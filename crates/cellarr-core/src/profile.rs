@@ -147,10 +147,11 @@ pub const MUSIC_RANK_BASE: u32 = 100;
 /// The names are the ones a music library manager's users already know from
 /// their quality profiles (lossy bitrates, the two common VBR presets, then the
 /// lossless containers), so a migrated profile maps onto this list by name.
-/// Ordering is by fidelity: fixed-bitrate MP3 ascending, the VBR presets slotted
-/// where their effective bitrate sits, the other lossy codecs, then lossless,
-/// with the 24-bit variants above their 16-bit ones.
+/// The order is Lidarr's own (its profile editor lists qualities in these tiers, worst
+/// first), so "an upgrade" means the same thing in both and a migrated profile's
+/// cutoff lands on the same quality.
 const MUSIC_QUALITY_NAMES: &[&str] = &[
+    // Trash quality
     "MP3-8",
     "MP3-16",
     "MP3-24",
@@ -160,34 +161,39 @@ const MUSIC_QUALITY_NAMES: &[&str] = &[
     "MP3-56",
     "MP3-64",
     "MP3-80",
+    // Poor quality
     "MP3-96",
     "MP3-112",
     "MP3-128",
     "OGG Vorbis Q5",
     "MP3-160",
+    // Low quality
     "MP3-192",
     "OGG Vorbis Q6",
     "AAC-192",
     "WMA",
-    "MP3-VBR-V2",
     "MP3-224",
+    // Mid quality
     "OGG Vorbis Q7",
+    "MP3-VBR-V2",
     "MP3-256",
     "OGG Vorbis Q8",
     "AAC-256",
+    // High quality
     "MP3-VBR-V0",
-    "OGG Vorbis Q9",
+    "AAC-VBR",
     "MP3-320",
+    "OGG Vorbis Q9",
     "AAC-320",
     "OGG Vorbis Q10",
-    "AAC-VBR",
-    "ALAC",
+    // Lossless
     "FLAC",
+    "ALAC",
     "APE",
     "WavPack",
-    "WAV",
-    "ALAC 24bit",
     "FLAC 24bit",
+    "ALAC 24bit",
+    "WAV",
 ];
 
 /// An ordered quality catalogue: the names that exist and their ranks.

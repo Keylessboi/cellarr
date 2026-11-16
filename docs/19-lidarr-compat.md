@@ -230,3 +230,24 @@ streamed rather than built in memory.
 | `CELLARR_DB_CACHE_MIB` (default 16) | SQLite page cache per connection (up to 9 connections). Raise it only when the database file is on slow network storage. |
 | `MALLOC_ARENA_MAX=2` | On glibc builds, stops the allocator keeping a heap arena per core; cut steady-state memory by ~40% in the benchmark. |
 | `music.lidarr_port` | Serve the Lidarr face on its own listener. |
+
+## Parity against a real Lidarr
+
+`scripts/lidarr-compare` replays `scripts/lidarr-compare-scenario.json` against a real
+Lidarr and a cellarr, then diffs status codes and JSON key/type shapes. Latest run: 41 of 56
+requests identical. The rest are documented differences:
+
+- **Extra fields in cellarr.** Several resources carry more fields than Lidarr (for example
+  `cleanTitle`, `added`, `disambiguation`). Clients ignore unknown keys.
+- **Lookup results.** Lidarr's lookup comes from its own metadata server and includes
+  images, links, genres and overviews. cellarr's comes from MusicBrainz and has none of them.
+- **Command list and bodies.** Lidarr pre-populates housekeeping commands and echoes
+  extra body fields; cellarr's command log starts empty.
+- **Unknown command.** Lidarr answers 500, cellarr answers 400.
+- **`/parse`.** Embeds the fuller album/artist resources, so it shows the same extras.
+- **System package fields.** `packageVersion`, `packageAuthor` and
+  `packageUpdateMechanismMessage` are not served (see `lidarr-gaps.json`).
+
+Download clients use Lidarr's `musicCategory` field name on this face and the shared
+`category` column internally. The indexer and download-client schemas are recorded from a
+real Lidarr (`src/lidarr/templates/`).

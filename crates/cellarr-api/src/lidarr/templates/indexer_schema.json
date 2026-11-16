@@ -1,0 +1,1079 @@
+[
+ {
+  "configContract": "NewznabSettings",
+  "downloadClientId": 0,
+  "enableAutomaticSearch": false,
+  "enableInteractiveSearch": false,
+  "enableRss": false,
+  "fields": [
+   {
+    "advanced": false,
+    "isFloat": false,
+    "label": "URL",
+    "name": "baseUrl",
+    "order": 0,
+    "privacy": "normal",
+    "type": "textbox"
+   },
+   {
+    "advanced": true,
+    "helpText": "Path to the api, usually /api",
+    "isFloat": false,
+    "label": "API Path",
+    "name": "apiPath",
+    "order": 1,
+    "privacy": "normal",
+    "type": "textbox",
+    "value": "/api"
+   },
+   {
+    "advanced": false,
+    "isFloat": false,
+    "label": "API Key",
+    "name": "apiKey",
+    "order": 2,
+    "privacy": "apiKey",
+    "type": "textbox"
+   },
+   {
+    "advanced": false,
+    "helpText": "Drop down list; at least one category must be selected.",
+    "isFloat": false,
+    "label": "Categories",
+    "name": "categories",
+    "order": 3,
+    "privacy": "normal",
+    "selectOptionsProviderAction": "newznabCategories",
+    "type": "select",
+    "value": [
+     3000,
+     3010,
+     3030,
+     3040
+    ]
+   },
+   {
+    "advanced": true,
+    "helpText": "Time before release date Lidarr will download from this indexer, empty is no limit",
+    "isFloat": false,
+    "label": "Early Download Limit",
+    "name": "earlyReleaseLimit",
+    "order": 4,
+    "privacy": "normal",
+    "type": "number",
+    "unit": "days"
+   },
+   {
+    "advanced": true,
+    "helpText": "Additional Newznab parameters",
+    "isFloat": false,
+    "label": "Additional Parameters",
+    "name": "additionalParameters",
+    "order": 5,
+    "privacy": "normal",
+    "type": "textbox"
+   }
+  ],
+  "implementation": "Newznab",
+  "implementationName": "Newznab",
+  "infoLink": "https://wiki.servarr.com/lidarr/supported#newznab",
+  "name": "",
+  "presets": [
+   {
+    "configContract": "NewznabSettings",
+    "downloadClientId": 0,
+    "enableAutomaticSearch": false,
+    "enableInteractiveSearch": false,
+    "enableRss": false,
+    "fields": [
+     {
+      "advanced": false,
+      "isFloat": false,
+      "label": "URL",
+      "name": "baseUrl",
+      "order": 0,
+      "privacy": "normal",
+      "type": "textbox",
+      "value": "https://api.dognzb.cr"
+     },
+     {
+      "advanced": true,
+      "helpText": "Path to the api, usually /api",
+      "isFloat": false,
+      "label": "API Path",
+      "name": "apiPath",
+      "order": 1,
+      "privacy": "normal",
+      "type": "textbox",
+      "value": "/api"
+     },
+     {
+      "advanced": false,
+      "isFloat": false,
+      "label": "API Key",
+      "name": "apiKey",
+      "order": 2,
+      "privacy": "apiKey",
+      "type": "textbox"
+     },
+     {
+      "advanced": false,
+      "helpText": "Drop down list; at least one category must be selected.",
+      "isFloat": false,
+      "label": "Categories",
+      "name": "categories",
+      "order": 3,
+      "privacy": "normal",
+      "selectOptionsProviderAction": "newznabCategories",
+      "type": "select",
+      "value": [
+       3000,
+       3010,
+       3030,
+       3040
+      ]
+     },
+     {
+      "advanced": true,
+      "helpText": "Time before release date Lidarr will download from this indexer, empty is no limit",
+      "isFloat": false,
+      "label": "Early Download Limit",
+      "name": "earlyReleaseLimit",
+      "order": 4,
+      "privacy": "normal",
+      "type": "number",
+      "unit": "days"
+     },
+     {
+      "advanced": true,
+      "helpText": "Additional Newznab parameters",
+      "isFloat": false,
+      "label": "Additional Parameters",
+      "name": "additionalParameters",
+      "order": 5,
+      "privacy": "normal",
+      "type": "textbox"
+     }
+    ],
+    "implementation": "Newznab",
+    "infoLink": "https://wiki.servarr.com/lidarr/supported#newznab",
+    "name": "DOGnzb",
+    "priority": 25,
+    "protocol": "usenet",
+    "supportsRss": true,
+    "supportsSearch": true,
+    "tags": []
+   },
+   {
+    "configContract": "NewznabSettings",
+    "downloadClientId": 0,
+    "enableAutomaticSearch": false,
+    "enableInteractiveSearch": false,
+    "enableRss": false,
+    "fields": [
+     {
+      "advanced": false,
+      "isFloat": false,
+      "label": "URL",
+      "name": "baseUrl",
+      "order": 0,
+      "privacy": "normal",
+      "type": "textbox",
+      "value": "https://drunkenslug.com"
+     },
+     {
+      "advanced": true,
+      "helpText": "Path to the api, usually /api",
+      "isFloat": false,
+      "label": "API Path",
+      "name": "apiPath",
+      "order": 1,
+      "privacy": "normal",
+      "type": "textbox",
+      "value": "/api"
+     },
+     {
+      "advanced": false,
+      "isFloat": false,
+      "label": "API Key",
+      "name": "apiKey",
+      "order": 2,
+      "privacy": "apiKey",
+      "type": "textbox"
+     },
+     {
+      "advanced": false,
+      "helpText": "Drop down list; at least one category must be selected.",
+      "isFloat": false,
+      "label": "Categories",
+      "name": "categories",
+      "order": 3,
+      "privacy": "normal",
+      "selectOptionsProviderAction": "newznabCategories",
+      "type": "select",
+      "value": [
+       3000,
+       3010,
+       3030,
+       3040
+      ]
+     },
+     {
+      "advanced": true,
+      "helpText": "Time before release date Lidarr will download from this indexer, empty is no limit",
+      "isFloat": false,
+      "label": "Early Download Limit",
+      "name": "earlyReleaseLimit",
+      "order": 4,
+      "privacy": "normal",
+      "type": "number",
+      "unit": "days"
+     },
+     {
+      "advanced": true,
+      "helpText": "Additional Newznab parameters",
+      "isFloat": false,
+      "label": "Additional Parameters",
+      "name": "additionalParameters",
+      "order": 5,
+      "privacy": "normal",
+      "type": "textbox"
+     }
+    ],
+    "implementation": "Newznab",
+    "infoLink": "https://wiki.servarr.com/lidarr/supported#newznab",
+    "name": "DrunkenSlug",
+    "priority": 25,
+    "protocol": "usenet",
+    "supportsRss": true,
+    "supportsSearch": true,
+    "tags": []
+   },
+   {
+    "configContract": "NewznabSettings",
+    "downloadClientId": 0,
+    "enableAutomaticSearch": false,
+    "enableInteractiveSearch": false,
+    "enableRss": false,
+    "fields": [
+     {
+      "advanced": false,
+      "isFloat": false,
+      "label": "URL",
+      "name": "baseUrl",
+      "order": 0,
+      "privacy": "normal",
+      "type": "textbox",
+      "value": "https://api.nzb.su"
+     },
+     {
+      "advanced": true,
+      "helpText": "Path to the api, usually /api",
+      "isFloat": false,
+      "label": "API Path",
+      "name": "apiPath",
+      "order": 1,
+      "privacy": "normal",
+      "type": "textbox",
+      "value": "/api"
+     },
+     {
+      "advanced": false,
+      "isFloat": false,
+      "label": "API Key",
+      "name": "apiKey",
+      "order": 2,
+      "privacy": "apiKey",
+      "type": "textbox"
+     },
+     {
+      "advanced": false,
+      "helpText": "Drop down list; at least one category must be selected.",
+      "isFloat": false,
+      "label": "Categories",
+      "name": "categories",
+      "order": 3,
+      "privacy": "normal",
+      "selectOptionsProviderAction": "newznabCategories",
+      "type": "select",
+      "value": [
+       3000,
+       3010,
+       3030,
+       3040
+      ]
+     },
+     {
+      "advanced": true,
+      "helpText": "Time before release date Lidarr will download from this indexer, empty is no limit",
+      "isFloat": false,
+      "label": "Early Download Limit",
+      "name": "earlyReleaseLimit",
+      "order": 4,
+      "privacy": "normal",
+      "type": "number",
+      "unit": "days"
+     },
+     {
+      "advanced": true,
+      "helpText": "Additional Newznab parameters",
+      "isFloat": false,
+      "label": "Additional Parameters",
+      "name": "additionalParameters",
+      "order": 5,
+      "privacy": "normal",
+      "type": "textbox"
+     }
+    ],
+    "implementation": "Newznab",
+    "infoLink": "https://wiki.servarr.com/lidarr/supported#newznab",
+    "name": "Nzb.su",
+    "priority": 25,
+    "protocol": "usenet",
+    "supportsRss": true,
+    "supportsSearch": true,
+    "tags": []
+   },
+   {
+    "configContract": "NewznabSettings",
+    "downloadClientId": 0,
+    "enableAutomaticSearch": false,
+    "enableInteractiveSearch": false,
+    "enableRss": false,
+    "fields": [
+     {
+      "advanced": false,
+      "isFloat": false,
+      "label": "URL",
+      "name": "baseUrl",
+      "order": 0,
+      "privacy": "normal",
+      "type": "textbox",
+      "value": "https://nzb.cat"
+     },
+     {
+      "advanced": true,
+      "helpText": "Path to the api, usually /api",
+      "isFloat": false,
+      "label": "API Path",
+      "name": "apiPath",
+      "order": 1,
+      "privacy": "normal",
+      "type": "textbox",
+      "value": "/api"
+     },
+     {
+      "advanced": false,
+      "isFloat": false,
+      "label": "API Key",
+      "name": "apiKey",
+      "order": 2,
+      "privacy": "apiKey",
+      "type": "textbox"
+     },
+     {
+      "advanced": false,
+      "helpText": "Drop down list; at least one category must be selected.",
+      "isFloat": false,
+      "label": "Categories",
+      "name": "categories",
+      "order": 3,
+      "privacy": "normal",
+      "selectOptionsProviderAction": "newznabCategories",
+      "type": "select",
+      "value": [
+       3000,
+       3010,
+       3030,
+       3040
+      ]
+     },
+     {
+      "advanced": true,
+      "helpText": "Time before release date Lidarr will download from this indexer, empty is no limit",
+      "isFloat": false,
+      "label": "Early Download Limit",
+      "name": "earlyReleaseLimit",
+      "order": 4,
+      "privacy": "normal",
+      "type": "number",
+      "unit": "days"
+     },
+     {
+      "advanced": true,
+      "helpText": "Additional Newznab parameters",
+      "isFloat": false,
+      "label": "Additional Parameters",
+      "name": "additionalParameters",
+      "order": 5,
+      "privacy": "normal",
+      "type": "textbox"
+     }
+    ],
+    "implementation": "Newznab",
+    "infoLink": "https://wiki.servarr.com/lidarr/supported#newznab",
+    "name": "NZBCat",
+    "priority": 25,
+    "protocol": "usenet",
+    "supportsRss": true,
+    "supportsSearch": true,
+    "tags": []
+   },
+   {
+    "configContract": "NewznabSettings",
+    "downloadClientId": 0,
+    "enableAutomaticSearch": false,
+    "enableInteractiveSearch": false,
+    "enableRss": false,
+    "fields": [
+     {
+      "advanced": false,
+      "isFloat": false,
+      "label": "URL",
+      "name": "baseUrl",
+      "order": 0,
+      "privacy": "normal",
+      "type": "textbox",
+      "value": "https://nzbfinder.ws"
+     },
+     {
+      "advanced": true,
+      "helpText": "Path to the api, usually /api",
+      "isFloat": false,
+      "label": "API Path",
+      "name": "apiPath",
+      "order": 1,
+      "privacy": "normal",
+      "type": "textbox",
+      "value": "/api"
+     },
+     {
+      "advanced": false,
+      "isFloat": false,
+      "label": "API Key",
+      "name": "apiKey",
+      "order": 2,
+      "privacy": "apiKey",
+      "type": "textbox"
+     },
+     {
+      "advanced": false,
+      "helpText": "Drop down list; at least one category must be selected.",
+      "isFloat": false,
+      "label": "Categories",
+      "name": "categories",
+      "order": 3,
+      "privacy": "normal",
+      "selectOptionsProviderAction": "newznabCategories",
+      "type": "select",
+      "value": [
+       3000,
+       3010,
+       3030,
+       3040
+      ]
+     },
+     {
+      "advanced": true,
+      "helpText": "Time before release date Lidarr will download from this indexer, empty is no limit",
+      "isFloat": false,
+      "label": "Early Download Limit",
+      "name": "earlyReleaseLimit",
+      "order": 4,
+      "privacy": "normal",
+      "type": "number",
+      "unit": "days"
+     },
+     {
+      "advanced": true,
+      "helpText": "Additional Newznab parameters",
+      "isFloat": false,
+      "label": "Additional Parameters",
+      "name": "additionalParameters",
+      "order": 5,
+      "privacy": "normal",
+      "type": "textbox"
+     }
+    ],
+    "implementation": "Newznab",
+    "infoLink": "https://wiki.servarr.com/lidarr/supported#newznab",
+    "name": "NZBFinder.ws",
+    "priority": 25,
+    "protocol": "usenet",
+    "supportsRss": true,
+    "supportsSearch": true,
+    "tags": []
+   },
+   {
+    "configContract": "NewznabSettings",
+    "downloadClientId": 0,
+    "enableAutomaticSearch": false,
+    "enableInteractiveSearch": false,
+    "enableRss": false,
+    "fields": [
+     {
+      "advanced": false,
+      "isFloat": false,
+      "label": "URL",
+      "name": "baseUrl",
+      "order": 0,
+      "privacy": "normal",
+      "type": "textbox",
+      "value": "https://api.nzbgeek.info"
+     },
+     {
+      "advanced": true,
+      "helpText": "Path to the api, usually /api",
+      "isFloat": false,
+      "label": "API Path",
+      "name": "apiPath",
+      "order": 1,
+      "privacy": "normal",
+      "type": "textbox",
+      "value": "/api"
+     },
+     {
+      "advanced": false,
+      "isFloat": false,
+      "label": "API Key",
+      "name": "apiKey",
+      "order": 2,
+      "privacy": "apiKey",
+      "type": "textbox"
+     },
+     {
+      "advanced": false,
+      "helpText": "Drop down list; at least one category must be selected.",
+      "isFloat": false,
+      "label": "Categories",
+      "name": "categories",
+      "order": 3,
+      "privacy": "normal",
+      "selectOptionsProviderAction": "newznabCategories",
+      "type": "select",
+      "value": [
+       3000,
+       3010,
+       3030,
+       3040
+      ]
+     },
+     {
+      "advanced": true,
+      "helpText": "Time before release date Lidarr will download from this indexer, empty is no limit",
+      "isFloat": false,
+      "label": "Early Download Limit",
+      "name": "earlyReleaseLimit",
+      "order": 4,
+      "privacy": "normal",
+      "type": "number",
+      "unit": "days"
+     },
+     {
+      "advanced": true,
+      "helpText": "Additional Newznab parameters",
+      "isFloat": false,
+      "label": "Additional Parameters",
+      "name": "additionalParameters",
+      "order": 5,
+      "privacy": "normal",
+      "type": "textbox"
+     }
+    ],
+    "implementation": "Newznab",
+    "infoLink": "https://wiki.servarr.com/lidarr/supported#newznab",
+    "name": "NZBgeek",
+    "priority": 25,
+    "protocol": "usenet",
+    "supportsRss": true,
+    "supportsSearch": true,
+    "tags": []
+   },
+   {
+    "configContract": "NewznabSettings",
+    "downloadClientId": 0,
+    "enableAutomaticSearch": false,
+    "enableInteractiveSearch": false,
+    "enableRss": false,
+    "fields": [
+     {
+      "advanced": false,
+      "isFloat": false,
+      "label": "URL",
+      "name": "baseUrl",
+      "order": 0,
+      "privacy": "normal",
+      "type": "textbox",
+      "value": "https://api.nzbplanet.net"
+     },
+     {
+      "advanced": true,
+      "helpText": "Path to the api, usually /api",
+      "isFloat": false,
+      "label": "API Path",
+      "name": "apiPath",
+      "order": 1,
+      "privacy": "normal",
+      "type": "textbox",
+      "value": "/api"
+     },
+     {
+      "advanced": false,
+      "isFloat": false,
+      "label": "API Key",
+      "name": "apiKey",
+      "order": 2,
+      "privacy": "apiKey",
+      "type": "textbox"
+     },
+     {
+      "advanced": false,
+      "helpText": "Drop down list; at least one category must be selected.",
+      "isFloat": false,
+      "label": "Categories",
+      "name": "categories",
+      "order": 3,
+      "privacy": "normal",
+      "selectOptionsProviderAction": "newznabCategories",
+      "type": "select",
+      "value": [
+       3000,
+       3010,
+       3030,
+       3040
+      ]
+     },
+     {
+      "advanced": true,
+      "helpText": "Time before release date Lidarr will download from this indexer, empty is no limit",
+      "isFloat": false,
+      "label": "Early Download Limit",
+      "name": "earlyReleaseLimit",
+      "order": 4,
+      "privacy": "normal",
+      "type": "number",
+      "unit": "days"
+     },
+     {
+      "advanced": true,
+      "helpText": "Additional Newznab parameters",
+      "isFloat": false,
+      "label": "Additional Parameters",
+      "name": "additionalParameters",
+      "order": 5,
+      "privacy": "normal",
+      "type": "textbox"
+     }
+    ],
+    "implementation": "Newznab",
+    "infoLink": "https://wiki.servarr.com/lidarr/supported#newznab",
+    "name": "nzbplanet.net",
+    "priority": 25,
+    "protocol": "usenet",
+    "supportsRss": true,
+    "supportsSearch": true,
+    "tags": []
+   },
+   {
+    "configContract": "NewznabSettings",
+    "downloadClientId": 0,
+    "enableAutomaticSearch": false,
+    "enableInteractiveSearch": false,
+    "enableRss": false,
+    "fields": [
+     {
+      "advanced": false,
+      "isFloat": false,
+      "label": "URL",
+      "name": "baseUrl",
+      "order": 0,
+      "privacy": "normal",
+      "type": "textbox",
+      "value": "https://simplynzbs.com"
+     },
+     {
+      "advanced": true,
+      "helpText": "Path to the api, usually /api",
+      "isFloat": false,
+      "label": "API Path",
+      "name": "apiPath",
+      "order": 1,
+      "privacy": "normal",
+      "type": "textbox",
+      "value": "/api"
+     },
+     {
+      "advanced": false,
+      "isFloat": false,
+      "label": "API Key",
+      "name": "apiKey",
+      "order": 2,
+      "privacy": "apiKey",
+      "type": "textbox"
+     },
+     {
+      "advanced": false,
+      "helpText": "Drop down list; at least one category must be selected.",
+      "isFloat": false,
+      "label": "Categories",
+      "name": "categories",
+      "order": 3,
+      "privacy": "normal",
+      "selectOptionsProviderAction": "newznabCategories",
+      "type": "select",
+      "value": [
+       3000,
+       3010,
+       3030,
+       3040
+      ]
+     },
+     {
+      "advanced": true,
+      "helpText": "Time before release date Lidarr will download from this indexer, empty is no limit",
+      "isFloat": false,
+      "label": "Early Download Limit",
+      "name": "earlyReleaseLimit",
+      "order": 4,
+      "privacy": "normal",
+      "type": "number",
+      "unit": "days"
+     },
+     {
+      "advanced": true,
+      "helpText": "Additional Newznab parameters",
+      "isFloat": false,
+      "label": "Additional Parameters",
+      "name": "additionalParameters",
+      "order": 5,
+      "privacy": "normal",
+      "type": "textbox"
+     }
+    ],
+    "implementation": "Newznab",
+    "infoLink": "https://wiki.servarr.com/lidarr/supported#newznab",
+    "name": "SimplyNZBs",
+    "priority": 25,
+    "protocol": "usenet",
+    "supportsRss": true,
+    "supportsSearch": true,
+    "tags": []
+   },
+   {
+    "configContract": "NewznabSettings",
+    "downloadClientId": 0,
+    "enableAutomaticSearch": false,
+    "enableInteractiveSearch": false,
+    "enableRss": false,
+    "fields": [
+     {
+      "advanced": false,
+      "isFloat": false,
+      "label": "URL",
+      "name": "baseUrl",
+      "order": 0,
+      "privacy": "normal",
+      "type": "textbox",
+      "value": "https://www.tabula-rasa.pw"
+     },
+     {
+      "advanced": true,
+      "helpText": "Path to the api, usually /api",
+      "isFloat": false,
+      "label": "API Path",
+      "name": "apiPath",
+      "order": 1,
+      "privacy": "normal",
+      "type": "textbox",
+      "value": "/api/v1/api"
+     },
+     {
+      "advanced": false,
+      "isFloat": false,
+      "label": "API Key",
+      "name": "apiKey",
+      "order": 2,
+      "privacy": "apiKey",
+      "type": "textbox"
+     },
+     {
+      "advanced": false,
+      "helpText": "Drop down list; at least one category must be selected.",
+      "isFloat": false,
+      "label": "Categories",
+      "name": "categories",
+      "order": 3,
+      "privacy": "normal",
+      "selectOptionsProviderAction": "newznabCategories",
+      "type": "select",
+      "value": [
+       3000,
+       3010,
+       3030,
+       3040
+      ]
+     },
+     {
+      "advanced": true,
+      "helpText": "Time before release date Lidarr will download from this indexer, empty is no limit",
+      "isFloat": false,
+      "label": "Early Download Limit",
+      "name": "earlyReleaseLimit",
+      "order": 4,
+      "privacy": "normal",
+      "type": "number",
+      "unit": "days"
+     },
+     {
+      "advanced": true,
+      "helpText": "Additional Newznab parameters",
+      "isFloat": false,
+      "label": "Additional Parameters",
+      "name": "additionalParameters",
+      "order": 5,
+      "privacy": "normal",
+      "type": "textbox"
+     }
+    ],
+    "implementation": "Newznab",
+    "infoLink": "https://wiki.servarr.com/lidarr/supported#newznab",
+    "name": "Tabula Rasa",
+    "priority": 25,
+    "protocol": "usenet",
+    "supportsRss": true,
+    "supportsSearch": true,
+    "tags": []
+   },
+   {
+    "configContract": "NewznabSettings",
+    "downloadClientId": 0,
+    "enableAutomaticSearch": false,
+    "enableInteractiveSearch": false,
+    "enableRss": false,
+    "fields": [
+     {
+      "advanced": false,
+      "isFloat": false,
+      "label": "URL",
+      "name": "baseUrl",
+      "order": 0,
+      "privacy": "normal",
+      "type": "textbox",
+      "value": "https://api.verycouch.com"
+     },
+     {
+      "advanced": true,
+      "helpText": "Path to the api, usually /api",
+      "isFloat": false,
+      "label": "API Path",
+      "name": "apiPath",
+      "order": 1,
+      "privacy": "normal",
+      "type": "textbox",
+      "value": "/api"
+     },
+     {
+      "advanced": false,
+      "isFloat": false,
+      "label": "API Key",
+      "name": "apiKey",
+      "order": 2,
+      "privacy": "apiKey",
+      "type": "textbox"
+     },
+     {
+      "advanced": false,
+      "helpText": "Drop down list; at least one category must be selected.",
+      "isFloat": false,
+      "label": "Categories",
+      "name": "categories",
+      "order": 3,
+      "privacy": "normal",
+      "selectOptionsProviderAction": "newznabCategories",
+      "type": "select",
+      "value": [
+       3000,
+       3010,
+       3030,
+       3040
+      ]
+     },
+     {
+      "advanced": true,
+      "helpText": "Time before release date Lidarr will download from this indexer, empty is no limit",
+      "isFloat": false,
+      "label": "Early Download Limit",
+      "name": "earlyReleaseLimit",
+      "order": 4,
+      "privacy": "normal",
+      "type": "number",
+      "unit": "days"
+     },
+     {
+      "advanced": true,
+      "helpText": "Additional Newznab parameters",
+      "isFloat": false,
+      "label": "Additional Parameters",
+      "name": "additionalParameters",
+      "order": 5,
+      "privacy": "normal",
+      "type": "textbox"
+     }
+    ],
+    "implementation": "Newznab",
+    "infoLink": "https://wiki.servarr.com/lidarr/supported#newznab",
+    "name": "VeryCouch LazyMuch",
+    "priority": 25,
+    "protocol": "usenet",
+    "supportsRss": true,
+    "supportsSearch": true,
+    "tags": []
+   }
+  ],
+  "priority": 25,
+  "protocol": "usenet",
+  "supportsRss": true,
+  "supportsSearch": true,
+  "tags": []
+ },
+ {
+  "configContract": "TorznabSettings",
+  "downloadClientId": 0,
+  "enableAutomaticSearch": false,
+  "enableInteractiveSearch": false,
+  "enableRss": false,
+  "fields": [
+   {
+    "advanced": false,
+    "isFloat": false,
+    "label": "URL",
+    "name": "baseUrl",
+    "order": 0,
+    "privacy": "normal",
+    "type": "textbox"
+   },
+   {
+    "advanced": true,
+    "helpText": "Path to the api, usually /api",
+    "isFloat": false,
+    "label": "API Path",
+    "name": "apiPath",
+    "order": 1,
+    "privacy": "normal",
+    "type": "textbox",
+    "value": "/api"
+   },
+   {
+    "advanced": false,
+    "isFloat": false,
+    "label": "API Key",
+    "name": "apiKey",
+    "order": 2,
+    "privacy": "apiKey",
+    "type": "textbox"
+   },
+   {
+    "advanced": false,
+    "helpText": "Drop down list; at least one category must be selected.",
+    "isFloat": false,
+    "label": "Categories",
+    "name": "categories",
+    "order": 3,
+    "privacy": "normal",
+    "selectOptionsProviderAction": "newznabCategories",
+    "type": "select",
+    "value": [
+     3000,
+     3010,
+     3030,
+     3040
+    ]
+   },
+   {
+    "advanced": true,
+    "helpText": "Time before release date Lidarr will download from this indexer, empty is no limit",
+    "isFloat": false,
+    "label": "Early Download Limit",
+    "name": "earlyReleaseLimit",
+    "order": 4,
+    "privacy": "normal",
+    "type": "number",
+    "unit": "days"
+   },
+   {
+    "advanced": true,
+    "helpText": "Additional Newznab parameters",
+    "isFloat": false,
+    "label": "Additional Parameters",
+    "name": "additionalParameters",
+    "order": 5,
+    "privacy": "normal",
+    "type": "textbox"
+   },
+   {
+    "advanced": true,
+    "helpText": "Minimum number of seeders required.",
+    "isFloat": false,
+    "label": "Minimum Seeders",
+    "name": "minimumSeeders",
+    "order": 6,
+    "privacy": "normal",
+    "type": "textbox",
+    "value": 1
+   },
+   {
+    "advanced": false,
+    "helpText": "The ratio a torrent should reach before stopping, empty uses the download client's default. Ratio should be at least 1.0 and follow the indexers rules",
+    "isFloat": true,
+    "label": "Seed Ratio",
+    "name": "seedCriteria.seedRatio",
+    "order": 7,
+    "privacy": "normal",
+    "type": "number"
+   },
+   {
+    "advanced": true,
+    "helpText": "The time a torrent should be seeded before stopping, empty uses the download client's default",
+    "isFloat": false,
+    "label": "Seed Time",
+    "name": "seedCriteria.seedTime",
+    "order": 8,
+    "privacy": "normal",
+    "type": "number",
+    "unit": "minutes"
+   },
+   {
+    "advanced": true,
+    "helpText": "The time a torrent should be seeded before stopping, empty is download client's default",
+    "isFloat": false,
+    "label": "Discography Seed Time",
+    "name": "seedCriteria.discographySeedTime",
+    "order": 9,
+    "privacy": "normal",
+    "type": "textbox",
+    "unit": "minutes"
+   },
+   {
+    "advanced": true,
+    "helpText": "If a torrent is blocked by hash it may not properly be rejected during RSS/Search for some indexers, enabling this will allow it to be rejected after the torrent is grabbed, but before it is sent to the client.",
+    "isFloat": false,
+    "label": "Reject Blocklisted Torrent Hashes While Grabbing",
+    "name": "rejectBlocklistedTorrentHashesWhileGrabbing",
+    "order": 10,
+    "privacy": "normal",
+    "type": "checkbox",
+    "value": false
+   }
+  ],
+  "implementation": "Torznab",
+  "implementationName": "Torznab",
+  "infoLink": "https://wiki.servarr.com/lidarr/supported#torznab",
+  "name": "Torznab",
+  "presets": [],
+  "priority": 25,
+  "protocol": "torrent",
+  "supportsRss": true,
+  "supportsSearch": true,
+  "tags": []
+ }
+]

@@ -1,0 +1,121 @@
+#!/usr/bin/env python3
+"""Drive a real Lidarr and cellarr's Lidarr face with the same requests and diff the answers.
+
+    scripts/lidarr-compare http://127.0.0.1:8686 http://127.0.0.1:18686 --key KEY [--record DIR]
+
+Both servers must share the API key and see the same music root folder. For each request it
+compares the HTTP status and the *shape* of the JSON (key names and value types, recursively;
+list elements are merged), not the values, which legitimately differ (ids, dates, versions).
+`--record DIR` stores Lidarr's raw answers so the comparison can be replayed offline.
+Standard library only.
+"""
+import argparse, json, os, sys, time, urllib.request, urllib.error
+
+def call(base, key, method, path, body=None):
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(base + "/api/v1" + path, data=data, method=method,
+                                 headers={"X-Api-Key": key, "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=180) as r:
+            raw = r.read(); status = r.status
+    except urllib.error.HTTPError as e:
+        raw = e.read(); status = e.code
+    try:
+        return status, json.loads(raw) if raw else None
+    except ValueError:
+        return status, raw[:80].decode("utf8", "replace")
+
+def jt(v):
+    if v is None: return "null"
+    if isinstance(v, bool): return "boolean"
+    if isinstance(v, int): return "integer"
+    if isinstance(v, float): return "number" if v != int(v) else "integer"
+    if isinstance(v, str): return "string"
+    if isinstance(v, list): return "array"
+    return "object"
+
+def shape(v):
+    """key -> type, recursively; arrays merge their elements' shapes."""
+    t = jt(v)
+    if t == "object": return {k: shape(x) for k, x in v.items()}
+    if t == "array":
+        merged = {}
+        for e in v:
+            s = shape(e)
+            if isinstance(s, dict) and isinstance(merged, dict): merged = merge(merged, s)
+            elif not merged: merged = s
+        return ["[]", merged]
+    return t
+
+def merge(a, b):
+    out = dict(a)
+    for k, v in b.items():
+        out[k] = merge(out[k], v) if k in out and isinstance(out[k], dict) and isinstance(v, dict) else out.get(k, v)
+        if k in a and a[k] == "null": out[k] = v
+    return out
+
+def diff(a, b, path=""):
+    """Differences of shape a (Lidarr) vs b (cellarr)."""
+    out = []
+    if isinstance(a, dict) and isinstance(b, dict):
+        for k in sorted(set(a) | set(b)):
+            if k not in b: out.append(f"{path}.{k}: missing from cellarr (Lidarr: {brief(a[k])})")
+            elif k not in a: out.append(f"{path}.{k}: extra in cellarr")
+            else: out += diff(a[k], b[k], f"{path}.{k}")
+    elif isinstance(a, list) and isinstance(b, list):
+        if bool(a[1]) != bool(b[1]):
+            out.append(f"{path}[]: Lidarr {'has' if a[1] else 'has no'} elements, cellarr {'has' if b[1] else 'has none'}")
+        out += diff(a[1], b[1], path + "[]") if a[1] and b[1] else []
+    elif a != b and "null" not in (a, b):
+        out.append(f"{path}: Lidarr {brief(a)}, cellarr {brief(b)}")
+    return out
+
+def brief(s): return s if isinstance(s, str) else ("object" if isinstance(s, dict) else "array")
+
+def main():
+    ap = argparse.ArgumentParser(); ap.add_argument("lidarr"); ap.add_argument("cellarr")
+    ap.add_argument("--key", required=True); ap.add_argument("--record"); ap.add_argument("--music-root", default="/tmp/music")
+    ap.add_argument("--scenario", default=os.path.join(os.path.dirname(__file__), "lidarr-compare-scenario.json"))
+    a = ap.parse_args()
+    steps = json.load(open(a.scenario))
+    ctx = {"root": a.music_root}
+    bad = total = 0
+    for step in steps:
+        name, method = step["name"], step.get("method", "GET")
+        def sub(s):
+            if not isinstance(s, str): return s
+            for k, v in ctx.items(): s = s.replace("{" + k + "}", str(v))
+            return s
+        path = sub(step["path"])
+        body = json.loads(sub(json.dumps(step["body"]))) if "body" in step else None
+        results = []
+        for base in (a.lidarr, a.cellarr):
+            for attempt in range(6):
+                st, js = call(base, a.key, method, path, body)
+                if not step.get("retry") or (st < 500 and js not in ([], None)): break
+                time.sleep(5)
+            results.append((st, js))
+            if "save" in step and base == a.lidarr:
+                ctx[step["save"]] = eval(step["from"], {}, {"j": js})
+            if "save2" in step and base == a.cellarr:
+                ctx[step["save2"]] = eval(step["from"], {}, {"j": js})
+        (s1, j1), (s2, j2) = results
+        if a.record:
+            os.makedirs(a.record, exist_ok=True)
+            json.dump({"status": s1, "body": j1}, open(os.path.join(a.record, name + ".json"), "w"), indent=1)
+        total += 1
+        problems = []
+        if s1 != s2: problems.append(f"status: Lidarr {s1}, cellarr {s2}")
+        if s1 == s2 and j1 is not None and j2 is not None and not step.get("shape_only_status"):
+            problems += diff(shape(j1), shape(j2))
+        if problems:
+            bad += 1
+            print(f"✗ {method} {path}  [{name}]")
+            for p in problems[:int(os.environ.get("MAX", "12"))]: print("    " + p)
+        else:
+            print(f"✓ {method} {path}")
+    print(f"\n{total - bad}/{total} identical in status and shape")
+    sys.exit(1 if bad else 0)
+
+if __name__ == "__main__":
+    main()

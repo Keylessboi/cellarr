@@ -288,38 +288,54 @@ pub fn track_file(f: &TrackFile, artist_id: i64, album_id: i64, cutoff_rank: Opt
     })
 }
 
+/// The order Lidarr lists a metadata profile's types in, with their ids.
+const PRIMARY_ORDER: &[(usize, &str)] = &[
+    (2, "Single"),
+    (4, "Other"),
+    (1, "EP"),
+    (3, "Broadcast"),
+    (0, "Album"),
+];
+const SECONDARY_ORDER: &[(usize, &str)] = &[
+    (0, "Studio"),
+    (3, "Spokenword"),
+    (2, "Soundtrack"),
+    (7, "Remix"),
+    (9, "Mixtape/Street"),
+    (6, "Live"),
+    (4, "Interview"),
+    (10, "Demo"),
+    (8, "DJ-mix"),
+    (1, "Compilation"),
+    (11, "Audio drama"),
+];
+const STATUS_ORDER: &[(usize, &str)] = &[
+    (3, "Pseudo-Release"),
+    (1, "Promotion"),
+    (0, "Official"),
+    (2, "Bootleg"),
+];
+
 /// A metadata profile resource.
 #[must_use]
 pub fn metadata_profile(p: &MetadataProfile) -> Value {
-    let item = |id: usize, name: &str, allowed: bool| json!({ "id": id, "name": name, "allowed": allowed });
-    let primary: Vec<Value> = cellarr_core::music::PRIMARY_ALBUM_TYPES
-        .iter()
-        .enumerate()
-        .map(|(i, n)| {
-            json!({ "albumType": { "id": i, "name": n }, "allowed": p.primary_types.iter().any(|t| t.eq_ignore_ascii_case(n)) })
-        })
-        .collect();
-    let secondary: Vec<Value> = cellarr_core::music::SECONDARY_ALBUM_TYPES
-        .iter()
-        .enumerate()
-        .map(|(i, n)| {
-            json!({ "albumType": { "id": i, "name": n }, "allowed": p.secondary_types.iter().any(|t| t.eq_ignore_ascii_case(n)) })
-        })
-        .collect();
-    let statuses: Vec<Value> = cellarr_core::music::RELEASE_STATUSES
-        .iter()
-        .enumerate()
-        .map(|(i, n)| {
-            json!({ "releaseStatus": { "id": i, "name": n }, "allowed": p.release_statuses.iter().any(|t| t.eq_ignore_ascii_case(n)) })
-        })
-        .collect();
-    let _ = item;
+    let list = |order: &[(usize, &str)], key: &str, allowed: &[String]| -> Vec<Value> {
+        order
+            .iter()
+            .map(|(id, name)| {
+                json!({
+                    key: { "id": id, "name": name },
+                    "allowed": allowed.iter().any(|t| t.eq_ignore_ascii_case(name)),
+                })
+            })
+            .collect()
+    };
     json!({
-        "id": p.id,
         "name": p.name,
-        "primaryAlbumTypes": primary,
-        "secondaryAlbumTypes": secondary,
-        "releaseStatuses": statuses,
+        "primaryAlbumTypes": list(PRIMARY_ORDER, "albumType", &p.primary_types),
+        "secondaryAlbumTypes": list(SECONDARY_ORDER, "albumType", &p.secondary_types),
+        "releaseStatuses": list(STATUS_ORDER, "releaseStatus", &p.release_statuses),
+        "id": p.id,
     })
 }
 
@@ -408,7 +424,13 @@ mod tests {
         let mut p = MetadataProfile::standard();
         p.primary_types.push("EP".into());
         p.secondary_types.push("Live".into());
-        let back = metadata_profile_from(&metadata_profile(&p), p.id);
+        let mut back = metadata_profile_from(&metadata_profile(&p), p.id);
+        // Resources list types in Lidarr's display order, not insertion order.
+        for v in [&mut back.primary_types, &mut back.secondary_types] {
+            v.sort();
+        }
+        p.primary_types.sort();
+        p.secondary_types.sort();
         assert_eq!(back, p);
     }
 

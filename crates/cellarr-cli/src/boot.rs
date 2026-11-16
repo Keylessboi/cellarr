@@ -329,6 +329,11 @@ impl Daemon {
         let log_files = cellarr_api::LogFiles::new(config.log_dir());
         let state = state.with_log_files(log_files);
 
+        // The profiles a fresh Lidarr ships with, so music clients find the ids they expect.
+        cellarr_api::lidarr::defaults::ensure(&state)
+            .await
+            .map_err(|e| anyhow::anyhow!("creating the default music profiles: {e}"))?;
+
         // Register the recurring maintenance jobs the daemon runs unattended.
         register_recurring(&state).await?;
 

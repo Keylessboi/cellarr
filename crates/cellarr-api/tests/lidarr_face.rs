@@ -49,7 +49,7 @@ async fn an_unknown_path_is_json_404() {
 async fn an_artist_is_looked_up_added_and_listed_with_statistics() {
     let l = start(AuthConfig::disabled()).await;
     let profile = l.flac_profile().await;
-    assert_eq!(profile, 1, "the first profile gets id 1");
+    assert_eq!(profile, 4, "ids 1-3 are the seeded defaults");
 
     let hits = l.get("/artist/lookup?term=radiohead").await;
     assert_eq!(hits[0]["foreignArtistId"], RADIOHEAD);
@@ -221,16 +221,22 @@ async fn profiles_round_trip_and_the_default_metadata_profile_exists() {
         .unwrap()
         .iter()
         .filter(|i| i["allowed"] == true)
-        .map(|i| i["quality"]["name"].as_str().unwrap())
+        .map(|i| {
+            i.get("name")
+                .and_then(|n| n.as_str())
+                .or_else(|| i["quality"]["name"].as_str())
+                .unwrap()
+        })
         .collect();
-    assert_eq!(allowed, ["MP3-320", "FLAC"]);
-    assert_eq!(profile["cutoff"], 6);
+    assert!(allowed.contains(&"Lossless"), "{allowed:?}");
+    assert!(allowed.contains(&"High Quality Lossy"), "{allowed:?}");
+    assert_eq!(profile["cutoff"], 1005);
 
     let list = l.get("/qualityprofile").await;
     assert_eq!(
         list.as_array().unwrap().len(),
-        1,
-        "video profiles are not listed to a music client"
+        4,
+        "the three seeded defaults plus ours; video profiles are not listed to a music client"
     );
 }
 

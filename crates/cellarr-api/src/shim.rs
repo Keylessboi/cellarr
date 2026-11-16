@@ -3301,7 +3301,7 @@ pub(crate) fn download_client_from_body(
     let mut category = String::new();
     for f in &body.fields {
         if let Some(name) = &f.name {
-            if name == "category" {
+            if name == "category" || name == "musicCategory" {
                 category = f.value.as_str().unwrap_or_default().to_string();
                 continue;
             }

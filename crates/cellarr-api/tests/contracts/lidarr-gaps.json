@@ -67,6 +67,9 @@
     "PUT /api/v1/importlistexclusion/{id}": "Single import-list exclusion update."
   },
   "fields": {
+    "SystemResource.packageAuthor": "cellarr is not a distro package; a source install reports no package metadata (real Lidarr serves null for all three).",
+    "SystemResource.packageUpdateMechanismMessage": "cellarr is not a distro package; a source install reports no package metadata (real Lidarr serves null for all three).",
+    "SystemResource.packageVersion": "cellarr is not a distro package; a source install reports no package metadata (real Lidarr serves null for all three).",
     "TrackResource.trackFile": "Lidarr omits the nested file from album track lists; clients (Octo) join GET /trackfile?albumId= instead."
   }
 }

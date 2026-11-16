@@ -188,7 +188,6 @@ pub(crate) async fn queue_status(State(fs): State<FaceState>) -> ApiResult<Json<
         .filter(|r| r["trackedDownloadStatus"] == "warning")
         .count();
     Ok(Json(json!({
-        "id": 1,
         "totalCount": records.len(),
         "count": records.len(),
         "unknownCount": 0,
@@ -411,12 +410,9 @@ pub(crate) async fn history_artist(
     let id = param(&q, "artistId")
         .and_then(|v| v.parse::<i64>().ok())
         .ok_or_else(|| ApiError::BadRequest("artistId is required".into()))?;
-    let artist = state
-        .db
-        .music()
-        .artist(id)
-        .await?
-        .ok_or_else(|| ApiError::NotFound(format!("artist {id} not found")))?;
+    let Some(artist) = state.db.music().artist(id).await? else {
+        return Ok(Json(Vec::new()));
+    };
     let kinds: Vec<&str> = param(&q, "eventType")
         .map(|c| event_kinds(c).to_vec())
         .unwrap_or_default();

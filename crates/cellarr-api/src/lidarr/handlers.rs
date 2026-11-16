@@ -14,7 +14,9 @@ use cellarr_db::{MusicStats, NewAlbum};
 use cellarr_jobs::music_sync::{AddArtist, MonitorMode};
 use serde_json::{json, Value};
 
-use super::quality::{id_for_rank, lidarr_quality_id, rank_for_id};
+use super::quality::{
+    allowed_ranks, cutoff_id_for_rank, lidarr_quality_id, profile_items, rank_for_cutoff_id,
+};
 use super::{app, catalogue_error, resources};
 use crate::error::{ApiError, ApiResult};
 use crate::shim::{self, FaceState};
@@ -999,10 +1001,13 @@ pub(crate) async fn list_tracks(
     let music = state.db.music();
     let albums: Vec<Album> =
         if let Some(id) = param(&q, "albumId").and_then(|v| v.parse::<i64>().ok()) {
-            vec![album_or_404(state, id).await?]
+            // An id that names nothing is an empty list, not an error, as in Lidarr.
+            music.album(id).await?.into_iter().collect()
         } else if let Some(id) = param(&q, "artistId").and_then(|v| v.parse::<i64>().ok()) {
-            let a = artist_or_404(state, id).await?;
-            music.albums_for_artist(a.content_id).await?
+            match music.artist(id).await? {
+                Some(a) => music.albums_for_artist(a.content_id).await?,
+                None => Vec::new(),
+            }
         } else {
             return Err(ApiError::BadRequest(
                 "albumId or artistId is required".into(),
@@ -1110,13 +1115,15 @@ pub(crate) async fn list_track_files(
         return Ok(Json(Vec::new()));
     }
     let files = if let Some(id) = param(&q, "albumId").and_then(|v| v.parse::<i64>().ok()) {
-        music
-            .track_files_for_album(album_or_404(state, id).await?.content_id)
-            .await?
+        match music.album(id).await? {
+            Some(a) => music.track_files_for_album(a.content_id).await?,
+            None => Vec::new(),
+        }
     } else if let Some(id) = param(&q, "artistId").and_then(|v| v.parse::<i64>().ok()) {
-        music
-            .track_files_for_artist(artist_or_404(state, id).await?.content_id)
-            .await?
+        match music.artist(id).await? {
+            Some(a) => music.track_files_for_artist(a.content_id).await?,
+            None => Vec::new(),
+        }
     } else {
         let ids: Vec<i64> = params(&q, "trackFileIds")
             .iter()
@@ -1184,105 +1191,44 @@ pub(crate) async fn delete_track_files(
 
 // --- quality profiles ----------------------------------------------------------
 
-fn music_items(allowed: &[u32]) -> Vec<Value> {
-    QualityRanking::default()
-        .for_media(MediaType::Music)
-        .into_iter()
-        .filter(|d| d.rank != 0)
-        .map(|d| {
-            json!({
-                "quality": { "id": lidarr_quality_id(&d.name), "name": d.name },
-                "items": [],
-                "allowed": allowed.contains(&d.rank),
-            })
-        })
-        .collect()
-}
-
 fn profile_resource(p: &QualityProfile, seq: i64) -> Value {
     json!({
         "id": seq,
         "name": p.name,
         "upgradeAllowed": p.upgrades_allowed,
-        "cutoff": id_for_rank(p.cutoff_quality),
-        "items": music_items(&p.allowed_qualities),
+        "cutoff": cutoff_id_for_rank(p.cutoff_quality),
+        "items": profile_items(&p.allowed_qualities),
         "minFormatScore": p.min_custom_format_score,
         "cutoffFormatScore": p.upgrade_until_custom_format_score,
         "formatItems": [],
     })
 }
 
-/// Read a quality profile from the resource a client sends. Groups are flattened
-/// to their member qualities; a cutoff that names a group means its lowest member.
+/// Read a quality profile from the resource a client sends. Tiers are flattened to
+/// their member qualities; a cutoff naming a tier means its lowest member.
 fn profile_from_body(body: &Value, id: QualityProfileId) -> ApiResult<QualityProfile> {
-    fn walk(items: &[Value], allowed: &mut Vec<u32>) {
-        for item in items {
-            let on = item
-                .get("allowed")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
-            if let Some(q) = item
-                .get("quality")
-                .and_then(|q| q.get("id"))
-                .and_then(Value::as_u64)
-            {
-                if let Some(rank) = u32::try_from(q).ok().and_then(rank_for_id) {
-                    if on && !allowed.contains(&rank) {
-                        allowed.push(rank);
-                    }
-                }
-            }
-            if let Some(children) = item.get("items").and_then(Value::as_array) {
-                // A group's members inherit the group's own `allowed`.
-                let mut inner = Vec::new();
-                walk(children, &mut inner);
-                if on {
-                    for child in children {
-                        if let Some(rank) = child
-                            .get("quality")
-                            .and_then(|q| q.get("id"))
-                            .and_then(Value::as_u64)
-                            .and_then(|q| u32::try_from(q).ok())
-                            .and_then(rank_for_id)
-                        {
-                            if !allowed.contains(&rank) {
-                                allowed.push(rank);
-                            }
-                        }
-                    }
-                }
-                for r in inner {
-                    if !allowed.contains(&r) {
-                        allowed.push(r);
-                    }
-                }
-            }
-        }
-    }
     let name = body
         .get("name")
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|n| !n.is_empty())
         .ok_or_else(|| ApiError::BadRequest("a quality profile needs a name".into()))?;
-    let mut allowed = Vec::new();
-    if let Some(items) = body.get("items").and_then(Value::as_array) {
-        walk(items, &mut allowed);
-    }
+    let allowed = body
+        .get("items")
+        .and_then(Value::as_array)
+        .map(|items| allowed_ranks(items))
+        .unwrap_or_default();
     if allowed.is_empty() {
         return Err(ApiError::BadRequest(
             "a quality profile must allow at least one quality".into(),
         ));
     }
-    let cutoff_id = body
+    let cutoff = body
         .get("cutoff")
         .and_then(Value::as_u64)
-        .and_then(|c| u32::try_from(c).ok());
-    let cutoff = cutoff_id
-        .and_then(rank_for_id)
+        .and_then(|c| u32::try_from(c).ok())
+        .and_then(rank_for_cutoff_id)
         .filter(|r| allowed.contains(r))
-        // A group id (or an unknown one): the lowest allowed quality is the
-        // weakest cutoff that is still satisfiable.
         .or_else(|| allowed.iter().copied().min())
         .unwrap_or(0);
     Ok(QualityProfile {
@@ -1358,16 +1304,11 @@ pub(crate) async fn get_quality_profile(
 }
 
 pub(crate) async fn quality_profile_schema(State(_fs): State<FaceState>) -> Json<Value> {
-    let ranking = QualityRanking::default();
-    let best = ranking
-        .for_media(MediaType::Music)
-        .last()
-        .map_or(0, |d| d.rank);
     Json(json!({
         "name": "",
         "upgradeAllowed": false,
-        "cutoff": id_for_rank(best),
-        "items": music_items(&[]),
+        "cutoff": 0,
+        "items": profile_items(&[]),
         "minFormatScore": 0,
         "cutoffFormatScore": 0,
         "formatItems": [],
@@ -1475,7 +1416,12 @@ pub(crate) async fn metadata_profile_schema(State(_fs): State<FaceState>) -> Jso
     empty.primary_types.clear();
     empty.secondary_types.clear();
     empty.release_statuses.clear();
-    Json(resources::metadata_profile(&empty))
+    let mut v = resources::metadata_profile(&empty);
+    if let Some(o) = v.as_object_mut() {
+        o.remove("id");
+        o.remove("name");
+    }
+    Json(v)
 }
 
 pub(crate) async fn create_metadata_profile(
@@ -1531,31 +1477,37 @@ pub(crate) async fn delete_metadata_profile(
 
 // --- shared resources with Lidarr-specific extras ------------------------------
 
+fn decorate_root(mut v: Value) -> Value {
+    if let Some(o) = v.as_object_mut() {
+        let path = o
+            .get("path")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        o.entry("name")
+            .or_insert_with(|| json!(resources::folder_of(&path)));
+        o.entry("defaultMetadataProfileId").or_insert(json!(1));
+        o.entry("defaultQualityProfileId").or_insert(json!(0));
+        o.entry("defaultMonitorOption").or_insert(json!("all"));
+        o.entry("defaultNewItemMonitorOption")
+            .or_insert(json!("all"));
+        o.entry("defaultTags").or_insert(json!([]));
+        o.entry("totalSpace").or_insert(json!(0));
+    }
+    v
+}
+
+pub(crate) async fn create_root_folder(
+    State(fs): State<FaceState>,
+    body: Json<shim::RootFolderBody>,
+) -> ApiResult<Json<Value>> {
+    let Json(v) = shim::create_root_folder(State(fs), body).await?;
+    Ok(Json(decorate_root(v)))
+}
+
 pub(crate) async fn root_folders(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
     let Json(base) = shim::root_folders(State(fs)).await?;
-    Ok(Json(
-        base.into_iter()
-            .map(|mut v| {
-                if let Some(o) = v.as_object_mut() {
-                    let path = o
-                        .get("path")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .to_string();
-                    o.entry("name")
-                        .or_insert_with(|| json!(resources::folder_of(&path)));
-                    o.entry("defaultMetadataProfileId").or_insert(json!(1));
-                    o.entry("defaultQualityProfileId").or_insert(json!(0));
-                    o.entry("defaultMonitorOption").or_insert(json!("all"));
-                    o.entry("defaultNewItemMonitorOption")
-                        .or_insert(json!("all"));
-                    o.entry("defaultTags").or_insert(json!([]));
-                    o.entry("totalSpace").or_insert(json!(0));
-                }
-                v
-            })
-            .collect(),
-    ))
+    Ok(Json(base.into_iter().map(decorate_root).collect()))
 }
 
 pub(crate) async fn diskspace(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
@@ -1573,63 +1525,6 @@ pub(crate) async fn diskspace(State(fs): State<FaceState>) -> ApiResult<Json<Vec
             })
             .collect(),
     ))
-}
-
-pub(crate) async fn config_host(State(fs): State<FaceState>) -> Json<Value> {
-    let auth = if app(&fs).auth.accepts(None) {
-        "none"
-    } else {
-        "external"
-    };
-    Json(json!({
-        "id": 1, "bindAddress": "*", "port": 8686, "sslPort": 6868, "enableSsl": false,
-        "launchBrowser": false, "authenticationMethod": auth, "authenticationRequired": "disabledForLocalAddresses",
-        "analyticsEnabled": false, "username": "", "password": "", "logLevel": "info",
-        "consoleLogLevel": "", "branch": "main", "apiKey": "", "sslCertPath": "", "sslCertPassword": "",
-        "urlBase": "", "instanceName": "Lidarr", "applicationUrl": "", "updateAutomatically": false,
-        "updateMechanism": "builtIn", "updateScriptPath": "", "proxyEnabled": false, "proxyType": "http",
-        "proxyHostname": "", "proxyPort": 8080, "proxyUsername": "", "proxyPassword": "",
-        "proxyBypassFilter": "", "proxyBypassLocalAddresses": true, "certificateValidation": "enabled",
-        "backupFolder": "Backups", "backupInterval": 7, "backupRetention": 28,
-    }))
-}
-
-pub(crate) async fn config_ui(State(_fs): State<FaceState>) -> Json<Value> {
-    Json(json!({
-        "id": 1, "firstDayOfWeek": 0, "calendarWeekColumnHeader": "ddd M/D", "shortDateFormat": "MMM D YYYY",
-        "longDateFormat": "dddd, MMMM D YYYY", "timeFormat": "h(:mm)a", "showRelativeDates": true,
-        "enableColorImpairedMode": false, "uiLanguage": 1, "theme": "auto", "expandAlbumByDefault": true,
-        "expandSingleByDefault": false, "expandEPByDefault": false, "expandBroadcastByDefault": false,
-        "expandOtherByDefault": false,
-    }))
-}
-
-pub(crate) async fn config_indexer(State(_fs): State<FaceState>) -> Json<Value> {
-    Json(
-        json!({ "id": 1, "minimumAge": 0, "maximumSize": 0, "retention": 0, "rssSyncInterval": 15 }),
-    )
-}
-
-pub(crate) async fn config_downloadclient(State(_fs): State<FaceState>) -> Json<Value> {
-    Json(json!({
-        "id": 1, "downloadClientWorkingFolders": "_UNPACK_|_FAILED_", "enableCompletedDownloadHandling": true,
-        "autoRedownloadFailed": true, "autoRedownloadFailedFromInteractiveSearch": true,
-    }))
-}
-
-pub(crate) async fn config_metadataprovider(State(_fs): State<FaceState>) -> Json<Value> {
-    Json(json!({ "id": 1, "metadataSource": "", "writeAudioTags": "no", "scrubAudioTags": false }))
-}
-
-pub(crate) async fn config_naming(State(_fs): State<FaceState>) -> Json<Value> {
-    Json(json!({
-        "id": 1, "renameTracks": true, "replaceIllegalCharacters": true, "colonReplacementFormat": "delete",
-        "standardTrackFormat": "{Album Title} ({Release Year})/{Artist Name} - {Album Title} - {track:00} - {Track Title}",
-        "multiDiscTrackFormat": "{Album Title} ({Release Year})/{Medium Format} {medium:00}/{Artist Name} - {Album Title} - {track:00} - {Track Title}",
-        "artistFolderFormat": "{Artist Name}",
-        "includeArtistName": false, "includeAlbumTitle": false, "includeQuality": false,
-        "replaceSpaces": false, "separator": " - ", "numberStyle": "{track:00}",
-    }))
 }
 
 pub(crate) async fn languages(State(_fs): State<FaceState>) -> Json<Vec<Value>> {
@@ -1653,8 +1548,14 @@ pub(crate) async fn system_status(
     let _ = &q;
     let Json(mut v) = shim::system_status(State(fs), Query(shim::StatusQuery::default())).await?;
     if let Some(o) = v.as_object_mut() {
-        o.entry("packageUpdateMechanismMessage")
-            .or_insert(Value::Null);
+        // Lidarr's status carries none of cellarr's packaging fields.
+        for k in [
+            "packageVersion",
+            "packageAuthor",
+            "packageUpdateMechanismMessage",
+        ] {
+            o.remove(k);
+        }
     }
     Ok(Json(v))
 }
@@ -1705,7 +1606,7 @@ pub(crate) async fn download_client(
     State(fs): State<FaceState>,
     Path(id): Path<i64>,
 ) -> ApiResult<Json<Value>> {
-    let Json(all) = shim::list_download_clients(State(fs)).await?;
+    let Json(all) = list_download_clients(State(fs)).await?;
     all.into_iter()
         .find(|r| r["id"].as_i64() == Some(id))
         .map(Json)
@@ -1764,4 +1665,141 @@ pub(crate) async fn naming_examples(State(_fs): State<FaceState>) -> Json<Value>
         "multiMediumTrackExample": render(multi, true),
         "artistFolderExample": "Artist Name",
     }))
+}
+
+// --- configuration singletons --------------------------------------------------
+//
+// Lidarr's settings pages (`/config/host`, `/config/naming`, …) are single records.
+// cellarr keeps the settings that matter in its own configuration; these resources
+// exist so a client can read and save Lidarr's page. The defaults are what a fresh
+// Lidarr reports (`templates/*.json`, recorded from one); a PUT is stored, so a
+// later GET returns what was saved.
+
+const CONFIGS: &[(&str, &str)] = &[
+    ("host", include_str!("templates/host.json")),
+    ("ui", include_str!("templates/ui.json")),
+    ("naming", include_str!("templates/naming.json")),
+    (
+        "mediamanagement",
+        include_str!("templates/mediamanagement.json"),
+    ),
+    ("indexer", include_str!("templates/indexer.json")),
+    (
+        "downloadclient",
+        include_str!("templates/downloadclient.json"),
+    ),
+    (
+        "metadataprovider",
+        include_str!("templates/metadataprovider.json"),
+    ),
+];
+
+fn config_key(name: &str) -> String {
+    format!("lidarr:config:{name}")
+}
+
+pub(crate) async fn read_config(state: &AppState, name: &str) -> ApiResult<Value> {
+    let default = CONFIGS
+        .iter()
+        .find(|(n, _)| *n == name)
+        .and_then(|(_, t)| serde_json::from_str::<Value>(t).ok())
+        .ok_or_else(|| ApiError::NotFound(format!("no such configuration: {name}")))?;
+    let stored = state.db.cache().get(&config_key(name)).await.ok().flatten();
+    let mut value = stored
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .unwrap_or(default.clone());
+    // Fields a newer template adds appear even in an older saved copy.
+    shim::merge_into(&mut value, Value::Null);
+    if let (Some(v), Some(d)) = (value.as_object_mut(), default.as_object()) {
+        for (k, x) in d {
+            v.entry(k.clone()).or_insert_with(|| x.clone());
+        }
+    }
+    Ok(value)
+}
+
+macro_rules! config_handlers {
+    ($($get:ident, $put:ident => $name:literal),* $(,)?) => {$(
+        pub(crate) async fn $get(State(fs): State<FaceState>) -> ApiResult<Json<Value>> {
+            Ok(Json(read_config(app(&fs), $name).await?))
+        }
+        pub(crate) async fn $put(
+            State(fs): State<FaceState>,
+            Json(body): Json<Value>,
+        ) -> ApiResult<Json<Value>> {
+            let state = app(&fs);
+            let mut current = read_config(state, $name).await?;
+            shim::merge_into(&mut current, body);
+            state
+                .db
+                .cache()
+                .put(&config_key($name), &current.to_string(), None)
+                .await
+                .map_err(|e| ApiError::Internal(e.to_string()))?;
+            Ok(Json(current))
+        }
+    )*};
+}
+
+config_handlers! {
+    config_host, put_config_host => "host",
+    config_ui, put_config_ui => "ui",
+    config_naming, put_config_naming => "naming",
+    config_mediamanagement, put_config_mediamanagement => "mediamanagement",
+    config_indexer, put_config_indexer => "indexer",
+    config_downloadclient, put_config_downloadclient => "downloadclient",
+    config_metadataprovider, put_config_metadataprovider => "metadataprovider",
+}
+
+// --- download clients and indexer schemas (Lidarr-shaped) -------------------
+
+/// Lidarr's category field is `musicCategory`; the shared shim stores a single
+/// typed `category`. Rename on the way out so Lidarr-speaking tools see the
+/// field they know.
+fn lidarr_client(mut v: Value) -> Value {
+    if let Some(fields) = v.get_mut("fields").and_then(Value::as_array_mut) {
+        for f in fields {
+            if f["name"] == "category" {
+                f["name"] = json!("musicCategory");
+            }
+        }
+    }
+    v
+}
+
+pub(crate) async fn list_download_clients(
+    State(fs): State<FaceState>,
+) -> ApiResult<Json<Vec<Value>>> {
+    let Json(all) = shim::list_download_clients(State(fs)).await?;
+    Ok(Json(all.into_iter().map(lidarr_client).collect()))
+}
+
+pub(crate) async fn create_download_client(
+    State(fs): State<FaceState>,
+    q: Query<shim::ForceSaveQuery>,
+    body: Json<shim::DownloadClientBody>,
+) -> ApiResult<Json<Value>> {
+    let Json(v) = shim::create_download_client(State(fs), q, body).await?;
+    Ok(Json(lidarr_client(v)))
+}
+
+pub(crate) async fn update_download_client(
+    State(fs): State<FaceState>,
+    id: Path<String>,
+    q: Query<shim::ForceSaveQuery>,
+    body: Json<shim::DownloadClientBody>,
+) -> ApiResult<Json<Value>> {
+    let Json(v) = shim::update_download_client(State(fs), id, q, body).await?;
+    Ok(Json(lidarr_client(v)))
+}
+
+pub(crate) async fn download_client_schema() -> Json<Value> {
+    Json(
+        serde_json::from_str(include_str!("templates/downloadclient_schema.json"))
+            .unwrap_or(Value::Null),
+    )
+}
+
+pub(crate) async fn indexer_schema() -> Json<Value> {
+    Json(serde_json::from_str(include_str!("templates/indexer_schema.json")).unwrap_or(Value::Null))
 }

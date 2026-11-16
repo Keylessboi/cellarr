@@ -62,6 +62,7 @@ pub async fn start(auth: AuthConfig) -> Lidarr {
         MusicBrainzSource::with_base_url(fetcher, BASE),
     ));
     let state = AppState::new(db, auth).with_music(catalogue);
+    cellarr_api::lidarr::defaults::ensure(&state).await.unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
     let app = cellarr_api::lidarr::listener_router(state.clone());
@@ -103,14 +104,18 @@ impl Lidarr {
         let schema = self.get("/qualityprofile/schema").await;
         let mut items = schema["items"].as_array().unwrap().clone();
         for item in &mut items {
-            let name = item["quality"]["name"].as_str().unwrap();
-            item["allowed"] = json!(name == "FLAC" || name == "MP3-320");
+            let name = item
+                .get("name")
+                .or_else(|| item["quality"].get("name"))
+                .and_then(|n| n.as_str())
+                .unwrap();
+            item["allowed"] = json!(name == "Lossless" || name == "High Quality Lossy");
         }
         let r = self
             .send(
                 reqwest::Method::POST,
                 "/qualityprofile",
-                &json!({ "name": "Lossless", "upgradeAllowed": true, "cutoff": 6, "items": items }),
+                &json!({ "name": "Lossless", "upgradeAllowed": true, "cutoff": 1005, "items": items }),
             )
             .await;
         assert!(r.status().is_success(), "{}", r.text().await.unwrap());

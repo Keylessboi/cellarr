@@ -21,17 +21,17 @@ pub(crate) async fn search(
     Query(q): Params,
 ) -> ApiResult<Json<Vec<Value>>> {
     let state = app(&fs);
+    // No album named (or one that does not exist) has no releases to offer.
     let album_id = q
         .iter()
         .find(|(k, _)| k.eq_ignore_ascii_case("albumId"))
-        .and_then(|(_, v)| v.parse::<i64>().ok())
-        .ok_or_else(|| ApiError::BadRequest("albumId is required".into()))?;
-    let album = state
-        .db
-        .music()
-        .album(album_id)
-        .await?
-        .ok_or_else(|| ApiError::NotFound(format!("album {album_id} not found")))?;
+        .and_then(|(_, v)| v.parse::<i64>().ok());
+    let Some(album) = (match album_id {
+        Some(id) => state.db.music().album(id).await?,
+        None => None,
+    }) else {
+        return Ok(Json(Vec::new()));
+    };
     let artist = state
         .db
         .music()

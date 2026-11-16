@@ -33,6 +33,122 @@ pub fn id_for_rank(rank: u32) -> u32 {
         .map_or(0, |d| lidarr_quality_id(&d.name))
 }
 
+/// Lidarr's quality groups, worst tier first: `(group id, name, member quality ids)`.
+///
+/// A Lidarr profile does not list qualities one by one; it lists these tiers (plus
+/// `Unknown` and `WAV`, which stand alone), and allows or disallows each tier. The
+/// group ids are Lidarr's (`1000` up).
+pub const GROUPS: &[(u32, &str, &[u32])] = &[
+    (
+        1000,
+        "Trash Quality Lossy",
+        &[32, 31, 30, 29, 28, 27, 26, 25, 24],
+    ),
+    (1001, "Poor Quality Lossy", &[23, 33, 22, 19, 5]),
+    (1002, "Low Quality Lossy", &[1, 18, 9, 20, 34]),
+    (1003, "Mid Quality Lossy", &[17, 8, 3, 16, 10]),
+    (1004, "High Quality Lossy", &[2, 12, 4, 15, 11, 14]),
+    (1005, "Lossless", &[6, 7, 35, 36, 21, 37]),
+];
+
+fn quality_item(id: u32, allowed: bool) -> serde_json::Value {
+    serde_json::json!({
+        "quality": { "id": id, "name": cellarr_core::lidarr_quality_name(id).unwrap_or("Unknown") },
+        "items": [],
+        "allowed": allowed,
+    })
+}
+
+/// A profile's `items` array as Lidarr renders it: `Unknown`, then each tier as a
+/// group (allowed when any of its members is), then `WAV`.
+#[must_use]
+pub fn profile_items(allowed_ranks: &[u32]) -> Vec<serde_json::Value> {
+    let on = |id: u32| rank_for_id(id).is_some_and(|r| allowed_ranks.contains(&r));
+    let mut items = vec![quality_item(0, on(0))];
+    for (gid, name, members) in GROUPS {
+        items.push(serde_json::json!({
+            "name": name,
+            "items": members.iter().map(|m| quality_item(*m, on(*m))).collect::<Vec<_>>(),
+            "allowed": members.iter().any(|m| on(*m)),
+            "id": gid,
+        }));
+    }
+    items.push(quality_item(13, on(13)));
+    items
+}
+
+/// The ranks a posted `items` array allows. A group that is allowed contributes
+/// every member (the members' own flags are ignored, as in Lidarr, where a group is
+/// allowed as a whole); a stand-alone quality contributes itself.
+#[must_use]
+pub fn allowed_ranks(items: &[serde_json::Value]) -> Vec<u32> {
+    let mut out = Vec::new();
+    let mut push = |id: u64| {
+        if let Some(r) = u32::try_from(id).ok().and_then(rank_for_id) {
+            if !out.contains(&r) {
+                out.push(r);
+            }
+        }
+    };
+    for item in items {
+        if !item
+            .get("allowed")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        let members = item
+            .get("items")
+            .and_then(serde_json::Value::as_array)
+            .filter(|m| !m.is_empty());
+        match members {
+            Some(members) => {
+                for m in members {
+                    if let Some(id) = m
+                        .get("quality")
+                        .and_then(|q| q.get("id"))
+                        .and_then(serde_json::Value::as_u64)
+                    {
+                        push(id);
+                    }
+                }
+            }
+            None => {
+                if let Some(id) = item
+                    .get("quality")
+                    .and_then(|q| q.get("id"))
+                    .and_then(serde_json::Value::as_u64)
+                {
+                    push(id);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The `cutoff` value for a cellarr cutoff rank: its group's id when the quality
+/// belongs to a tier, else its own id.
+#[must_use]
+pub fn cutoff_id_for_rank(rank: u32) -> u32 {
+    let id = id_for_rank(rank);
+    GROUPS
+        .iter()
+        .find(|(_, _, members)| members.contains(&id))
+        .map_or(id, |(gid, _, _)| *gid)
+}
+
+/// The cellarr cutoff rank for a posted `cutoff`: a group means its lowest member
+/// (the first quality that satisfies it).
+#[must_use]
+pub fn rank_for_cutoff_id(cutoff: u32) -> Option<u32> {
+    match GROUPS.iter().find(|(gid, _, _)| *gid == cutoff) {
+        Some((_, _, members)) => members.iter().filter_map(|m| rank_for_id(*m)).min(),
+        None => rank_for_id(cutoff),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -72,6 +188,45 @@ mod tests {
             seen.len(),
             "the table and the catalogue agree"
         );
+    }
+
+    #[test]
+    fn every_music_quality_is_in_exactly_one_tier_or_stands_alone() {
+        let mut seen = std::collections::HashSet::new();
+        for (_, _, members) in GROUPS {
+            for m in *members {
+                assert!(seen.insert(*m), "quality {m} is in two groups");
+                assert!(rank_for_id(*m).is_some(), "group member {m} is unknown");
+            }
+        }
+        // Everything else is Unknown (0) or WAV (13), the two stand-alone items.
+        for q in QualityRanking::default().for_media(cellarr_core::MediaType::Music) {
+            let id = lidarr_quality_id(&q.name);
+            assert!(
+                seen.contains(&id) || id == 0 || id == 13,
+                "{} is in no tier",
+                q.name
+            );
+        }
+    }
+
+    #[test]
+    fn a_tier_is_allowed_when_any_member_is_and_round_trips() {
+        let ranks = allowed_ranks(&profile_items(&[
+            rank_for_id(6).unwrap(),
+            rank_for_id(4).unwrap(),
+        ]));
+        // FLAC allows the whole Lossless tier; 320 allows the whole High tier.
+        assert!(ranks.contains(&rank_for_id(21).unwrap()));
+        assert!(ranks.contains(&rank_for_id(2).unwrap()));
+        assert!(!ranks.contains(&rank_for_id(1).unwrap()));
+    }
+
+    #[test]
+    fn a_cutoff_is_a_tier_id_for_a_grouped_quality() {
+        assert_eq!(cutoff_id_for_rank(rank_for_id(6).unwrap()), 1005);
+        assert_eq!(cutoff_id_for_rank(rank_for_id(13).unwrap()), 13);
+        assert_eq!(rank_for_cutoff_id(1005), rank_for_id(6));
     }
 
     #[test]
