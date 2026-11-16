@@ -184,8 +184,49 @@ documented behaviour and tested against fixtures — see
 
 ## Resource use
 
-*Measured, not estimated — see the numbers below, produced by `scripts/synth-lidarr-db` (a
-database at the size of one real install: 914 artists, 41,459 albums, ~950k tracks, 35,798
-files) and the release binary.*
+*Measured, not estimated.* The library is synthetic but sized to one real install (914 artists,
+41,459 albums, ~950k tracks across two releases each, 35,798 files, 16k blocklist rows, 934k
+history rows), built by `scripts/synth-lidarr-db`; the binary is the release build, run on a
+4-core container. Nothing was mocked in the daemon: this is `cellarr migrate` and then the
+real server answering the same calls Lidarr's clients make.
 
-RESOURCE_NUMBERS_PLACEHOLDER
+| | cellarr | Lidarr (the same install, from its own deployment notes) |
+|---|---|---|
+| Import of the library | **174 s**, peak **185 MiB** | n/a |
+| Database on disk | **360 MB** (no history) | 3.9 GB (934k history rows) |
+| Memory, just started | **~140 MiB** | ~900 MiB "fresh pod" |
+| Memory, after a mixed workload | **~410 MiB** (**~240 MiB** with `MALLOC_ARENA_MAX=2`) | 1.5–1.7 GiB (reached 1.7 GiB and wedged; limit raised to 3 GiB) |
+| Memory, empty library | **29 MiB** | n/a |
+| Binary | 35 MB, no runtime, no .NET, no plugin host unless built in | ~200 MB image |
+
+Request latency on that library, best of three (the SQLite file on local disk):
+
+| Call | Time |
+|---|---|
+| `GET /album?artistId=` (one artist) | 20 ms |
+| `GET /track?albumId=` | 15 ms |
+| `GET /queue`, `GET /history?albumId=&eventType=8` | 15–25 ms |
+| `GET /wanted/missing` (page of 50 of 38,195) | ~0.5 s |
+| `GET /blocklist` (page of 50 of 16,271) | ~0.45 s |
+| `GET /artist` (all 914, with statistics) | ~0.45 s |
+| `POST /command AlbumSearch` × 50 albums | ~0.5 s, and it returns; the search runs as jobs |
+| `GET /album` (all 41,459 albums, 77 MB of JSON) | ~2.3 s, peak ~600 MiB while it streams |
+
+Lidarr's own note on this library: `GET /api/v1/artist` exceeded 180 s on network storage and
+`/ping` took ~5 s on local disk, which is what its probes and the mass-search script had to work
+around. cellarr's equivalents are 0.45 s and 1 ms.
+
+Caveats, so the table is read correctly: Lidarr's figures are what its operator wrote down
+about a long-running install under a multi-day mass search, not a controlled run, and this
+benchmark has no indexers or download client, so it measures the library and the API, not
+the cost of searching. What is certain is the shape: memory and latency here do not grow with
+history (cellarr starts a fresh one), nothing is a .NET runtime, and the unfiltered calls are
+streamed rather than built in memory.
+
+### Knobs
+
+| Setting | Effect |
+|---|---|
+| `CELLARR_DB_CACHE_MIB` (default 16) | SQLite page cache per connection (up to 9 connections). Raise it only when the database file is on slow network storage. |
+| `MALLOC_ARENA_MAX=2` | On glibc builds, stops the allocator keeping a heap arena per core; cut steady-state memory by ~40% in the benchmark. |
+| `music.lidarr_port` | Serve the Lidarr face on its own listener. |
