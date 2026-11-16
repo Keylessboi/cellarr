@@ -142,7 +142,11 @@ pub fn album(
     tracks: &[Track],
 ) -> Value {
     let discs = tracks.iter().map(|t| t.disc).max().unwrap_or(1);
-    let duration: u64 = tracks.iter().filter_map(|t| t.duration_ms).map(u64::from).sum();
+    let duration: u64 = tracks
+        .iter()
+        .filter_map(|t| t.duration_ms)
+        .map(u64::from)
+        .sum();
     let media: Vec<Value> = (1..=discs.max(1))
         .map(|n| json!({ "mediumNumber": n, "mediumName": "", "mediumFormat": "CD" }))
         .collect();
@@ -255,12 +259,7 @@ pub fn track(
 
 /// A track-file resource.
 #[must_use]
-pub fn track_file(
-    f: &TrackFile,
-    artist_id: i64,
-    album_id: i64,
-    cutoff_rank: Option<u32>,
-) -> Value {
+pub fn track_file(f: &TrackFile, artist_id: i64, album_id: i64, cutoff_rank: Option<u32>) -> Value {
     let info = f.file.media_info.clone().unwrap_or(Value::Null);
     let get = |k: &str| info.get(k).cloned().unwrap_or(Value::Null);
     json!({
@@ -366,9 +365,11 @@ impl IdIndex {
     /// The `(album id, artist id)` a content id of an album belongs to.
     #[must_use]
     pub fn of_album(&self, album: ContentId) -> (i64, i64) {
-        self.albums.get(&album).map_or((0, 0), |(album_id, artist)| {
-            (*album_id, self.artists.get(artist).copied().unwrap_or(0))
-        })
+        self.albums
+            .get(&album)
+            .map_or((0, 0), |(album_id, artist)| {
+                (*album_id, self.artists.get(artist).copied().unwrap_or(0))
+            })
     }
 }
 
@@ -378,9 +379,18 @@ mod tests {
 
     #[test]
     fn partial_release_dates_complete_to_their_first_day() {
-        assert_eq!(release_date_iso(Some("1997")), json!("1997-01-01T00:00:00Z"));
-        assert_eq!(release_date_iso(Some("1997-05")), json!("1997-05-01T00:00:00Z"));
-        assert_eq!(release_date_iso(Some("1997-05-21")), json!("1997-05-21T00:00:00Z"));
+        assert_eq!(
+            release_date_iso(Some("1997")),
+            json!("1997-01-01T00:00:00Z")
+        );
+        assert_eq!(
+            release_date_iso(Some("1997-05")),
+            json!("1997-05-01T00:00:00Z")
+        );
+        assert_eq!(
+            release_date_iso(Some("1997-05-21")),
+            json!("1997-05-21T00:00:00Z")
+        );
         assert_eq!(release_date_iso(None), Value::Null);
         assert_eq!(release_date_iso(Some("")), Value::Null);
     }

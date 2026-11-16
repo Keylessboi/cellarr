@@ -13,7 +13,11 @@ async fn lidarr_db(dir: &std::path::Path) -> String {
     let opts = SqliteConnectOptions::from_str(&format!("sqlite://{}", path.display()))
         .unwrap()
         .create_if_missing(true);
-    let pool = SqlitePoolOptions::new().max_connections(1).connect_with(opts).await.unwrap();
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(opts)
+        .await
+        .unwrap();
     let statements = [
         "CREATE TABLE RootFolders (Id INTEGER PRIMARY KEY, Path TEXT)",
         "CREATE TABLE Indexers (Id INTEGER PRIMARY KEY, Name TEXT, Implementation TEXT, Settings TEXT, ConfigContract TEXT, EnableRss INTEGER, EnableAutomaticSearch INTEGER, EnableInteractiveSearch INTEGER, Priority INTEGER, Tags TEXT, DownloadClientId INTEGER)",
@@ -66,14 +70,19 @@ async fn lidarr_db(dir: &std::path::Path) -> String {
         "INSERT INTO History VALUES (1, 30001, 907, 0, 'x', '{}', '2025-08-01 00:00:00', 1, '{}', 'd')",
     ];
     for sql in statements {
-        sqlx::query(sql).execute(&pool).await.unwrap_or_else(|e| panic!("{sql}: {e}"));
+        sqlx::query(sql)
+            .execute(&pool)
+            .await
+            .unwrap_or_else(|e| panic!("{sql}: {e}"));
     }
     pool.close().await;
     path.to_str().unwrap().to_string()
 }
 
 async fn dest(dir: &std::path::Path) -> Database {
-    Database::open(dir.join("cellarr.sqlite").to_str().unwrap()).await.unwrap()
+    Database::open(dir.join("cellarr.sqlite").to_str().unwrap())
+        .await
+        .unwrap()
 }
 
 #[tokio::test]
@@ -107,7 +116,11 @@ async fn the_library_is_imported_with_lidarrs_own_ids() {
     assert_eq!(m.unmapped_files, 1);
 
     let music = db.music();
-    let radiohead = music.artist(907).await.unwrap().expect("artist keeps its id");
+    let radiohead = music
+        .artist(907)
+        .await
+        .unwrap()
+        .expect("artist keeps its id");
     assert_eq!(radiohead.name, "Radiohead");
     assert_eq!(radiohead.mbid, "a-radiohead");
     assert_eq!(radiohead.path, "/data/media/music/Radiohead");
@@ -115,23 +128,43 @@ async fn the_library_is_imported_with_lidarrs_own_ids() {
     assert_eq!(radiohead.genres, ["Alternative rock"]);
     let burial = music.artist(908).await.unwrap().unwrap();
     assert!(!burial.monitored, "an unmonitored artist stays unmonitored");
-    assert!(!burial.monitor_new_albums, "MonitorNewItems=None carries over");
+    assert!(
+        !burial.monitor_new_albums,
+        "MonitorNewItems=None carries over"
+    );
 
-    let okc = music.album(30001).await.unwrap().expect("album keeps its id");
+    let okc = music
+        .album(30001)
+        .await
+        .unwrap()
+        .expect("album keeps its id");
     assert_eq!(okc.title, "OK Computer");
     assert_eq!(okc.release_date.as_deref(), Some("1997-05-21"));
-    assert_eq!(okc.release_mbid.as_deref(), Some("rel-b"), "the monitored pressing");
+    assert_eq!(
+        okc.release_mbid.as_deref(),
+        Some("rel-b"),
+        "the monitored pressing"
+    );
     assert!(okc.monitored);
     let live = music.album(30002).await.unwrap().unwrap();
     assert_eq!(live.secondary_types, ["Live"]);
     assert!(!live.monitored);
 
     let tracks = music.tracks_for_album(okc.content_id).await.unwrap();
-    assert_eq!(tracks.iter().map(|t| t.title.as_str()).collect::<Vec<_>>(), ["Airbag", "Paranoid Android"]);
+    assert_eq!(
+        tracks.iter().map(|t| t.title.as_str()).collect::<Vec<_>>(),
+        ["Airbag", "Paranoid Android"]
+    );
     assert_eq!(tracks[0].id, 700001, "tracks keep their ids");
     assert_eq!(tracks[0].duration_ms, Some(284_000));
-    let untrue = music.tracks_for_album(music.album(30003).await.unwrap().unwrap().content_id).await.unwrap();
-    assert_eq!(untrue[1].position, 2, "a vinyl-style `A2` is position 2 on its disc");
+    let untrue = music
+        .tracks_for_album(music.album(30003).await.unwrap().unwrap().content_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        untrue[1].position, 2,
+        "a vinyl-style `A2` is position 2 on its disc"
+    );
 }
 
 #[tokio::test]
@@ -142,8 +175,15 @@ async fn files_are_recognized_in_place_with_their_quality() {
     import(&[&src], &db).await.unwrap();
 
     let music = db.music();
-    let flac = music.track_file(91).await.unwrap().expect("file keeps its id");
-    assert_eq!(flac.file.path, "/data/media/music/Radiohead/OK Computer (1997)/01 - Airbag.flac");
+    let flac = music
+        .track_file(91)
+        .await
+        .unwrap()
+        .expect("file keeps its id");
+    assert_eq!(
+        flac.file.path,
+        "/data/media/music/Radiohead/OK Computer (1997)/01 - Airbag.flac"
+    );
     assert_eq!(flac.file.quality.name, "FLAC");
     assert_eq!(flac.file.size, 31_000_000);
     assert_eq!(flac.added_at, "2025-07-01T10:00:00Z");
@@ -152,7 +192,10 @@ async fn files_are_recognized_in_place_with_their_quality() {
     assert_eq!(info["bitDepth"], 16);
     let mp3 = music.track_file(92).await.unwrap().unwrap();
     assert_eq!(mp3.file.quality.name, "MP3-320");
-    assert!(music.track_file(93).await.unwrap().is_none(), "an orphan file is left out");
+    assert!(
+        music.track_file(93).await.unwrap().is_none(),
+        "an orphan file is left out"
+    );
 
     let stats = music.artist_stats().await.unwrap();
     let radiohead = music.artist(907).await.unwrap().unwrap();
@@ -167,8 +210,16 @@ async fn profiles_keep_their_integer_ids_and_meaning() {
     import(&[&src], &db).await.unwrap();
 
     let music = db.music();
-    let lossless = music.profile_by_seq(1).await.unwrap().expect("profile id 1");
-    let any = music.profile_by_seq(4).await.unwrap().expect("profile id 4");
+    let lossless = music
+        .profile_by_seq(1)
+        .await
+        .unwrap()
+        .expect("profile id 1");
+    let any = music
+        .profile_by_seq(4)
+        .await
+        .unwrap()
+        .expect("profile id 4");
     let profiles = db.profiles().list_profiles().await.unwrap();
     let p = profiles.iter().find(|p| p.id == lossless).unwrap();
     assert_eq!(p.name, "Lossless");
@@ -180,10 +231,16 @@ async fn profiles_keep_their_integer_ids_and_meaning() {
         .collect();
     assert!(names.contains(&"FLAC".to_string()) && names.contains(&"FLAC 24bit".to_string()));
     assert!(names.contains(&"MP3-320".to_string()));
-    assert!(!names.contains(&"MP3-192".to_string()), "a disallowed quality stays out");
+    assert!(
+        !names.contains(&"MP3-192".to_string()),
+        "a disallowed quality stays out"
+    );
     // The cutoff was set on the "Lossless" group; it resolves to that group's
     // lowest member.
-    assert_eq!(ranking.definition_for_rank(p.cutoff_quality).unwrap().name, "FLAC");
+    assert_eq!(
+        ranking.definition_for_rank(p.cutoff_quality).unwrap().name,
+        "FLAC"
+    );
     let _ = any;
 
     // Each artist is graded by the profile it had.
@@ -202,7 +259,10 @@ async fn config_blocklist_and_mappings_come_across() {
     let db = dest(dir.path()).await;
     let report = import(&[&src], &db).await.unwrap();
     let m = report.music.unwrap();
-    assert_eq!((m.blocklist, m.remote_path_mappings, m.history_skipped), (1, 1, 1));
+    assert_eq!(
+        (m.blocklist, m.remote_path_mappings, m.history_skipped),
+        (1, 1, 1)
+    );
 
     let entries = BlocklistRepository::list(&db.blocklist()).await.unwrap();
     assert_eq!(entries[0].title, "Radiohead - OK Computer [DEAD]");
@@ -221,12 +281,22 @@ async fn config_blocklist_and_mappings_come_across() {
         seeders: Some(1),
         indexer_flags: vec![],
     };
-    assert!(BlocklistRepository::is_blocklisted(&db.blocklist(), okc.content_id, &release).await.unwrap());
+    assert!(
+        BlocklistRepository::is_blocklisted(&db.blocklist(), okc.content_id, &release)
+            .await
+            .unwrap()
+    );
 
-    assert_eq!(db.config().list_root_folders().await.unwrap()[0].path, "/data/media/music");
+    assert_eq!(
+        db.config().list_root_folders().await.unwrap()[0].path,
+        "/data/media/music"
+    );
     assert_eq!(db.config().list_indexers().await.unwrap().len(), 1);
     assert_eq!(db.config().list_download_clients().await.unwrap().len(), 1);
-    assert_eq!(db.config().list_remote_path_mappings().await.unwrap()[0].local_path, "/data/torrents/");
+    assert_eq!(
+        db.config().list_remote_path_mappings().await.unwrap()[0].local_path,
+        "/data/torrents/"
+    );
 }
 
 #[tokio::test]

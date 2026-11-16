@@ -217,7 +217,7 @@ impl MusicRepo {
                 let added_at = new.added_at.clone().unwrap_or(now);
                 insert_node(conn, content_id, library, None, "artist", "{\"type\":\"album\"}", new.monitored)
                     .await?;
-                sqlx::query(&pq(
+                sqlx::query(pq(
                     "INSERT INTO artist_meta
                         (id, content_id, mbid, name, name_norm, sort_name, disambiguation,
                          artist_type, ended, overview, genres, path, quality_profile_id,
@@ -278,7 +278,7 @@ impl MusicRepo {
         self.writer
             .submit(move |conn| {
                 Box::pin(async move {
-                    sqlx::query(&pq(
+                    sqlx::query(pq(
                         "UPDATE artist_meta SET name = ?2, name_norm = ?3, sort_name = ?4,
                             disambiguation = ?5, artist_type = ?6, ended = ?7, overview = ?8,
                             genres = ?9, path = ?10, quality_profile_id = ?11,
@@ -300,13 +300,13 @@ impl MusicRepo {
                     .bind(i64::from(a.monitor_new_albums))
                     .execute(&mut *conn)
                     .await?;
-                    sqlx::query(&pq("UPDATE content SET monitored = ?2 WHERE id = ?1"))
+                    sqlx::query(pq("UPDATE content SET monitored = ?2 WHERE id = ?1"))
                         .bind(a.content_id.to_string())
                         .bind(i64::from(a.monitored))
                         .execute(&mut *conn)
                         .await?;
                     if let Some(aliases) = aliases {
-                        sqlx::query(&pq("DELETE FROM artist_alias WHERE artist_content_id = ?1"))
+                        sqlx::query(pq("DELETE FROM artist_alias WHERE artist_content_id = ?1"))
                             .bind(a.content_id.to_string())
                             .execute(&mut *conn)
                             .await?;
@@ -328,7 +328,7 @@ impl MusicRepo {
         self.writer
             .submit(move |conn| {
                 Box::pin(async move {
-                    sqlx::query(&pq(
+                    sqlx::query(pq(
                         "UPDATE artist_meta SET refreshed_at = ?2 WHERE content_id = ?1",
                     ))
                     .bind(artist.to_string())
@@ -352,7 +352,7 @@ impl MusicRepo {
              WHERE a.refreshed_at IS NULL OR a.refreshed_at < ?1
              ORDER BY (a.refreshed_at IS NULL) DESC, a.refreshed_at ASC LIMIT ?2"
         );
-        let rows = sqlx::query(&pq(&sql))
+        let rows = sqlx::query(pq(&sql))
             .bind(before)
             .bind(i64::try_from(limit).unwrap_or(i64::MAX))
             .fetch_all(&self.pool)
@@ -369,7 +369,7 @@ impl MusicRepo {
             "SELECT {ARTIST_COLS} FROM artist_meta a JOIN content c ON c.id = a.content_id
              ORDER BY a.id ASC"
         );
-        let rows = sqlx::query(&pq(&sql)).fetch_all(&self.pool).await?;
+        let rows = sqlx::query(pq(&sql)).fetch_all(&self.pool).await?;
         rows.into_iter().map(row_to_artist).collect()
     }
 
@@ -405,7 +405,7 @@ impl MusicRepo {
              WHERE {predicate}"
         );
         let sql = pq(&sql);
-        let query = sqlx::query(&sql);
+        let query = sqlx::query(sql);
         let query = match key {
             ArtistKey::Seq(n) => query.bind(n),
             ArtistKey::Text(s) => query.bind(s),
@@ -437,7 +437,7 @@ impl MusicRepo {
     async fn delete_scope(&self, column: &'static str, id: ContentId) -> Result<Vec<String>> {
         self.write(move |conn| {
             Box::pin(async move {
-                let rows = sqlx::query(&pq(&format!(
+                let rows = sqlx::query(pq(&format!(
                     "SELECT mf.path FROM track_file tf JOIN media_file mf ON mf.id = tf.media_file_id
                      WHERE tf.{column} = ?1"
                 )))
@@ -448,7 +448,7 @@ impl MusicRepo {
                     .into_iter()
                     .map(|r| r.try_get::<String, _>("path").map_err(DbError::from))
                     .collect::<Result<Vec<_>>>()?;
-                sqlx::query(&pq(&format!(
+                sqlx::query(pq(&format!(
                     "DELETE FROM media_file WHERE id IN
                         (SELECT media_file_id FROM track_file WHERE {column} = ?1)"
                 )))
@@ -456,7 +456,7 @@ impl MusicRepo {
                 .execute(&mut *conn)
                 .await?;
                 // The subtree's FTS rows have no foreign key to cascade through.
-                sqlx::query(&pq(
+                sqlx::query(pq(
                     "DELETE FROM content_fts WHERE content_id IN (
                         SELECT id FROM content WHERE id = ?1 OR parent_id = ?1
                            OR parent_id IN (SELECT id FROM content WHERE parent_id = ?1))",
@@ -464,7 +464,7 @@ impl MusicRepo {
                 .bind(id.to_string())
                 .execute(&mut *conn)
                 .await?;
-                sqlx::query(&pq("DELETE FROM content WHERE id = ?1"))
+                sqlx::query(pq("DELETE FROM content WHERE id = ?1"))
                     .bind(id.to_string())
                     .execute(&mut *conn)
                     .await?;
@@ -494,7 +494,7 @@ impl MusicRepo {
             Box::pin(async move {
                 let mut inserted = Vec::new();
                 for new in albums {
-                    let existing = sqlx::query(&pq(
+                    let existing = sqlx::query(pq(
                         "SELECT content_id, title FROM album_meta WHERE mbid = ?1",
                     ))
                     .bind(&new.mbid)
@@ -503,12 +503,10 @@ impl MusicRepo {
                     if let Some(row) = existing {
                         let content_id: String = row.try_get("content_id")?;
                         let old_title: String = row.try_get("title")?;
-                        sqlx::query(&pq(
-                            "UPDATE album_meta SET title = ?2, title_norm = ?3,
+                        sqlx::query(pq("UPDATE album_meta SET title = ?2, title_norm = ?3,
                                 disambiguation = ?4, album_type = ?5, secondary_types = ?6,
                                 release_date = ?7
-                             WHERE content_id = ?1",
-                        ))
+                             WHERE content_id = ?1"))
                         .bind(&content_id)
                         .bind(&new.title)
                         .bind(normalize_name(&new.title))
@@ -539,13 +537,11 @@ impl MusicRepo {
                         new.monitored,
                     )
                     .await?;
-                    sqlx::query(&pq(
-                        "INSERT INTO album_meta
+                    sqlx::query(pq("INSERT INTO album_meta
                             (id, content_id, artist_content_id, mbid, title, title_norm,
                              disambiguation, album_type, secondary_types, release_date,
                              release_mbid, added_at)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-                    ))
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)"))
                     .bind(id)
                     .bind(content_id.to_string())
                     .bind(artist.to_string())
@@ -608,7 +604,7 @@ impl MusicRepo {
              WHERE {predicate} ORDER BY al.id ASC"
         );
         let sql = pq(&sql);
-        let mut query = sqlx::query(&sql);
+        let mut query = sqlx::query(sql);
         if let Some(value) = bind {
             query = query.bind(value);
         }
@@ -625,7 +621,7 @@ impl MusicRepo {
             "SELECT {ALBUM_COLS} FROM album_meta al JOIN content c ON c.id = al.content_id
              WHERE al.id = ?1"
         );
-        sqlx::query(&pq(&sql))
+        sqlx::query(pq(&sql))
             .bind(id)
             .fetch_optional(&self.pool)
             .await?
@@ -679,7 +675,7 @@ impl MusicRepo {
                         SELECT 1 FROM artist_alias x
                         WHERE x.artist_content_id = ar.content_id AND x.alias_norm = ?2))"
             );
-            let rows = sqlx::query(&pq(&sql))
+            let rows = sqlx::query(pq(&sql))
                 .bind(album_norm)
                 .bind(artist_norm)
                 .fetch_all(&self.pool)
@@ -730,7 +726,7 @@ impl MusicRepo {
                AND (al.release_date IS NULL OR al.release_date <= ?1)
                AND NOT EXISTS (
                    SELECT 1 FROM track_file tf WHERE tf.album_content_id = al.content_id)";
-        let total: i64 = sqlx::query(&pq(&format!(
+        let total: i64 = sqlx::query(pq(&format!(
             "SELECT count(*) AS n FROM album_meta al
              JOIN content c ON c.id = al.content_id
              JOIN content ac ON ac.id = al.artist_content_id
@@ -753,7 +749,7 @@ impl MusicRepo {
              WHERE {WHERE}
              ORDER BY {column} {direction}, al.id ASC LIMIT ?2 OFFSET ?3"
         );
-        let rows = sqlx::query(&pq(&sql))
+        let rows = sqlx::query(pq(&sql))
             .bind(today)
             .bind(i64::try_from(limit).unwrap_or(i64::MAX))
             .bind(i64::try_from(offset).unwrap_or(i64::MAX))
@@ -772,7 +768,7 @@ impl MusicRepo {
             .submit(move |conn| {
                 Box::pin(async move {
                     for id in ids {
-                        sqlx::query(&pq("UPDATE content SET monitored = ?2 WHERE id = ?1"))
+                        sqlx::query(pq("UPDATE content SET monitored = ?2 WHERE id = ?1"))
                             .bind(id.to_string())
                             .bind(i64::from(monitored))
                             .execute(&mut *conn)
@@ -804,7 +800,9 @@ impl MusicRepo {
     ) -> Result<Vec<Track>> {
         let now = format_time(time::OffsetDateTime::now_utc())?;
         self.write(move |conn| {
-            Box::pin(async move { store_tracks(conn, library, album, release_mbid, tracks, &now).await })
+            Box::pin(
+                async move { store_tracks(conn, library, album, release_mbid, tracks, &now).await },
+            )
         })
         .await
     }
@@ -844,7 +842,7 @@ impl MusicRepo {
             "SELECT {TRACK_COLS} FROM track_meta t WHERE t.album_content_id = ?1
              ORDER BY t.disc ASC, t.position ASC"
         );
-        let rows = sqlx::query(&pq(&sql))
+        let rows = sqlx::query(pq(&sql))
             .bind(album.to_string())
             .fetch_all(&self.pool)
             .await?;
@@ -862,7 +860,7 @@ impl MusicRepo {
              WHERE al.artist_content_id = ?1
              ORDER BY al.id ASC, t.disc ASC, t.position ASC"
         );
-        let rows = sqlx::query(&pq(&sql))
+        let rows = sqlx::query(pq(&sql))
             .bind(artist.to_string())
             .fetch_all(&self.pool)
             .await?;
@@ -875,7 +873,7 @@ impl MusicRepo {
     /// Returns a [`DbError`] on query failure.
     pub async fn track(&self, id: i64) -> Result<Option<Track>> {
         let sql = format!("SELECT {TRACK_COLS} FROM track_meta t WHERE t.id = ?1");
-        sqlx::query(&pq(&sql))
+        sqlx::query(pq(&sql))
             .bind(id)
             .fetch_optional(&self.pool)
             .await?
@@ -889,7 +887,7 @@ impl MusicRepo {
     /// Returns a [`DbError`] on query failure.
     pub async fn track_by_content(&self, id: ContentId) -> Result<Option<Track>> {
         let sql = format!("SELECT {TRACK_COLS} FROM track_meta t WHERE t.content_id = ?1");
-        sqlx::query(&pq(&sql))
+        sqlx::query(pq(&sql))
             .bind(id.to_string())
             .fetch_optional(&self.pool)
             .await?
@@ -916,11 +914,9 @@ impl MusicRepo {
         let now = format_time(time::OffsetDateTime::now_utc())?;
         self.write(move |conn| {
             Box::pin(async move {
-                let owner = sqlx::query(&pq(
-                    "SELECT t.album_content_id, al.artist_content_id
+                let owner = sqlx::query(pq("SELECT t.album_content_id, al.artist_content_id
                      FROM track_meta t JOIN album_meta al ON al.content_id = t.album_content_id
-                     WHERE t.content_id = ?1",
-                ))
+                     WHERE t.content_id = ?1"))
                 .bind(track.to_string())
                 .fetch_optional(&mut *conn)
                 .await?
@@ -931,7 +927,7 @@ impl MusicRepo {
                 let album: String = owner.try_get("album_content_id")?;
                 let artist: String = owner.try_get("artist_content_id")?;
 
-                let existing = sqlx::query(&pq(
+                let existing = sqlx::query(pq(
                     "SELECT mf.id AS mf_id, tf.id AS tf_id FROM media_file mf
                      LEFT JOIN track_file tf ON tf.media_file_id = mf.id
                      WHERE mf.path = ?1",
@@ -952,12 +948,10 @@ impl MusicRepo {
                 };
                 let media_file_id = if media_file_id.is_empty() {
                     let mf = MediaFileId::from_uuid(seq_uuid(seq_u32(id))).to_string();
-                    sqlx::query(&pq(
-                        "INSERT INTO media_file
+                    sqlx::query(pq("INSERT INTO media_file
                             (id, path, size, languages, quality, media_info, quality_rank,
                              custom_format_score)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                    ))
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"))
                     .bind(&mf)
                     .bind(&file.path)
                     .bind(i64::try_from(file.size).unwrap_or(i64::MAX))
@@ -977,16 +971,14 @@ impl MusicRepo {
                 } else {
                     media_file_id
                 };
-                sqlx::query(&pq(
-                    "INSERT INTO track_file
+                sqlx::query(pq("INSERT INTO track_file
                         (id, media_file_id, track_content_id, album_content_id,
                          artist_content_id, added_at)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6)
                      ON CONFLICT(media_file_id) DO UPDATE SET
                         track_content_id = excluded.track_content_id,
                         album_content_id = excluded.album_content_id,
-                        artist_content_id = excluded.artist_content_id",
-                ))
+                        artist_content_id = excluded.artist_content_id"))
                 .bind(id)
                 .bind(&media_file_id)
                 .bind(track.to_string())
@@ -996,7 +988,7 @@ impl MusicRepo {
                 .execute(&mut *conn)
                 .await?;
                 for owner in [track.to_string(), album] {
-                    sqlx::query(&pq(
+                    sqlx::query(pq(
                         "INSERT INTO content_file (content_id, media_file_id) VALUES (?1, ?2)
                          ON CONFLICT DO NOTHING",
                     ))
@@ -1021,11 +1013,9 @@ impl MusicRepo {
         track: ContentId,
         keep_path: &str,
     ) -> Result<Vec<(i64, String)>> {
-        let rows = sqlx::query(&pq(
-            "SELECT tf.id AS id, mf.path AS path FROM track_file tf
+        let rows = sqlx::query(pq("SELECT tf.id AS id, mf.path AS path FROM track_file tf
              JOIN media_file mf ON mf.id = tf.media_file_id
-             WHERE tf.track_content_id = ?1 AND mf.path <> ?2",
-        ))
+             WHERE tf.track_content_id = ?1 AND mf.path <> ?2"))
         .bind(track.to_string())
         .bind(keep_path)
         .fetch_all(&self.pool)
@@ -1040,8 +1030,11 @@ impl MusicRepo {
     /// # Errors
     /// Returns a [`DbError`] on query failure.
     pub async fn track_files_for_album(&self, album: ContentId) -> Result<Vec<TrackFile>> {
-        self.track_files_where("tf.album_content_id = ?1", TrackFileKey::Text(album.to_string()))
-            .await
+        self.track_files_where(
+            "tf.album_content_id = ?1",
+            TrackFileKey::Text(album.to_string()),
+        )
+        .await
     }
 
     /// An artist's track files.
@@ -1068,14 +1061,18 @@ impl MusicRepo {
             .next())
     }
 
-    async fn track_files_where(&self, predicate: &str, key: TrackFileKey) -> Result<Vec<TrackFile>> {
+    async fn track_files_where(
+        &self,
+        predicate: &str,
+        key: TrackFileKey,
+    ) -> Result<Vec<TrackFile>> {
         let sql = format!(
             "SELECT {TRACK_FILE_COLS} FROM track_file tf
              JOIN media_file mf ON mf.id = tf.media_file_id
              WHERE {predicate} ORDER BY tf.id ASC"
         );
         let sql = pq(&sql);
-        let query = sqlx::query(&sql);
+        let query = sqlx::query(sql);
         let query = match key {
             TrackFileKey::Seq(n) => query.bind(n),
             TrackFileKey::Text(s) => query.bind(s),
@@ -1092,10 +1089,8 @@ impl MusicRepo {
     pub async fn delete_track_file(&self, id: i64) -> Result<Option<String>> {
         self.write(move |conn| {
             Box::pin(async move {
-                let row = sqlx::query(&pq(
-                    "SELECT mf.id AS mf_id, mf.path FROM track_file tf
-                     JOIN media_file mf ON mf.id = tf.media_file_id WHERE tf.id = ?1",
-                ))
+                let row = sqlx::query(pq("SELECT mf.id AS mf_id, mf.path FROM track_file tf
+                     JOIN media_file mf ON mf.id = tf.media_file_id WHERE tf.id = ?1"))
                 .bind(id)
                 .fetch_optional(&mut *conn)
                 .await?;
@@ -1104,7 +1099,7 @@ impl MusicRepo {
                 };
                 let mf_id: String = row.try_get("mf_id")?;
                 let path: String = row.try_get("path")?;
-                sqlx::query(&pq("DELETE FROM media_file WHERE id = ?1"))
+                sqlx::query(pq("DELETE FROM media_file WHERE id = ?1"))
                     .bind(mf_id)
                     .execute(&mut *conn)
                     .await?;
@@ -1122,7 +1117,7 @@ impl MusicRepo {
     /// Returns a [`DbError`] on query failure.
     pub async fn artist_stats(&self) -> Result<HashMap<ContentId, MusicStats>> {
         let mut out: HashMap<ContentId, MusicStats> = HashMap::new();
-        for row in sqlx::query(&pq(
+        for row in sqlx::query(pq(
             "SELECT artist_content_id AS k, count(*) AS n FROM album_meta GROUP BY artist_content_id",
         ))
         .fetch_all(&self.pool)
@@ -1130,17 +1125,15 @@ impl MusicRepo {
         {
             out.entry(key_of(&row)?).or_default().album_count = row.try_get("n")?;
         }
-        for row in sqlx::query(&pq(
-            "SELECT al.artist_content_id AS k, count(*) AS n
+        for row in sqlx::query(pq("SELECT al.artist_content_id AS k, count(*) AS n
              FROM track_meta t JOIN album_meta al ON al.content_id = t.album_content_id
-             GROUP BY al.artist_content_id",
-        ))
+             GROUP BY al.artist_content_id"))
         .fetch_all(&self.pool)
         .await?
         {
             out.entry(key_of(&row)?).or_default().track_count = row.try_get("n")?;
         }
-        for row in sqlx::query(&pq(
+        for row in sqlx::query(pq(
             "SELECT tf.artist_content_id AS k, count(*) AS n, COALESCE(sum(mf.size), 0) AS bytes
              FROM track_file tf JOIN media_file mf ON mf.id = tf.media_file_id
              GROUP BY tf.artist_content_id",
@@ -1160,10 +1153,16 @@ impl MusicRepo {
     ///
     /// # Errors
     /// Returns a [`DbError`] on query failure.
-    pub async fn artist_stats_for(&self, artists: &[ContentId]) -> Result<HashMap<ContentId, MusicStats>> {
+    pub async fn artist_stats_for(
+        &self,
+        artists: &[ContentId],
+    ) -> Result<HashMap<ContentId, MusicStats>> {
         let mut out: HashMap<ContentId, MusicStats> = HashMap::new();
         for chunk in artists.chunks(400) {
-            let marks = (1..=chunk.len()).map(|i| format!("?{i}")).collect::<Vec<_>>().join(",");
+            let marks = (1..=chunk.len())
+                .map(|i| format!("?{i}"))
+                .collect::<Vec<_>>()
+                .join(",");
             let queries = [
                 format!("SELECT artist_content_id AS k, count(*) AS n FROM album_meta WHERE artist_content_id IN ({marks}) GROUP BY artist_content_id"),
                 format!("SELECT al.artist_content_id AS k, count(*) AS n FROM track_meta t JOIN album_meta al ON al.content_id = t.album_content_id WHERE al.artist_content_id IN ({marks}) GROUP BY al.artist_content_id"),
@@ -1171,7 +1170,7 @@ impl MusicRepo {
             ];
             for (i, sql) in queries.iter().enumerate() {
                 let sql = pq(sql);
-                let mut q = sqlx::query(&sql);
+                let mut q = sqlx::query(sql);
                 for id in chunk {
                     q = q.bind(id.to_string());
                 }
@@ -1219,7 +1218,7 @@ impl MusicRepo {
         };
         let bind = artist.map(|a| a.to_string());
         let track_sql = pq(track_sql);
-        let mut q = sqlx::query(&track_sql);
+        let mut q = sqlx::query(track_sql);
         if let Some(b) = &bind {
             q = q.bind(b);
         }
@@ -1229,7 +1228,7 @@ impl MusicRepo {
             entry.track_count = row.try_get("n")?;
         }
         let file_sql = pq(file_sql);
-        let mut q = sqlx::query(&file_sql);
+        let mut q = sqlx::query(file_sql);
         if let Some(b) = &bind {
             q = q.bind(b);
         }
@@ -1252,7 +1251,7 @@ impl MusicRepo {
              WHERE al.tracks_fetched_at IS NULL
              ORDER BY c.monitored DESC, al.id ASC LIMIT ?1"
         );
-        let rows = sqlx::query(&pq(&sql))
+        let rows = sqlx::query(pq(&sql))
             .bind(i64::try_from(limit).unwrap_or(i64::MAX))
             .fetch_all(&self.pool)
             .await?;
@@ -1281,7 +1280,7 @@ impl MusicRepo {
         &self,
         today: &str,
     ) -> Result<HashMap<ContentId, (Option<ContentId>, Option<ContentId>)>> {
-        let rows = sqlx::query(&pq(
+        let rows = sqlx::query(pq(
             "SELECT artist_content_id AS k, content_id, release_date FROM album_meta
              WHERE release_date IS NOT NULL AND release_date <> ''
              ORDER BY artist_content_id, release_date ASC, id ASC",
@@ -1313,7 +1312,7 @@ impl MusicRepo {
     pub async fn profile_seq(&self, profile: QualityProfileId) -> Result<i64> {
         self.write(move |conn| {
             Box::pin(async move {
-                let found = sqlx::query(&pq(
+                let found = sqlx::query(pq(
                     "SELECT seq FROM quality_profile_seq WHERE profile_id = ?1",
                 ))
                 .bind(profile.to_string())
@@ -1323,7 +1322,7 @@ impl MusicRepo {
                     return Ok(row.try_get::<i64, _>("seq")?);
                 }
                 let next = next_seq(conn, "quality_profile", None).await?;
-                sqlx::query(&pq(
+                sqlx::query(pq(
                     "INSERT INTO quality_profile_seq (profile_id, seq) VALUES (?1, ?2)",
                 ))
                 .bind(profile.to_string())
@@ -1346,7 +1345,7 @@ impl MusicRepo {
         self.write(move |conn| {
             Box::pin(async move {
                 next_seq(conn, "quality_profile", Some(seq)).await?;
-                sqlx::query(&pq(
+                sqlx::query(pq(
                     "INSERT INTO quality_profile_seq (profile_id, seq) VALUES (?1, ?2)",
                 ))
                 .bind(profile.to_string())
@@ -1364,7 +1363,7 @@ impl MusicRepo {
     /// # Errors
     /// Returns a [`DbError`] on query failure.
     pub async fn profile_by_seq(&self, seq: i64) -> Result<Option<QualityProfileId>> {
-        let row = sqlx::query(&pq(
+        let row = sqlx::query(pq(
             "SELECT profile_id FROM quality_profile_seq WHERE seq = ?1",
         ))
         .bind(seq)
@@ -1382,7 +1381,7 @@ impl MusicRepo {
     /// # Errors
     /// Returns a [`DbError`] on query failure.
     pub async fn profile_seqs(&self) -> Result<HashMap<QualityProfileId, i64>> {
-        let rows = sqlx::query(&pq("SELECT profile_id, seq FROM quality_profile_seq"))
+        let rows = sqlx::query(pq("SELECT profile_id, seq FROM quality_profile_seq"))
             .fetch_all(&self.pool)
             .await?;
         rows.into_iter()
@@ -1415,11 +1414,9 @@ impl MusicRepo {
         offset: u64,
         limit: u64,
     ) -> Result<(u64, Vec<cellarr_core::HistoryRecord>)> {
-        let mut clauses = vec![
-            "h.content_id IN (SELECT content_id FROM album_meta)".to_string(),
-        ];
+        let mut clauses = vec!["h.content_id IN (SELECT content_id FROM album_meta)".to_string()];
         let mut binds: Vec<String> = Vec::new();
-        let mut next = |value: String, binds: &mut Vec<String>| {
+        let next = |value: String, binds: &mut Vec<String>| {
             binds.push(value);
             binds.len()
         };
@@ -1449,7 +1446,7 @@ impl MusicRepo {
 
         let count_sql = format!("SELECT count(*) AS n FROM history h WHERE {predicate}");
         let count_sql = pq(&count_sql);
-        let mut q = sqlx::query(&count_sql);
+        let mut q = sqlx::query(count_sql);
         for b in &binds {
             q = q.bind(b);
         }
@@ -1462,7 +1459,7 @@ impl MusicRepo {
             n_limit + 1
         );
         let page_sql = pq(&page_sql);
-        let mut q = sqlx::query(&page_sql);
+        let mut q = sqlx::query(page_sql);
         for b in &binds {
             q = q.bind(b);
         }
@@ -1497,8 +1494,10 @@ impl MusicRepo {
     ///
     /// # Errors
     /// Returns a [`DbError`] on query failure.
-    pub async fn album_min_quality(&self) -> Result<Vec<(ContentId, u32, Option<QualityProfileId>)>> {
-        let rows = sqlx::query(&pq(
+    pub async fn album_min_quality(
+        &self,
+    ) -> Result<Vec<(ContentId, u32, Option<QualityProfileId>)>> {
+        let rows = sqlx::query(pq(
             "SELECT tf.album_content_id AS album, min(mf.quality_rank) AS rank,
                     ar.quality_profile_id AS profile
              FROM track_file tf
@@ -1540,7 +1539,7 @@ impl MusicRepo {
                  WHERE al.content_id IN ({placeholders}) ORDER BY al.id ASC"
             );
             let sql = pq(&sql);
-            let mut q = sqlx::query(&sql);
+            let mut q = sqlx::query(sql);
             for id in chunk {
                 q = q.bind(id.to_string());
             }
@@ -1555,16 +1554,22 @@ impl MusicRepo {
     ///
     /// # Errors
     /// Returns a [`DbError`] on query failure.
-    pub async fn album_stats_for(&self, albums: &[ContentId]) -> Result<HashMap<ContentId, MusicStats>> {
+    pub async fn album_stats_for(
+        &self,
+        albums: &[ContentId],
+    ) -> Result<HashMap<ContentId, MusicStats>> {
         let mut out: HashMap<ContentId, MusicStats> = HashMap::new();
         for chunk in albums.chunks(400) {
-            let marks = (1..=chunk.len()).map(|i| format!("?{i}")).collect::<Vec<_>>().join(",");
+            let marks = (1..=chunk.len())
+                .map(|i| format!("?{i}"))
+                .collect::<Vec<_>>()
+                .join(",");
             let tracks = format!(
                 "SELECT album_content_id AS k, count(*) AS n FROM track_meta
                  WHERE album_content_id IN ({marks}) GROUP BY album_content_id"
             );
             let tracks = pq(&tracks);
-            let mut q = sqlx::query(&tracks);
+            let mut q = sqlx::query(tracks);
             for id in chunk {
                 q = q.bind(id.to_string());
             }
@@ -1579,7 +1584,7 @@ impl MusicRepo {
                  WHERE tf.album_content_id IN ({marks}) GROUP BY tf.album_content_id"
             );
             let files = pq(&files);
-            let mut q = sqlx::query(&files);
+            let mut q = sqlx::query(files);
             for id in chunk {
                 q = q.bind(id.to_string());
             }
@@ -1601,7 +1606,7 @@ impl MusicRepo {
     /// # Errors
     /// Returns a [`DbError`] on query/decode failure.
     pub async fn metadata_profiles(&self) -> Result<Vec<MetadataProfile>> {
-        let rows = sqlx::query(&pq("SELECT body FROM metadata_profile ORDER BY id ASC"))
+        let rows = sqlx::query(pq("SELECT body FROM metadata_profile ORDER BY id ASC"))
             .fetch_all(&self.pool)
             .await?;
         let mut profiles = rows
@@ -1634,20 +1639,22 @@ impl MusicRepo {
     ///
     /// # Errors
     /// Returns a [`DbError`] on write failure.
-    pub async fn upsert_metadata_profile(&self, profile: MetadataProfile) -> Result<MetadataProfile> {
+    pub async fn upsert_metadata_profile(
+        &self,
+        profile: MetadataProfile,
+    ) -> Result<MetadataProfile> {
         self.write(move |conn| {
             Box::pin(async move {
                 let mut profile = profile;
                 if profile.id <= 0 {
-                    let max: i64 = sqlx::query(&pq(
-                        "SELECT COALESCE(max(id), 1) AS m FROM metadata_profile",
-                    ))
-                    .fetch_one(&mut *conn)
-                    .await?
-                    .try_get("m")?;
+                    let max: i64 =
+                        sqlx::query(pq("SELECT COALESCE(max(id), 1) AS m FROM metadata_profile"))
+                            .fetch_one(&mut *conn)
+                            .await?
+                            .try_get("m")?;
                     profile.id = max + 1;
                 }
-                sqlx::query(&pq(
+                sqlx::query(pq(
                     "INSERT INTO metadata_profile (id, name, body) VALUES (?1, ?2, ?3)
                      ON CONFLICT(id) DO UPDATE SET name = excluded.name, body = excluded.body",
                 ))
@@ -1669,7 +1676,7 @@ impl MusicRepo {
     pub async fn delete_metadata_profile(&self, id: i64) -> Result<bool> {
         self.write(move |conn| {
             Box::pin(async move {
-                let result = sqlx::query(&pq("DELETE FROM metadata_profile WHERE id = ?1"))
+                let result = sqlx::query(pq("DELETE FROM metadata_profile WHERE id = ?1"))
                     .bind(id)
                     .execute(&mut *conn)
                     .await?;
@@ -1701,7 +1708,7 @@ async fn store_tracks(
     tracks: Vec<NewTrack>,
     now: &str,
 ) -> Result<Vec<Track>> {
-    let existing = sqlx::query(&pq(&format!(
+    let existing = sqlx::query(pq(&format!(
         "SELECT {TRACK_COLS} FROM track_meta t WHERE t.album_content_id = ?1"
     )))
     .bind(album.to_string())
@@ -1710,13 +1717,15 @@ async fn store_tracks(
     .into_iter()
     .map(row_to_track)
     .collect::<Result<Vec<_>>>()?;
-    let mut by_slot: HashMap<(u32, u32), Track> =
-        existing.into_iter().map(|t| ((t.disc, t.position), t)).collect();
+    let mut by_slot: HashMap<(u32, u32), Track> = existing
+        .into_iter()
+        .map(|t| ((t.disc, t.position), t))
+        .collect();
 
     let mut out = Vec::with_capacity(tracks.len());
     for new in tracks {
         if let Some(mut kept) = by_slot.remove(&(new.disc, new.position)) {
-            sqlx::query(&pq(
+            sqlx::query(pq(
                 "UPDATE track_meta SET mbid = ?2, title = ?3, duration_ms = ?4
                  WHERE content_id = ?1",
             ))
@@ -1738,12 +1747,19 @@ async fn store_tracks(
             "{{\"type\":\"track\",\"disc\":{},\"track\":{}}}",
             new.disc, new.position
         );
-        insert_node(conn, content_id, library, Some(album), "track", &coords, true).await?;
-        sqlx::query(&pq(
-            "INSERT INTO track_meta
+        insert_node(
+            conn,
+            content_id,
+            library,
+            Some(album),
+            "track",
+            &coords,
+            true,
+        )
+        .await?;
+        sqlx::query(pq("INSERT INTO track_meta
                 (id, content_id, album_content_id, mbid, title, disc, position, duration_ms)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        ))
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"))
         .bind(id)
         .bind(content_id.to_string())
         .bind(album.to_string())
@@ -1767,7 +1783,7 @@ async fn store_tracks(
     }
 
     for stale in by_slot.into_values() {
-        let has_file = sqlx::query(&pq(
+        let has_file = sqlx::query(pq(
             "SELECT 1 AS x FROM track_file WHERE track_content_id = ?1 LIMIT 1",
         ))
         .bind(stale.content_id.to_string())
@@ -1778,17 +1794,15 @@ async fn store_tracks(
             out.push(stale);
             continue;
         }
-        sqlx::query(&pq("DELETE FROM content WHERE id = ?1"))
+        sqlx::query(pq("DELETE FROM content WHERE id = ?1"))
             .bind(stale.content_id.to_string())
             .execute(&mut *conn)
             .await?;
     }
 
-    sqlx::query(&pq(
-        "UPDATE album_meta SET tracks_fetched_at = ?2,
+    sqlx::query(pq("UPDATE album_meta SET tracks_fetched_at = ?2,
             release_mbid = COALESCE(?3, release_mbid)
-         WHERE content_id = ?1",
-    ))
+         WHERE content_id = ?1"))
     .bind(album.to_string())
     .bind(now)
     .bind(&release_mbid)
@@ -1813,7 +1827,7 @@ fn seq_u32(id: i64) -> u32 {
 /// Take the next id of sequence `name`, or claim `preset` and raise the counter
 /// to cover it.
 async fn next_seq(conn: &mut DbConnection, name: &str, preset: Option<i64>) -> Result<i64> {
-    let current: i64 = sqlx::query(&pq("SELECT value FROM music_seq WHERE name = ?1"))
+    let current: i64 = sqlx::query(pq("SELECT value FROM music_seq WHERE name = ?1"))
         .bind(name)
         .fetch_optional(&mut *conn)
         .await?
@@ -1824,10 +1838,8 @@ async fn next_seq(conn: &mut DbConnection, name: &str, preset: Option<i64>) -> R
         Some(id) => (id, current.max(id)),
         None => (current + 1, current + 1),
     };
-    sqlx::query(&pq(
-        "INSERT INTO music_seq (name, value) VALUES (?1, ?2)
-         ON CONFLICT(name) DO UPDATE SET value = excluded.value",
-    ))
+    sqlx::query(pq("INSERT INTO music_seq (name, value) VALUES (?1, ?2)
+         ON CONFLICT(name) DO UPDATE SET value = excluded.value"))
     .bind(name)
     .bind(value)
     .execute(&mut *conn)
@@ -1844,7 +1856,7 @@ async fn insert_node(
     coords: &str,
     monitored: bool,
 ) -> Result<()> {
-    sqlx::query(&pq(
+    sqlx::query(pq(
         "INSERT INTO content (id, library_id, media_type, parent_id, kind, coords, monitored)
          VALUES (?1, ?2, 'music', ?3, ?4, ?5, ?6)",
     ))
@@ -1864,7 +1876,7 @@ async fn insert_node(
 /// unindexed column, so every delete scans it, and a library of tens of
 /// thousands of albums would otherwise be quadratic to build.
 async fn index_new_title(conn: &mut DbConnection, id: ContentId, title: &str) -> Result<()> {
-    sqlx::query(&pq(
+    sqlx::query(pq(
         "INSERT INTO content_fts (content_id, title) VALUES (?1, ?2)",
     ))
     .bind(id.to_string())
@@ -1876,11 +1888,11 @@ async fn index_new_title(conn: &mut DbConnection, id: ContentId, title: &str) ->
 
 /// Re-index the title of an existing node (replacing its row).
 async fn index_title(conn: &mut DbConnection, id: ContentId, title: &str) -> Result<()> {
-    sqlx::query(&pq("DELETE FROM content_fts WHERE content_id = ?1"))
+    sqlx::query(pq("DELETE FROM content_fts WHERE content_id = ?1"))
         .bind(id.to_string())
         .execute(&mut *conn)
         .await?;
-    sqlx::query(&pq(
+    sqlx::query(pq(
         "INSERT INTO content_fts (content_id, title) VALUES (?1, ?2)",
     ))
     .bind(id.to_string())
@@ -1901,7 +1913,7 @@ async fn write_content_meta(
     let year: Option<i64> = release_date
         .and_then(|d| d.get(..4))
         .and_then(|y| y.parse().ok());
-    sqlx::query(&pq(
+    sqlx::query(pq(
         "INSERT INTO content_meta (content_id, title, year, air_date) VALUES (?1, ?2, ?3, ?4)
          ON CONFLICT(content_id) DO UPDATE SET
             title = excluded.title, year = excluded.year, air_date = excluded.air_date",
@@ -1915,13 +1927,17 @@ async fn write_content_meta(
     Ok(())
 }
 
-async fn write_aliases(conn: &mut DbConnection, artist: ContentId, aliases: &[String]) -> Result<()> {
+async fn write_aliases(
+    conn: &mut DbConnection,
+    artist: ContentId,
+    aliases: &[String],
+) -> Result<()> {
     for alias in aliases {
         let norm = normalize_name(alias);
         if norm.is_empty() {
             continue;
         }
-        sqlx::query(&pq(
+        sqlx::query(pq(
             "INSERT INTO artist_alias (artist_content_id, alias_norm) VALUES (?1, ?2)
              ON CONFLICT DO NOTHING",
         ))
@@ -2020,7 +2036,10 @@ fn row_to_track_file(row: DbRow) -> Result<TrackFile> {
             size: u64::try_from(row.try_get::<i64, _>("size")?).unwrap_or(0),
             quality,
             languages: serde_json::from_str(&languages)?,
-            media_info: media_info.as_deref().map(serde_json::from_str).transpose()?,
+            media_info: media_info
+                .as_deref()
+                .map(serde_json::from_str)
+                .transpose()?,
             custom_format_score: i32::try_from(score).ok(),
             release_type: None,
         },

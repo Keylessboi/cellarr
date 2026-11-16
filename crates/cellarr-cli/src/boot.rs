@@ -464,8 +464,7 @@ impl Daemon {
                 let stop = async move {
                     let _ = lidarr_stop_rx.await;
                 };
-                if let Err(e) =
-                    cellarr_api::serve_lidarr_with_shutdown(l, lidarr_state, stop).await
+                if let Err(e) = cellarr_api::serve_lidarr_with_shutdown(l, lidarr_state, stop).await
                 {
                     warn!(error = %e, "Lidarr-compatible listener failed");
                 }

@@ -44,9 +44,8 @@ use cellarr_core::{
     history::{DecisionLogRecord, HistoryEvent, HistoryRecord},
     pipeline::{Stage, Transition, TransitionKind},
     ContentMatch, ContentRef, CustomFormat, Decision, DownloadState, Grab, GrabId, GrabRequest,
-    Protocol,
-    GrabStatus, IndexerId, NamingTokens, ParsedRelease, PipelineRunId, PlannedMove, QualityProfile,
-    QualityRanking, Release, Score,
+    GrabStatus, IndexerId, NamingTokens, ParsedRelease, PipelineRunId, PlannedMove, Protocol,
+    QualityProfile, QualityRanking, Release, Score,
 };
 use cellarr_core::{
     repo::{DecisionLogRepository, GrabRepository, HistoryRepository},
@@ -2200,14 +2199,8 @@ where
                 } else {
                     NotificationEvent::Import
                 };
-                self.fire_provider_files(
-                    import_event,
-                    matched_ref,
-                    release,
-                    &grab_quality,
-                    &paths,
-                )
-                .await;
+                self.fire_provider_files(import_event, matched_ref, release, &grab_quality, &paths)
+                    .await;
                 *stage = self.advance(run_id, *stage, None).await?; // -> Rename
                 self.fire_files_webhook(WebhookEventType::Rename, matched_ref, &paths)
                     .await;
@@ -2465,16 +2458,21 @@ where
                 parsed.coordinates.iter().any(|c| match (c, &node.coords) {
                     (
                         Co::Episode {
-                            season: fs, episode: fe, ..
+                            season: fs,
+                            episode: fe,
+                            ..
                         },
                         Co::Episode {
-                            season: ns, episode: ne, ..
+                            season: ns,
+                            episode: ne,
+                            ..
                         },
                     ) => fs == ns && fe == ne,
                     (
                         Co::Absolute { number },
                         Co::Episode {
-                            absolute: Some(abs), ..
+                            absolute: Some(abs),
+                            ..
                         },
                     ) => number == abs,
                     _ => false,
@@ -2700,12 +2698,7 @@ where
             .moves
             .into_iter()
             .zip(placements.iter())
-            .map(|(m, (_, target))| {
-                (
-                    m.destination_path.to_string_lossy().into_owned(),
-                    target.id,
-                )
-            })
+            .map(|(m, (_, target))| (m.destination_path.to_string_lossy().into_owned(), target.id))
             .collect();
 
         // A completed replacement supersedes each old file: cellarr-fs has already
@@ -2754,8 +2747,7 @@ where
         // media is already durable; a sidecar failure is logged and never fails
         // the import (so the crash-safe stage->verify->commit guarantee stands).
         if self.config.write_nfo {
-            let nfo_paths: Vec<String> =
-                destinations.iter().map(|(p, _)| p.clone()).collect();
+            let nfo_paths: Vec<String> = destinations.iter().map(|(p, _)| p.clone()).collect();
             self.write_nfo_sidecars(matched_ref, &nfo_paths).await;
         }
 
@@ -4367,7 +4359,10 @@ fn coords_agree(
         // `absoluteNumber`). Without this the coordinate guard would reject the very
         // adoption the matcher just chose.
         Co::Absolute { number } => title_coords.iter().any(|tc| match tc {
-            Co::Episode { absolute: Some(abs), .. } => abs == number,
+            Co::Episode {
+                absolute: Some(abs),
+                ..
+            } => abs == number,
             // A MOVIE has no absolute episode numbering, so a bare number parsed out
             // of a film's own title is a parser artifact, never evidence that the
             // file is the wrong content. Films are full of them — "Evangelion:
@@ -4422,10 +4417,8 @@ mod tests {
             !is_unknown_quality(&graded),
             "a title that states its quality is graded from the title"
         );
-        let ungraded = cellarr_core::resolve_quality(
-            &cellarr_parse::parse_title("Movie (2019)"),
-            &ranking,
-        );
+        let ungraded =
+            cellarr_core::resolve_quality(&cellarr_parse::parse_title("Movie (2019)"), &ranking);
         assert!(
             is_unknown_quality(&ungraded),
             "a library-scheme name states no quality, so the file must be asked"
@@ -4443,7 +4436,9 @@ mod tests {
         // readable. (A missing arm would fail to compile, but this also pins the
         // strings against accidental blanking.)
         let cases = [
-            reason_text(&R::QualityNotAllowed { quality: "Bluray-720p".to_string() }),
+            reason_text(&R::QualityNotAllowed {
+                quality: "Bluray-720p".to_string(),
+            }),
             reason_text(&R::BelowMinimumCustomFormatScore),
             reason_text(&R::Blocklisted),
             reason_text(&R::SizeOutOfRange),
@@ -4880,7 +4875,11 @@ mod source_collection_tests {
         std::os::unix::fs::symlink(&root, root.join("Season 1/loop")).unwrap();
 
         let found = collect_sources(&root).unwrap();
-        assert_eq!(found.len(), 1, "the loop must not multiply the result: {found:?}");
+        assert_eq!(
+            found.len(),
+            1,
+            "the loop must not multiply the result: {found:?}"
+        );
     }
 }
 

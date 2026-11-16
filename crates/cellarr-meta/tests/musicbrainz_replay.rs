@@ -28,7 +28,10 @@ async fn an_artist_search_returns_the_best_match_first() {
     assert_eq!(hits[0].artist_type.as_deref(), Some("Group"));
     assert_eq!(hits[0].score, 100);
     assert!(hits[1].score < 100);
-    assert_eq!(hits[1].disambiguation.as_deref(), Some("Capsmusic LTD. artist"));
+    assert_eq!(
+        hits[1].disambiguation.as_deref(),
+        Some("Capsmusic LTD. artist")
+    );
 }
 
 #[tokio::test]
@@ -45,7 +48,10 @@ async fn an_artist_lookup_carries_aliases_and_genres() {
         !artist.aliases.contains(&"Radiohead".to_string()),
         "the display name is not its own alias"
     );
-    assert_eq!(artist.sort_name, None, "a sort name equal to the name is not stored");
+    assert_eq!(
+        artist.sort_name, None,
+        "a sort name equal to the name is not stored"
+    );
     assert!(!artist.genres.is_empty());
 }
 
@@ -70,8 +76,14 @@ async fn release_groups_carry_their_types_so_a_profile_can_filter_them() {
         .collect();
     assert!(kept.contains(&"Kid A"));
     assert!(kept.contains(&"In Rainbows"));
-    assert!(!kept.contains(&"Man of War"), "a single is not a studio album");
-    assert!(!kept.contains(&"5 Album Set"), "a compilation is not a studio album");
+    assert!(
+        !kept.contains(&"Man of War"),
+        "a single is not a studio album"
+    );
+    assert!(
+        !kept.contains(&"5 Album Set"),
+        "a compilation is not a studio album"
+    );
     assert!(!kept.contains(&"Live at The Astoria, London, 27/05/1994"));
 }
 
@@ -127,5 +139,8 @@ async fn a_refusal_that_is_not_a_request_to_wait_is_reported_at_once() {
         br#"{"error":"Not Found"}"#.to_vec(),
     ));
     let err = mb.artist("nope").await.unwrap_err();
-    assert!(matches!(err, cellarr_meta::MetaError::Http { status: 404, .. }));
+    assert!(matches!(
+        err,
+        cellarr_meta::MetaError::Http { status: 404, .. }
+    ));
 }

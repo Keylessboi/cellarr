@@ -91,10 +91,7 @@ impl Database {
     /// Returns a [`crate::DbError`] on connect or migration failure.
     #[cfg(feature = "postgres")]
     pub async fn connect(url: &str) -> Result<Self> {
-        let pool = PgPoolOptions::new()
-            .max_connections(8)
-            .connect(url)
-            .await?;
+        let pool = PgPoolOptions::new().max_connections(8).connect(url).await?;
         sqlx::migrate!("./migrations/postgres").run(&pool).await?;
         let (writer, shutdown) = WriterHandle::spawn(pool.clone(), DEFAULT_WRITER_BOUND);
         Ok(Self {
@@ -125,8 +122,8 @@ impl Database {
     pub async fn connect_test_schema(url: &str, schema: &str) -> Result<Self> {
         use std::str::FromStr;
 
-        use sqlx::Executor;
         use sqlx::postgres::PgConnectOptions;
+        use sqlx::Executor;
 
         // A schema name is an identifier, not a bind parameter, so it is
         // interpolated into DDL below. The test-support helper only ever passes a
@@ -143,10 +140,7 @@ impl Database {
         // Create the schema once on a throwaway connection (still on the default
         // search_path), dropping anything stale so a reused name starts clean.
         {
-            let bootstrap = PgPoolOptions::new()
-                .max_connections(1)
-                .connect(url)
-                .await?;
+            let bootstrap = PgPoolOptions::new().max_connections(1).connect(url).await?;
             bootstrap
                 .execute(format!("DROP SCHEMA IF EXISTS {schema} CASCADE").as_str())
                 .await?;

@@ -117,7 +117,8 @@ async fn detect_kind(pool: &SqlitePool, path: &str) -> Result<SourceKind> {
     // Recognize Lidarr's marker so the error is informative rather than opaque.
     Err(MigrationError::Unrecognized {
         path: path.to_string(),
-        detail: "no Movies, Series/Episodes or Artists/AlbumReleases marker tables found".to_string(),
+        detail: "no Movies, Series/Episodes or Artists/AlbumReleases marker tables found"
+            .to_string(),
     })
 }
 

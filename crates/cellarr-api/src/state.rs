@@ -208,10 +208,7 @@ impl AppState {
     /// can opt a mock in.
     /// Attach the music catalogue the Lidarr face adds artists through.
     #[must_use]
-    pub fn with_music(
-        mut self,
-        music: Arc<dyn cellarr_jobs::music_sync::MusicCatalogue>,
-    ) -> Self {
+    pub fn with_music(mut self, music: Arc<dyn cellarr_jobs::music_sync::MusicCatalogue>) -> Self {
         self.music = Some(music);
         self
     }

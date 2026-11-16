@@ -261,12 +261,7 @@ async fn run_backfill_quality(config: &Config, dry_run: bool, limit: usize) -> R
 
     let db = Database::connect(&config.database_target())
         .await
-        .with_context(|| {
-            format!(
-                "opening database at {}",
-                config.database_target_redacted()
-            )
-        })?;
+        .with_context(|| format!("opening database at {}", config.database_target_redacted()))?;
     let ranking = cellarr_core::QualityRanking::default();
     let ungraded = db
         .media_files()
@@ -310,14 +305,12 @@ async fn run_migrate(config: &Config, sources: &[PathBuf]) -> Result<()> {
     std::fs::create_dir_all(&config.data_dir)
         .with_context(|| format!("creating data dir {}", config.data_dir.display()))?;
     let db_target = config.database_target();
-    let db = Database::connect(&db_target)
-        .await
-        .with_context(|| {
-            format!(
-                "opening destination database at {}",
-                config.database_target_redacted()
-            )
-        })?;
+    let db = Database::connect(&db_target).await.with_context(|| {
+        format!(
+            "opening destination database at {}",
+            config.database_target_redacted()
+        )
+    })?;
 
     let source_strs: Vec<&str> = sources
         .iter()
@@ -425,14 +418,9 @@ async fn run_managed_config(config: &Config, cmd: ManagedConfigCommand) -> Resul
         std::fs::create_dir_all(&config.data_dir)
             .with_context(|| format!("creating data dir {}", config.data_dir.display()))?;
         let db_target = config.database_target();
-        let db = Database::connect(&db_target)
-            .await
-            .with_context(|| {
-                format!(
-                    "opening database at {}",
-                    config.database_target_redacted()
-                )
-            })?;
+        let db = Database::connect(&db_target).await.with_context(|| {
+            format!("opening database at {}", config.database_target_redacted())
+        })?;
         anyhow::Ok(db)
     };
 

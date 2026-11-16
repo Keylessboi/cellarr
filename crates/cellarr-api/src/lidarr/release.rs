@@ -32,7 +32,11 @@ pub(crate) async fn search(
         .album(album_id)
         .await?
         .ok_or_else(|| ApiError::NotFound(format!("album {album_id} not found")))?;
-    let artist = state.db.music().artist_by_content(album.artist_content_id).await?;
+    let artist = state
+        .db
+        .music()
+        .artist_by_content(album.artist_content_id)
+        .await?;
 
     let Json(rows) = shim::release_search(
         State(fs.clone()),
@@ -52,7 +56,10 @@ pub(crate) async fn search(
         rows.into_iter()
             .map(|r| {
                 let rejected = r["rejected"].as_bool().unwrap_or(false);
-                let quality = r["quality"]["quality"]["name"].as_str().unwrap_or("Unknown").to_string();
+                let quality = r["quality"]["quality"]["name"]
+                    .as_str()
+                    .unwrap_or("Unknown")
+                    .to_string();
                 let rank = r["quality"]["quality"]["id"].as_u64().unwrap_or(0);
                 let torrent = r["protocol"] == "torrent";
                 json!({
@@ -131,7 +138,10 @@ pub(crate) async fn grab(
     .await?;
     if outcome["grabbed"] == false {
         return Err(ApiError::Domain(
-            outcome["message"].as_str().unwrap_or("the release could not be grabbed").to_string(),
+            outcome["message"]
+                .as_str()
+                .unwrap_or("the release could not be grabbed")
+                .to_string(),
         ));
     }
     Ok(Json(body))

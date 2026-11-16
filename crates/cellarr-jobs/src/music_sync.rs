@@ -8,13 +8,9 @@
 //! refreshing needs MusicBrainz.
 
 use async_trait::async_trait;
-use cellarr_core::{
-    Album, Artist, ContentId, LibraryId, MetadataProfile, QualityProfileId, Track,
-};
+use cellarr_core::{Album, Artist, ContentId, LibraryId, MetadataProfile, QualityProfileId, Track};
 use cellarr_db::{Database, DbError, NewAlbum, NewArtist, NewTrack};
-use cellarr_meta::{
-    pick_release, Fetcher, MbArtist, MbReleaseGroup, MetaError, MusicBrainzSource,
-};
+use cellarr_meta::{pick_release, Fetcher, MbArtist, MbReleaseGroup, MetaError, MusicBrainzSource};
 
 /// Which of an artist's albums start out monitored when the artist is added.
 ///
@@ -74,9 +70,13 @@ pub fn monitored_for(mode: MonitorMode, dates: &[Option<String>], today: &str) -
         MonitorMode::FirstAlbum | MonitorMode::LatestAlbum => {
             let keys: Vec<String> = dates.iter().map(key).collect();
             let pick = if mode == MonitorMode::FirstAlbum {
-                keys.iter().enumerate().min_by(|a, b| a.1.cmp(b.1).then(a.0.cmp(&b.0)))
+                keys.iter()
+                    .enumerate()
+                    .min_by(|a, b| a.1.cmp(b.1).then(a.0.cmp(&b.0)))
             } else {
-                keys.iter().enumerate().max_by(|a, b| a.1.cmp(b.1).then(b.0.cmp(&a.0)))
+                keys.iter()
+                    .enumerate()
+                    .max_by(|a, b| a.1.cmp(b.1).then(b.0.cmp(&a.0)))
             }
             .map(|(i, _)| i);
             (0..dates.len()).map(|i| Some(i) == pick).collect()
@@ -266,7 +266,10 @@ impl<F: Fetcher + 'static> MusicCatalogue for MusicSync<F> {
                 },
             )
             .await?;
-        let dates: Vec<Option<String>> = groups.iter().map(|g| g.first_release_date.clone()).collect();
+        let dates: Vec<Option<String>> = groups
+            .iter()
+            .map(|g| g.first_release_date.clone())
+            .collect();
         let flags = monitored_for(req.monitor, &dates, &today());
         let albums: Vec<NewAlbum> = groups
             .iter()
@@ -277,7 +280,10 @@ impl<F: Fetcher + 'static> MusicCatalogue for MusicSync<F> {
             .music()
             .upsert_albums(req.library, artist.content_id, albums)
             .await?;
-        self.db.music().mark_artist_refreshed(artist.content_id).await?;
+        self.db
+            .music()
+            .mark_artist_refreshed(artist.content_id)
+            .await?;
         Ok(artist)
     }
 
@@ -299,7 +305,9 @@ impl<F: Fetcher + 'static> MusicCatalogue for MusicSync<F> {
         known.artist_type = mb.artist_type.clone();
         known.ended = mb.ended;
         known.genres = mb.genres.clone();
-        music.update_artist(&known, Some(mb.aliases.clone())).await?;
+        music
+            .update_artist(&known, Some(mb.aliases.clone()))
+            .await?;
 
         // A new album starts monitored only if the artist asks for that, and
         // never if the artist itself is unmonitored. Existing albums keep the

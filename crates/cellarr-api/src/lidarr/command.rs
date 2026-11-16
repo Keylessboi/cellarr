@@ -46,7 +46,10 @@ pub struct CommandLog {
 
 impl CommandLog {
     fn record(&self, name: &str, body: Value, jobs: Vec<String>) -> i64 {
-        let mut inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         inner.next += 1;
         let id = inner.next;
         inner.entries.push(Entry {
@@ -70,12 +73,24 @@ impl CommandLog {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .entries
             .iter()
-            .map(|e| (e.id, e.name.clone(), e.body.clone(), e.jobs.clone(), e.queued, e.cancelled))
+            .map(|e| {
+                (
+                    e.id,
+                    e.name.clone(),
+                    e.body.clone(),
+                    e.jobs.clone(),
+                    e.queued,
+                    e.cancelled,
+                )
+            })
             .collect()
     }
 
     fn cancel(&self, id: i64) {
-        let mut inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(e) = inner.entries.iter_mut().find(|e| e.id == id) {
             e.cancelled = true;
         }
@@ -105,8 +120,13 @@ pub(crate) async fn search_artist(state: &AppState, artist: &Artist) -> ApiResul
     for album in music.albums_for_artist(artist.content_id).await? {
         if album.monitored && !files.contains(&album.content_id) {
             jobs.push(
-                queue_job(state, JobKind::ManualSearch { content_id: album.content_id.to_string() })
-                    .await?,
+                queue_job(
+                    state,
+                    JobKind::ManualSearch {
+                        content_id: album.content_id.to_string(),
+                    },
+                )
+                .await?,
             );
         }
     }
@@ -135,8 +155,13 @@ async fn jobs_for(state: &AppState, name: &str, body: &Value) -> ApiResult<Optio
                     .await?
                     .ok_or_else(|| ApiError::NotFound(format!("album {id} not found")))?;
                 jobs.push(
-                    queue_job(state, JobKind::ManualSearch { content_id: album.content_id.to_string() })
-                        .await?,
+                    queue_job(
+                        state,
+                        JobKind::ManualSearch {
+                            content_id: album.content_id.to_string(),
+                        },
+                    )
+                    .await?,
                 );
             }
             Ok(Some(jobs))
@@ -149,9 +174,9 @@ async fn jobs_for(state: &AppState, name: &str, body: &Value) -> ApiResult<Optio
                 .ok_or_else(|| ApiError::NotFound(format!("artist {id} not found")))?;
             Ok(Some(search_artist(state, &artist).await?))
         }
-        "missingalbumsearch" | "cutoffunmetalbumsearch" => {
-            Ok(Some(vec![queue_job(state, JobKind::MissingItemSearch).await?]))
-        }
+        "missingalbumsearch" | "cutoffunmetalbumsearch" => Ok(Some(vec![
+            queue_job(state, JobKind::MissingItemSearch).await?,
+        ])),
         "refreshartist" => {
             let jobs = match artist_id {
                 Some(id) => {
@@ -159,14 +184,27 @@ async fn jobs_for(state: &AppState, name: &str, body: &Value) -> ApiResult<Optio
                         .artist(id)
                         .await?
                         .ok_or_else(|| ApiError::NotFound(format!("artist {id} not found")))?;
-                    vec![queue_job(state, JobKind::RefreshArtist { content_id: artist.content_id.to_string() }).await?]
+                    vec![
+                        queue_job(
+                            state,
+                            JobKind::RefreshArtist {
+                                content_id: artist.content_id.to_string(),
+                            },
+                        )
+                        .await?,
+                    ]
                 }
                 None => {
                     let mut jobs = Vec::new();
                     for a in music.artists().await? {
                         jobs.push(
-                            queue_job(state, JobKind::RefreshArtist { content_id: a.content_id.to_string() })
-                                .await?,
+                            queue_job(
+                                state,
+                                JobKind::RefreshArtist {
+                                    content_id: a.content_id.to_string(),
+                                },
+                            )
+                            .await?,
                         );
                     }
                     jobs
@@ -178,13 +216,12 @@ async fn jobs_for(state: &AppState, name: &str, body: &Value) -> ApiResult<Optio
             Ok(Some(vec![queue_job(state, JobKind::RescanLibrary).await?]))
         }
         "rsssync" => Ok(Some(vec![queue_job(state, JobKind::RssSync).await?])),
-        "processmonitoreddownloads" | "checkforfinisheddownload" => {
-            Ok(Some(vec![queue_job(state, JobKind::ReconcileDownloads).await?]))
-        }
+        "processmonitoreddownloads" | "checkforfinisheddownload" => Ok(Some(vec![
+            queue_job(state, JobKind::ReconcileDownloads).await?,
+        ])),
         // Recognized housekeeping that has nothing to do here.
-        "checkhealth" | "messaging" | "cleanupmediacovers" | "applicationupdate" | "housekeeping" => {
-            Ok(None)
-        }
+        "checkhealth" | "messaging" | "cleanupmediacovers" | "applicationupdate"
+        | "housekeeping" => Ok(None),
         _ => Err(ApiError::BadRequest(format!("unknown command: {name}"))),
     }
 }
@@ -196,7 +233,9 @@ async fn status_of(state: &AppState, jobs: &[String], cancelled: bool) -> &'stat
     if jobs.is_empty() {
         return "completed";
     }
-    let all = commands::list_jobs(&state.scheduler).await.unwrap_or_default();
+    let all = commands::list_jobs(&state.scheduler)
+        .await
+        .unwrap_or_default();
     let mut running = false;
     let mut queued = false;
     for id in jobs {
@@ -217,13 +256,7 @@ async fn status_of(state: &AppState, jobs: &[String], cancelled: bool) -> &'stat
     }
 }
 
-fn resource(
-    id: i64,
-    name: &str,
-    body: &Value,
-    queued: OffsetDateTime,
-    status: &str,
-) -> Value {
+fn resource(id: i64, name: &str, body: &Value, queued: OffsetDateTime, status: &str) -> Value {
     let when = queued
         .format(&time::format_description::well_known::Rfc3339)
         .unwrap_or_default();
@@ -275,9 +308,17 @@ pub(crate) async fn create(
         .ok_or_else(|| ApiError::BadRequest("a command needs a name".into()))?
         .to_string();
     let jobs = jobs_for(state, &name, &body).await?.unwrap_or_default();
-    let id = state.lidarr_commands.record(&name, body.clone(), jobs.clone());
+    let id = state
+        .lidarr_commands
+        .record(&name, body.clone(), jobs.clone());
     let status = status_of(state, &jobs, false).await;
-    Ok(Json(resource(id, &name, &body, OffsetDateTime::now_utc(), status)))
+    Ok(Json(resource(
+        id,
+        &name,
+        &body,
+        OffsetDateTime::now_utc(),
+        status,
+    )))
 }
 
 pub(crate) async fn list(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {

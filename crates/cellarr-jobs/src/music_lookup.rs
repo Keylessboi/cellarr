@@ -104,7 +104,11 @@ impl MusicLookup for DbMusicLookup {
         artist_norm: &str,
         album_norms: &[String],
     ) -> Result<Vec<AlbumCandidate>, DbError> {
-        let found = self.db.music().albums_named(artist_norm, album_norms).await?;
+        let found = self
+            .db
+            .music()
+            .albums_named(artist_norm, album_norms)
+            .await?;
         self.candidates(found).await
     }
 
@@ -121,7 +125,10 @@ mod tests {
     #[test]
     fn an_artist_keeps_the_folder_it_already_has() {
         assert_eq!(folder_name("/data/media/music/Radiohead", "x"), "Radiohead");
-        assert_eq!(folder_name("/data/media/music/Radiohead/", "x"), "Radiohead");
+        assert_eq!(
+            folder_name("/data/media/music/Radiohead/", "x"),
+            "Radiohead"
+        );
         assert_eq!(folder_name("", "Radiohead"), "Radiohead");
     }
 }

@@ -5,10 +5,10 @@
 //! filter/order on are mirrored. `add` is idempotent on `(content_id,
 //! release_key)` so re-blocklisting the same release refreshes the row.
 
+use crate::dialect::{pq, DbPool};
 use async_trait::async_trait;
 use cellarr_core::blocklist::{release_key, BlocklistEntry, BlocklistRepository};
 use cellarr_core::{ContentId, Release};
-use crate::dialect::{pq, DbPool};
 use sqlx::Row;
 
 use crate::error::{DbError, Result};
@@ -45,16 +45,14 @@ impl BlocklistRepository for BlocklistRepo {
                     // Idempotent on (content_id, release_key): a repeated failure
                     // for the same release refreshes the reason/time, never
                     // duplicates the row.
-                    sqlx::query(&pq(
-                        "INSERT INTO blocklist
+                    sqlx::query(pq("INSERT INTO blocklist
                             (id, content_id, release_key, title, reason, blocklisted_at, body)
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
                          ON CONFLICT(content_id, release_key) DO UPDATE SET
                             title = excluded.title,
                             reason = excluded.reason,
                             blocklisted_at = excluded.blocklisted_at,
-                            body = excluded.body"),
-                    )
+                            body = excluded.body"))
                     .bind(id)
                     .bind(content_id)
                     .bind(key)
@@ -76,10 +74,8 @@ impl BlocklistRepository for BlocklistRepo {
         // (it recorded the release name, not the indexer's guid).
         let key = release_key(release);
         let title_key = release.title.trim().to_ascii_lowercase();
-        let row = sqlx::query(&pq(
-            "SELECT 1 FROM blocklist
-             WHERE content_id = ?1 AND (release_key = ?2 OR release_key = ?3) LIMIT 1"),
-        )
+        let row = sqlx::query(pq("SELECT 1 FROM blocklist
+             WHERE content_id = ?1 AND (release_key = ?2 OR release_key = ?3) LIMIT 1"))
         .bind(content_id.to_string())
         .bind(key)
         .bind(title_key)
@@ -89,10 +85,11 @@ impl BlocklistRepository for BlocklistRepo {
     }
 
     async fn list(&self) -> Result<Vec<BlocklistEntry>> {
-        let rows =
-            sqlx::query(&pq("SELECT id, body FROM blocklist ORDER BY blocklisted_at DESC, id ASC"))
-                .fetch_all(&self.pool)
-                .await?;
+        let rows = sqlx::query(pq(
+            "SELECT id, body FROM blocklist ORDER BY blocklisted_at DESC, id ASC",
+        ))
+        .fetch_all(&self.pool)
+        .await?;
         rows.into_iter()
             .map(|row| {
                 let id: String = row.try_get("id")?;
@@ -118,7 +115,7 @@ impl BlocklistRepository for BlocklistRepo {
         self.writer
             .submit(move |conn| {
                 Box::pin(async move {
-                    let result = sqlx::query(&pq("DELETE FROM blocklist WHERE id = ?1"))
+                    let result = sqlx::query(pq("DELETE FROM blocklist WHERE id = ?1"))
                         .bind(id)
                         .execute(&mut *conn)
                         .await?;

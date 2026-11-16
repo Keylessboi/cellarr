@@ -24,7 +24,9 @@ fn param<'a>(q: &'a [(String, String)], key: &str) -> Option<&'a str> {
 }
 
 fn number(q: &[(String, String)], key: &str, default: u64) -> u64 {
-    param(q, key).and_then(|v| v.parse().ok()).unwrap_or(default)
+    param(q, key)
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
 }
 
 fn flag(q: &[(String, String)], key: &str) -> bool {
@@ -61,12 +63,27 @@ impl Library {
             .into_iter()
             .map(|a| (a.content_id, a))
             .collect();
-        let seqs = profile_seqs(state, artists.values().filter_map(|a| a.quality_profile_id).collect()).await?;
-        Ok(Self { albums, artists, seqs })
+        let seqs = profile_seqs(
+            state,
+            artists
+                .values()
+                .filter_map(|a| a.quality_profile_id)
+                .collect(),
+        )
+        .await?;
+        Ok(Self {
+            albums,
+            artists,
+            seqs,
+        })
     }
 
     fn artist_json(&self, a: &Artist) -> Value {
-        resources::artist_ref(a, a.quality_profile_id.and_then(|p| self.seqs.get(&p).copied()))
+        resources::artist_ref(
+            a,
+            a.quality_profile_id
+                .and_then(|p| self.seqs.get(&p).copied()),
+        )
     }
 
     /// The `albumId`, `artistId` and (optionally) embedded resources of an album.
@@ -78,14 +95,8 @@ impl Library {
         record["albumId"] = json!(al.id);
         record["artistId"] = json!(artist.map_or(0, |a| a.id));
         if embed {
-            record["album"] = resources::album(
-                al,
-                artist.map_or(0, |a| a.id),
-                None,
-                None,
-                None,
-                &[],
-            );
+            record["album"] =
+                resources::album(al, artist.map_or(0, |a| a.id), None, None, None, &[]);
             if let Some(a) = artist {
                 record["artist"] = self.artist_json(a);
             }
@@ -141,10 +152,7 @@ async fn queue_records(fs: &FaceState, embed: bool) -> ApiResult<Vec<Value>> {
     Ok(out)
 }
 
-pub(crate) async fn queue(
-    State(fs): State<FaceState>,
-    Query(q): Params,
-) -> ApiResult<Json<Value>> {
+pub(crate) async fn queue(State(fs): State<FaceState>, Query(q): Params) -> ApiResult<Json<Value>> {
     let embed = flag(&q, "includeAlbum") || flag(&q, "includeArtist");
     let mut records = queue_records(&fs, embed).await?;
     if let Some(album) = param(&q, "albumIds").and_then(|v| v.parse::<i64>().ok()) {
@@ -171,8 +179,14 @@ pub(crate) async fn queue(
 
 pub(crate) async fn queue_status(State(fs): State<FaceState>) -> ApiResult<Json<Value>> {
     let records = queue_records(&fs, false).await?;
-    let errors = records.iter().filter(|r| r["trackedDownloadStatus"] == "error").count();
-    let warnings = records.iter().filter(|r| r["trackedDownloadStatus"] == "warning").count();
+    let errors = records
+        .iter()
+        .filter(|r| r["trackedDownloadStatus"] == "error")
+        .count();
+    let warnings = records
+        .iter()
+        .filter(|r| r["trackedDownloadStatus"] == "warning")
+        .count();
     Ok(Json(json!({
         "id": 1,
         "totalCount": records.len(),
@@ -199,7 +213,9 @@ pub(crate) async fn queue_details(
 /// Lidarr removes from the client unless told not to.
 fn removal(q: &[(String, String)]) -> shim::QueueRemoveQuery {
     shim::QueueRemoveQuery {
-        remove_from_client: Some(param(q, "removeFromClient").map_or(true, |v| v.eq_ignore_ascii_case("true"))),
+        remove_from_client: Some(
+            param(q, "removeFromClient").is_none_or(|v| v.eq_ignore_ascii_case("true")),
+        ),
         blocklist: Some(flag(q, "blocklist")),
     }
 }
@@ -224,7 +240,9 @@ pub(crate) async fn queue_remove_bulk(
         .map(|a| a.iter().filter_map(Value::as_i64).collect())
         .unwrap_or_default();
     for id in ids {
-        let _ = shim::delete_queue_item(State(fs.clone()), Path(id.to_string()), Query(removal(&q))).await?;
+        let _ =
+            shim::delete_queue_item(State(fs.clone()), Path(id.to_string()), Query(removal(&q)))
+                .await?;
     }
     Ok(Json(json!({})))
 }
@@ -257,7 +275,12 @@ fn event_name(e: &HistoryEvent) -> (&'static str, u32) {
 /// is derived from what makes a row distinct.
 fn history_id(r: &HistoryRecord) -> i64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    let key = format!("{}|{}|{}", r.run_id, r.at, serde_json::to_string(&r.event).unwrap_or_default());
+    let key = format!(
+        "{}|{}|{}",
+        r.run_id,
+        r.at,
+        serde_json::to_string(&r.event).unwrap_or_default()
+    );
     for b in key.bytes() {
         h ^= u64::from(b);
         h = h.wrapping_mul(0x0100_0000_01b3);
@@ -267,15 +290,17 @@ fn history_id(r: &HistoryRecord) -> i64 {
 
 fn history_record(r: &HistoryRecord, library: &Library, embed: bool) -> Value {
     let (name, _) = event_name(&r.event);
-    let at = r
-        .at
-        .format(&time::format_description::well_known::Rfc3339)
-        .unwrap_or_default();
+    let at =
+        r.at.format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_default();
     let title = library
         .albums
         .get(&r.content_id)
         .map(|al| {
-            let artist = library.artists.get(&al.artist_content_id).map_or("", |a| a.name.as_str());
+            let artist = library
+                .artists
+                .get(&al.artist_content_id)
+                .map_or("", |a| a.name.as_str());
             format!("{artist} - {}", al.title)
         })
         .unwrap_or_default();
@@ -308,14 +333,20 @@ pub(crate) async fn history(
     // An id that names nothing yields an empty page, as in Lidarr, not an error:
     // clients ask about albums that may have been removed since.
     let empty = || page(Vec::new(), 0, pg, size, "date", "descending");
-    let album = match param(&q, "albumId").and_then(|v| v.parse::<i64>().ok()).filter(|i| *i != 0) {
+    let album = match param(&q, "albumId")
+        .and_then(|v| v.parse::<i64>().ok())
+        .filter(|i| *i != 0)
+    {
         Some(id) => match state.db.music().album(id).await? {
             Some(a) => Some(a.content_id),
             None => return Ok(Json(empty())),
         },
         None => None,
     };
-    let artist = match param(&q, "artistId").and_then(|v| v.parse::<i64>().ok()).filter(|i| *i != 0) {
+    let artist = match param(&q, "artistId")
+        .and_then(|v| v.parse::<i64>().ok())
+        .filter(|i| *i != 0)
+    {
         Some(id) => match state.db.music().artist(id).await? {
             Some(a) => Some(a.content_id),
             None => return Ok(Json(empty())),
@@ -336,7 +367,10 @@ pub(crate) async fn history(
     let library = Library::load(state, &ids).await?;
     let embed = flag(&q, "includeAlbum") || flag(&q, "includeArtist");
     Ok(Json(page(
-        records.iter().map(|r| history_record(r, &library, embed)).collect(),
+        records
+            .iter()
+            .map(|r| history_record(r, &library, embed))
+            .collect(),
         total,
         pg,
         size,
@@ -354,10 +388,19 @@ pub(crate) async fn history_since(
     let kinds: Vec<&str> = param(&q, "eventType")
         .map(|c| event_kinds(c).to_vec())
         .unwrap_or_default();
-    let (_, records) = state.db.music().history_page(None, None, &kinds, Some(since), 0, 1000).await?;
+    let (_, records) = state
+        .db
+        .music()
+        .history_page(None, None, &kinds, Some(since), 0, 1000)
+        .await?;
     let ids: Vec<ContentId> = records.iter().map(|r| r.content_id).collect();
     let library = Library::load(state, &ids).await?;
-    Ok(Json(records.iter().map(|r| history_record(r, &library, false)).collect()))
+    Ok(Json(
+        records
+            .iter()
+            .map(|r| history_record(r, &library, false))
+            .collect(),
+    ))
 }
 
 pub(crate) async fn history_artist(
@@ -374,7 +417,9 @@ pub(crate) async fn history_artist(
         .artist(id)
         .await?
         .ok_or_else(|| ApiError::NotFound(format!("artist {id} not found")))?;
-    let kinds: Vec<&str> = param(&q, "eventType").map(|c| event_kinds(c).to_vec()).unwrap_or_default();
+    let kinds: Vec<&str> = param(&q, "eventType")
+        .map(|c| event_kinds(c).to_vec())
+        .unwrap_or_default();
     let (_, records) = state
         .db
         .music()
@@ -382,7 +427,12 @@ pub(crate) async fn history_artist(
         .await?;
     let ids: Vec<ContentId> = records.iter().map(|r| r.content_id).collect();
     let library = Library::load(state, &ids).await?;
-    Ok(Json(records.iter().map(|r| history_record(r, &library, false)).collect()))
+    Ok(Json(
+        records
+            .iter()
+            .map(|r| history_record(r, &library, false))
+            .collect(),
+    ))
 }
 
 // --- wanted --------------------------------------------------------------------
@@ -402,7 +452,9 @@ async fn album_page(
             resources::album(
                 al,
                 artist.map_or(0, |a| a.id),
-                include_artist.then(|| artist.map(|a| library.artist_json(a))).flatten(),
+                include_artist
+                    .then(|| artist.map(|a| library.artist_json(a)))
+                    .flatten(),
                 Some(stats.get(&al.content_id).copied().unwrap_or_default()),
                 None,
                 &[],
@@ -424,7 +476,8 @@ pub(crate) async fn wanted_missing(
         k if k.contains("release") => AlbumSort::ReleaseDate,
         _ => AlbumSort::Id,
     };
-    let ascending = !param(&q, "sortDirection").is_some_and(|d| d.eq_ignore_ascii_case("descending"));
+    let ascending =
+        !param(&q, "sortDirection").is_some_and(|d| d.eq_ignore_ascii_case("descending"));
     let (total, albums) = state
         .db
         .music()
@@ -481,7 +534,14 @@ pub(crate) async fn wanted_cutoff(
         .take(usize::try_from(size).unwrap_or(usize::MAX))
         .collect();
     let records = album_page(state, &slice, flag(&q, "includeArtist")).await?;
-    Ok(Json(page(records, total, pg, size, "albums.releaseDate", "descending")))
+    Ok(Json(page(
+        records,
+        total,
+        pg,
+        size,
+        "albums.releaseDate",
+        "descending",
+    )))
 }
 
 pub(crate) async fn calendar(
@@ -490,7 +550,10 @@ pub(crate) async fn calendar(
 ) -> ApiResult<Json<Vec<Value>>> {
     let state = app(&fs);
     let start = param(&q, "start").map_or_else(String::new, |s| s.chars().take(10).collect());
-    let end = param(&q, "end").map_or_else(|| "9999-12-31".to_string(), |s| s.chars().take(10).collect());
+    let end = param(&q, "end").map_or_else(
+        || "9999-12-31".to_string(),
+        |s| s.chars().take(10).collect(),
+    );
     let unmonitored = flag(&q, "unmonitored");
     let albums: Vec<Album> = state
         .db
@@ -510,7 +573,9 @@ pub(crate) async fn calendar(
             }) && (unmonitored || a.monitored)
         })
         .collect();
-    Ok(Json(album_page(state, &albums, flag(&q, "includeArtist")).await?))
+    Ok(Json(
+        album_page(state, &albums, flag(&q, "includeArtist")).await?,
+    ))
 }
 
 // --- blocklist -----------------------------------------------------------------
@@ -524,7 +589,7 @@ pub(crate) async fn blocklist(
     let mut entries = BlocklistRepository::list(&state.db.blocklist()).await?;
     let ids: Vec<ContentId> = entries.iter().map(|e| e.content_id).collect();
     let library = Library::load(state, &ids).await?;
-    entries.sort_by(|a, b| b.blocklisted_at.cmp(&a.blocklisted_at));
+    entries.sort_by_key(|e| std::cmp::Reverse(e.blocklisted_at));
     // Only music releases: an entry belongs to the music library when the album it
     // was blocked for is one.
     let music: Vec<_> = entries
@@ -572,12 +637,10 @@ pub(crate) async fn blocklist(
 
 // --- parse ---------------------------------------------------------------------
 
-pub(crate) async fn parse(
-    State(fs): State<FaceState>,
-    Query(q): Params,
-) -> ApiResult<Json<Value>> {
+pub(crate) async fn parse(State(fs): State<FaceState>, Query(q): Params) -> ApiResult<Json<Value>> {
     let state = app(&fs);
-    let title = param(&q, "title").ok_or_else(|| ApiError::BadRequest("title is required".into()))?;
+    let title =
+        param(&q, "title").ok_or_else(|| ApiError::BadRequest("title is required".into()))?;
     let parsed = cellarr_parse::parse_music_title(title);
     let music = parsed.music.clone().unwrap_or_default();
     let quality = music
@@ -628,5 +691,9 @@ pub(crate) async fn album_by_id(
         .album(id)
         .await?
         .ok_or_else(|| ApiError::NotFound(format!("album {id} not found")))?;
-    Ok(Json(album_page(state, &[album], flag(&q, "includeArtist")).await?.remove(0)))
+    Ok(Json(
+        album_page(state, &[album], flag(&q, "includeArtist"))
+            .await?
+            .remove(0),
+    ))
 }

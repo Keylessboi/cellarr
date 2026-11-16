@@ -106,11 +106,9 @@ pub(crate) async fn read_download_clients(
     pool: &SqlitePool,
     kind: SourceKind,
 ) -> Result<Vec<DownloadClientConfig>> {
-    let rows = sqlx::query(
-        "SELECT * FROM DownloadClients ORDER BY Id ASC",
-    )
-    .fetch_all(pool)
-    .await?;
+    let rows = sqlx::query("SELECT * FROM DownloadClients ORDER BY Id ASC")
+        .fetch_all(pool)
+        .await?;
     Ok(rows
         .iter()
         .map(|row| {
@@ -152,7 +150,11 @@ fn protocol_of(row: &sqlx::sqlite::SqliteRow) -> Protocol {
         };
     }
     if let Ok(n) = row.try_get::<i64, _>("Protocol") {
-        return if n == 1 { Protocol::Torrent } else { Protocol::Usenet };
+        return if n == 1 {
+            Protocol::Torrent
+        } else {
+            Protocol::Usenet
+        };
     }
     // No `Protocol` column (Lidarr): it follows from what the entry is.
     protocol_of_implementation(&opt_text(row, "Implementation").unwrap_or_default())

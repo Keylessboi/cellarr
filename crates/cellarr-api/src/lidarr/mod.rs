@@ -59,29 +59,43 @@ pub fn router(state: AppState) -> Router {
         face: Face::Lidarr,
     };
 
-    let routes = Router::new()
+    Router::new()
         // --- system, shared with the other faces ------------------------------
         .route("/system/status", get(handlers::system_status))
         .route("/system/task", get(shim::system_tasks))
         .route("/system/task/{id}", get(shim::system_task))
         .route("/health", get(shim::health))
-        .route("/system/backup", get(shim::list_backups).post(shim::create_backup))
+        .route(
+            "/system/backup",
+            get(shim::list_backups).post(shim::create_backup),
+        )
         .route("/system/backup/{id}", delete(shim::delete_backup))
         .route("/system/backup/restore/{id}", post(shim::restore_backup_id))
-        .route("/system/backup/restore/upload", post(shim::restore_backup_upload))
+        .route(
+            "/system/backup/restore/upload",
+            post(shim::restore_backup_upload),
+        )
         .route("/log/file", get(shim::list_log_files))
         .route("/log/file/{name}", get(shim::read_log_file))
         .route("/update", get(shim::list_updates))
         .route("/diskspace", get(handlers::diskspace))
         // --- configuration shared with the other faces ------------------------
-        .route("/rootfolder", get(handlers::root_folders).post(shim::create_root_folder))
+        .route(
+            "/rootfolder",
+            get(handlers::root_folders).post(shim::create_root_folder),
+        )
         .route("/rootfolder/{id}", delete(shim::delete_root_folder))
         .route("/tag", get(shim::list_tags).post(shim::create_tag))
         .route(
             "/tag/{id}",
-            get(shim::get_tag).put(shim::update_tag).delete(shim::delete_tag),
+            get(shim::get_tag)
+                .put(shim::update_tag)
+                .delete(shim::delete_tag),
         )
-        .route("/indexer", get(shim::list_indexers).post(shim::create_indexer))
+        .route(
+            "/indexer",
+            get(shim::list_indexers).post(shim::create_indexer),
+        )
         .route("/indexer/schema", get(shim::indexer_schema))
         .route("/indexer/test", post(shim::test_indexer))
         .route(
@@ -170,18 +184,30 @@ pub fn router(state: AppState) -> Router {
             "/importlistexclusion/{id}",
             delete(shim::delete_import_list_exclusion),
         )
-        .route("/config/mediamanagement", get(shim::get_media_management).put(shim::update_media_management))
+        .route(
+            "/config/mediamanagement",
+            get(shim::get_media_management).put(shim::update_media_management),
+        )
         .route("/config/host", get(handlers::config_host))
         .route("/config/ui", get(handlers::config_ui))
         .route("/config/indexer", get(handlers::config_indexer))
-        .route("/config/downloadclient", get(handlers::config_downloadclient))
-        .route("/config/metadataprovider", get(handlers::config_metadataprovider))
+        .route(
+            "/config/downloadclient",
+            get(handlers::config_downloadclient),
+        )
+        .route(
+            "/config/metadataprovider",
+            get(handlers::config_metadataprovider),
+        )
         .route("/config/naming", get(handlers::config_naming))
         .route("/config/naming/examples", get(handlers::naming_examples))
         .route("/language", get(handlers::languages))
         .route("/indexerflag", get(handlers::indexer_flags))
         // --- the music library ------------------------------------------------
-        .route("/artist", get(handlers::list_artists).post(handlers::add_artist))
+        .route(
+            "/artist",
+            get(handlers::list_artists).post(handlers::add_artist),
+        )
         .route("/artist/lookup", get(handlers::artist_lookup))
         .route(
             "/artist/editor",
@@ -193,7 +219,10 @@ pub fn router(state: AppState) -> Router {
                 .put(handlers::update_artist)
                 .delete(handlers::delete_artist),
         )
-        .route("/album", get(handlers::list_albums).post(handlers::add_album))
+        .route(
+            "/album",
+            get(handlers::list_albums).post(handlers::add_album),
+        )
         .route("/album/lookup", get(handlers::album_lookup))
         .route("/album/monitor", put(handlers::album_monitor))
         .route(
@@ -215,7 +244,10 @@ pub fn router(state: AppState) -> Router {
             "/qualityprofile",
             get(handlers::quality_profiles).post(handlers::create_quality_profile),
         )
-        .route("/qualityprofile/schema", get(handlers::quality_profile_schema))
+        .route(
+            "/qualityprofile/schema",
+            get(handlers::quality_profile_schema),
+        )
         .route(
             "/qualityprofile/{id}",
             get(handlers::get_quality_profile)
@@ -227,7 +259,10 @@ pub fn router(state: AppState) -> Router {
             "/metadataprofile",
             get(handlers::metadata_profiles).post(handlers::create_metadata_profile),
         )
-        .route("/metadataprofile/schema", get(handlers::metadata_profile_schema))
+        .route(
+            "/metadataprofile/schema",
+            get(handlers::metadata_profile_schema),
+        )
         .route(
             "/metadataprofile/{id}",
             get(handlers::get_metadata_profile)
@@ -252,30 +287,59 @@ pub fn router(state: AppState) -> Router {
         .route("/parse", get(activity::parse))
         .route("/release", get(release::search).post(release::grab))
         // --- resources addressed by id: singletons and single reads ----------
-        .route("/rootfolder/{id}", get(handlers::root_folder).put(handlers::root_folder_update))
-        .route("/remotepathmapping/{id}", get(handlers::remote_path_mapping))
+        .route(
+            "/rootfolder/{id}",
+            get(handlers::root_folder).put(handlers::root_folder_update),
+        )
+        .route(
+            "/remotepathmapping/{id}",
+            get(handlers::remote_path_mapping),
+        )
         .route("/downloadclient/{id}", get(handlers::download_client))
-        .route("/qualitydefinition/{id}", get(handlers::quality_definition).put(handlers::echo_put))
+        .route(
+            "/qualitydefinition/{id}",
+            get(handlers::quality_definition).put(handlers::echo_put),
+        )
         .route("/qualitydefinition/update", put(handlers::echo_list))
         .route("/language/{id}", get(handlers::language))
         .route("/calendar/{id}", get(activity::album_by_id))
         .route("/wanted/missing/{id}", get(activity::album_by_id))
         .route("/wanted/cutoff/{id}", get(activity::album_by_id))
-        .route("/config/host/{id}", get(handlers::config_host).put(handlers::echo_put))
-        .route("/config/ui/{id}", get(handlers::config_ui).put(handlers::echo_put))
-        .route("/config/indexer/{id}", get(handlers::config_indexer).put(handlers::echo_put))
-        .route("/config/downloadclient/{id}", get(handlers::config_downloadclient).put(handlers::echo_put))
-        .route("/config/metadataprovider/{id}", get(handlers::config_metadataprovider).put(handlers::echo_put))
-        .route("/config/naming/{id}", get(handlers::config_naming).put(handlers::echo_put))
-        .route("/config/mediamanagement/{id}", get(shim::get_media_management).put(shim::update_media_management))
+        .route(
+            "/config/host/{id}",
+            get(handlers::config_host).put(handlers::echo_put),
+        )
+        .route(
+            "/config/ui/{id}",
+            get(handlers::config_ui).put(handlers::echo_put),
+        )
+        .route(
+            "/config/indexer/{id}",
+            get(handlers::config_indexer).put(handlers::echo_put),
+        )
+        .route(
+            "/config/downloadclient/{id}",
+            get(handlers::config_downloadclient).put(handlers::echo_put),
+        )
+        .route(
+            "/config/metadataprovider/{id}",
+            get(handlers::config_metadataprovider).put(handlers::echo_put),
+        )
+        .route(
+            "/config/naming/{id}",
+            get(handlers::config_naming).put(handlers::echo_put),
+        )
+        .route(
+            "/config/mediamanagement/{id}",
+            get(shim::get_media_management).put(shim::update_media_management),
+        )
         // --- commands ---------------------------------------------------------
         .route("/command", get(command::list).post(command::create))
         .route("/command/{id}", get(command::get).delete(command::cancel))
         .with_state(fs.clone())
         .layer(middleware::from_fn_with_state(state, require_api_key))
         .fallback(not_found)
-        .layer(middleware::from_fn(version_header));
-    routes
+        .layer(middleware::from_fn(version_header))
 }
 
 /// The router for a dedicated Lidarr listener: `/api/v1/*`, the open `/ping`
@@ -323,7 +387,14 @@ pub(crate) fn catalogue_error(e: cellarr_jobs::music_sync::CatalogueError) -> Ap
 
 /// The paged envelope Lidarr wraps list endpoints in.
 #[must_use]
-pub(crate) fn page(records: Vec<Value>, total: u64, page: u64, size: u64, key: &str, dir: &str) -> Value {
+pub(crate) fn page(
+    records: Vec<Value>,
+    total: u64,
+    page: u64,
+    size: u64,
+    key: &str,
+    dir: &str,
+) -> Value {
     json!({
         "page": page,
         "pageSize": size,

@@ -219,16 +219,14 @@ pub mod testing {
         out.extend_from_slice(&4096u16.to_be_bytes()); // min block size
         out.extend_from_slice(&4096u16.to_be_bytes()); // max block size
         out.extend_from_slice(&[0, 0, 0, 0, 0, 0]); // min/max frame size (unknown)
-        // 20 bits sample rate, 3 bits channels-1, 5 bits bps-1, 36 bits samples.
+                                                    // 20 bits sample rate, 3 bits channels-1, 5 bits bps-1, 36 bits samples.
         let sample_rate: u64 = 44_100;
         let total_samples: u64 = 44_100 * 180;
-        let packed: u64 = (sample_rate << 44)
-            | (1u64 << 41)
-            | ((u64::from(bits) - 1) << 36)
-            | total_samples;
+        let packed: u64 =
+            (sample_rate << 44) | (1u64 << 41) | ((u64::from(bits) - 1) << 36) | total_samples;
         out.extend_from_slice(&packed.to_be_bytes());
         out.extend_from_slice(&[0u8; 16]); // md5
-        // VORBIS_COMMENT (type 4), last block.
+                                           // VORBIS_COMMENT (type 4), last block.
         let vendor = b"cellarr-test";
         let mut body = Vec::new();
         body.extend_from_slice(&u32::try_from(vendor.len()).unwrap_or(0).to_le_bytes());
@@ -325,20 +323,47 @@ mod tests {
 
     #[test]
     fn mp3_grades_by_constant_step_or_vbr_preset() {
-        assert_eq!(audio_quality_name(&tags("mp3", Some(320), None)), Some("MP3-320"));
-        assert_eq!(audio_quality_name(&tags("mp3", Some(192), None)), Some("MP3-192"));
-        assert_eq!(audio_quality_name(&tags("mp3", Some(245), None)), Some("MP3-VBR-V0"));
-        assert_eq!(audio_quality_name(&tags("mp3", Some(183), None)), Some("MP3-VBR-V2"));
-        assert_eq!(audio_quality_name(&tags("mp3", Some(140), None)), Some("MP3-128"));
+        assert_eq!(
+            audio_quality_name(&tags("mp3", Some(320), None)),
+            Some("MP3-320")
+        );
+        assert_eq!(
+            audio_quality_name(&tags("mp3", Some(192), None)),
+            Some("MP3-192")
+        );
+        assert_eq!(
+            audio_quality_name(&tags("mp3", Some(245), None)),
+            Some("MP3-VBR-V0")
+        );
+        assert_eq!(
+            audio_quality_name(&tags("mp3", Some(183), None)),
+            Some("MP3-VBR-V2")
+        );
+        assert_eq!(
+            audio_quality_name(&tags("mp3", Some(140), None)),
+            Some("MP3-128")
+        );
         assert_eq!(audio_quality_name(&tags("mp3", None, None)), None);
     }
 
     #[test]
     fn an_mp4_container_is_aac_or_apple_lossless_by_bitrate() {
-        assert_eq!(audio_quality_name(&tags("aac", Some(256), None)), Some("AAC-256"));
-        assert_eq!(audio_quality_name(&tags("aac", Some(271), None)), Some("AAC-VBR"));
-        assert_eq!(audio_quality_name(&tags("aac", Some(900), Some(16))), Some("ALAC"));
-        assert_eq!(audio_quality_name(&tags("aac", Some(2800), Some(24))), Some("ALAC 24bit"));
+        assert_eq!(
+            audio_quality_name(&tags("aac", Some(256), None)),
+            Some("AAC-256")
+        );
+        assert_eq!(
+            audio_quality_name(&tags("aac", Some(271), None)),
+            Some("AAC-VBR")
+        );
+        assert_eq!(
+            audio_quality_name(&tags("aac", Some(900), Some(16))),
+            Some("ALAC")
+        );
+        assert_eq!(
+            audio_quality_name(&tags("aac", Some(2800), Some(24))),
+            Some("ALAC 24bit")
+        );
     }
 
     #[test]

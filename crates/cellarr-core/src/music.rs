@@ -358,14 +358,19 @@ mod tests {
 
     #[test]
     fn a_sequenced_uuid_has_a_fixed_textual_prefix() {
-        assert!(seq_uuid(0x0001_02a3).to_string().starts_with("00000000-0001-02a3-"));
+        assert!(seq_uuid(0x0001_02a3)
+            .to_string()
+            .starts_with("00000000-0001-02a3-"));
     }
 
     #[test]
     fn names_compare_equal_across_punctuation_case_and_ampersands() {
         assert_eq!(normalize_name("OK Computer"), "ok computer");
         assert_eq!(normalize_name("ok.computer!"), "ok computer");
-        assert_eq!(normalize_name("Simon & Garfunkel"), normalize_name("Simon and Garfunkel"));
+        assert_eq!(
+            normalize_name("Simon & Garfunkel"),
+            normalize_name("Simon and Garfunkel")
+        );
         assert_eq!(normalize_name("  AC/DC "), "ac dc");
         assert_eq!(normalize_name("Sigur Rós"), "sigur rós");
     }

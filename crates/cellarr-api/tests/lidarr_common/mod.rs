@@ -11,7 +11,10 @@ use cellarr_jobs::music_sync::MusicSync;
 use cellarr_meta::{MusicBrainzSource, RecordedFetcher};
 use serde_json::{json, Value};
 
-pub const FIX: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../cellarr-meta/tests/fixtures");
+pub const FIX: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../cellarr-meta/tests/fixtures"
+);
 pub const BASE: &str = "https://mb.test/ws/2";
 pub const RADIOHEAD: &str = "a74b1b7f-71a5-4011-9441-d0b5e4122711";
 pub const OK_COMPUTER: &str = "b1392450-e666-3926-a536-22c65f834433";
@@ -34,11 +37,26 @@ pub async fn start(auth: AuthConfig) -> Lidarr {
         .await
         .unwrap();
     let fetcher = RecordedFetcher::new()
-        .with_body(&format!("{BASE}/artist?query="), fixture("mb_artist_search_radiohead.json"))
-        .with_body(&format!("{BASE}/artist/{RADIOHEAD}"), fixture("mb_artist_radiohead.json"))
-        .with_body(&format!("{BASE}/release-group?artist="), fixture("mb_release_groups_radiohead.json"))
-        .with_body(&format!("{BASE}/release-group?query="), fixture("mb_release_group_search_ok_computer.json"))
-        .with_body(&format!("{BASE}/release?release-group="), fixture("mb_releases_ok_computer.json"));
+        .with_body(
+            &format!("{BASE}/artist?query="),
+            fixture("mb_artist_search_radiohead.json"),
+        )
+        .with_body(
+            &format!("{BASE}/artist/{RADIOHEAD}"),
+            fixture("mb_artist_radiohead.json"),
+        )
+        .with_body(
+            &format!("{BASE}/release-group?artist="),
+            fixture("mb_release_groups_radiohead.json"),
+        )
+        .with_body(
+            &format!("{BASE}/release-group?query="),
+            fixture("mb_release_group_search_ok_computer.json"),
+        )
+        .with_body(
+            &format!("{BASE}/release?release-group="),
+            fixture("mb_releases_ok_computer.json"),
+        );
     let catalogue = Arc::new(MusicSync::new(
         db.clone(),
         MusicBrainzSource::with_base_url(fetcher, BASE),
@@ -71,7 +89,12 @@ impl Lidarr {
         r.json().await.unwrap()
     }
 
-    pub async fn send(&self, method: reqwest::Method, path: &str, body: &Value) -> reqwest::Response {
+    pub async fn send(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: &Value,
+    ) -> reqwest::Response {
         self.req(method, path).json(body).send().await.unwrap()
     }
 
@@ -103,10 +126,10 @@ impl Lidarr {
         payload["metadataProfileId"] = json!(1);
         payload["rootFolderPath"] = json!("/data/media/music");
         payload["monitored"] = json!(true);
-        payload["addOptions"] = json!({ "monitor": "all", "monitored": true, "searchForMissingAlbums": false });
+        payload["addOptions"] =
+            json!({ "monitor": "all", "monitored": true, "searchForMissingAlbums": false });
         let r = self.send(reqwest::Method::POST, "/artist", &payload).await;
         assert!(r.status().is_success(), "{}", r.text().await.unwrap());
         r.json().await.unwrap()
     }
 }
-

@@ -70,7 +70,8 @@ pub use importlist::{
 };
 pub use media::{
     ContentKind, ContentMetadata, ContentNode, ContentRef, Coordinates, Library, MediaFile,
-    MediaType, SeriesType, Subtitle, MissingReason, MissingSummary,};
+    MediaType, MissingReason, MissingSummary, SeriesType, Subtitle,
+};
 pub use monitor::{EpisodeFacts, MonitorOption};
 pub use music::{
     lidarr_quality_id, lidarr_quality_name, normalize_name, Album, Artist, MetadataProfile, Track,

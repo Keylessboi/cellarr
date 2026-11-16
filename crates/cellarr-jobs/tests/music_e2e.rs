@@ -5,10 +5,10 @@
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
-use cellarr_core::repo::{ContentRepository, GrabRepository};
+use cellarr_core::repo::ContentRepository;
 use cellarr_core::{
-    ContentRef, Coordinates, CustomFormat, ExtraFileImport, GrabStatus, Library, LibraryId,
-    MediaType, Protocol, QualityProfile, QualityProfileId, QualityRanking, Release, SearchTerms,
+    ContentRef, Coordinates, CustomFormat, ExtraFileImport, Library, LibraryId, MediaType,
+    Protocol, QualityProfile, QualityProfileId, QualityRanking, Release, SearchTerms,
 };
 use cellarr_db::{Database, NewAlbum, NewArtist};
 use cellarr_decide::ProperRepackPolicy;
@@ -195,7 +195,10 @@ async fn shelf() -> Shelf {
         .unwrap()
         .remove(0);
     let album_ref = db.content().get(album.content_id).await.unwrap().unwrap();
-    Shelf { db, album: album_ref }
+    Shelf {
+        db,
+        album: album_ref,
+    }
 }
 
 fn registry(db: &Database) -> MediaRegistry {
@@ -210,10 +213,19 @@ async fn an_album_is_searched_grabbed_and_imported_onto_its_tracks() {
     assert_eq!(album.coords, Coordinates::Album);
 
     let download = tempfile::tempdir().unwrap();
-    let dl = download.path().join("Radiohead - OK Computer (1997) [FLAC]");
+    let dl = download
+        .path()
+        .join("Radiohead - OK Computer (1997) [FLAC]");
     std::fs::create_dir_all(&dl).unwrap();
     write_track(&dl, "01 - Airbag.flac", "OK Computer", 1, 1, "Airbag");
-    write_track(&dl, "02 - Paranoid Android.flac", "OK Computer", 1, 2, "Paranoid Android");
+    write_track(
+        &dl,
+        "02 - Paranoid Android.flac",
+        "OK Computer",
+        1,
+        2,
+        "Paranoid Android",
+    );
     std::fs::write(dl.join("cover.jpg"), b"jpg").unwrap();
 
     let library = tempfile::tempdir().unwrap();
@@ -225,10 +237,17 @@ async fn an_album_is_searched_grabbed_and_imported_onto_its_tracks() {
     let runner = PipelineRunner::new(&indexer, &client, &registry, &db, &clock, &cfg);
 
     let outcome = runner.run(&album).await.unwrap();
-    assert!(matches!(outcome, RunOutcome::Imported { .. }), "{outcome:?}");
+    assert!(
+        matches!(outcome, RunOutcome::Imported { .. }),
+        "{outcome:?}"
+    );
 
     let base = library.path().join("Radiohead/OK Computer (1997)");
-    assert!(base.join("01 - Airbag.flac").exists(), "{:?}", std::fs::read_dir(library.path()));
+    assert!(
+        base.join("01 - Airbag.flac").exists(),
+        "{:?}",
+        std::fs::read_dir(library.path())
+    );
     assert!(base.join("02 - Paranoid Android.flac").exists());
     assert!(!base.join("cover.jpg").exists(), "only audio is imported");
 
@@ -246,18 +265,24 @@ async fn an_album_is_searched_grabbed_and_imported_onto_its_tracks() {
         db.content().monitored_missing().await.unwrap().is_empty(),
         "an album with files is no longer missing"
     );
-    let grabs = db.grabs();
-    let _ = grabs; // grab status is asserted through the outcome
-    let _ = GrabStatus::Imported;
 }
 
 #[tokio::test]
 async fn a_download_tagged_as_another_album_is_not_imported() {
     let Shelf { db, album } = shelf().await;
     let download = tempfile::tempdir().unwrap();
-    let dl = download.path().join("Radiohead - OK Computer (1997) [FLAC]");
+    let dl = download
+        .path()
+        .join("Radiohead - OK Computer (1997) [FLAC]");
     std::fs::create_dir_all(&dl).unwrap();
-    write_track(&dl, "01.flac", "Kid A", 1, 1, "Everything In Its Right Place");
+    write_track(
+        &dl,
+        "01.flac",
+        "Kid A",
+        1,
+        1,
+        "Everything In Its Right Place",
+    );
     write_track(&dl, "02.flac", "Kid A", 1, 2, "Kid A");
 
     let library = tempfile::tempdir().unwrap();
@@ -269,9 +294,20 @@ async fn a_download_tagged_as_another_album_is_not_imported() {
     let runner = PipelineRunner::new(&indexer, &client, &registry, &db, &clock, &cfg);
 
     let outcome = runner.run(&album).await.unwrap();
-    assert!(!matches!(outcome, RunOutcome::Imported { .. }), "{outcome:?}");
-    assert!(db.music().track_files_for_album(album.id).await.unwrap().is_empty());
-    assert!(!library.path().join("Radiohead").exists(), "nothing was written to the library");
+    assert!(
+        !matches!(outcome, RunOutcome::Imported { .. }),
+        "{outcome:?}"
+    );
+    assert!(db
+        .music()
+        .track_files_for_album(album.id)
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(
+        !library.path().join("Radiohead").exists(),
+        "nothing was written to the library"
+    );
 }
 
 mod catalogue {
@@ -279,7 +315,10 @@ mod catalogue {
     use cellarr_jobs::music_sync::{AddArtist, MonitorMode, MusicCatalogue, MusicSync};
     use cellarr_meta::{MusicBrainzSource, RecordedFetcher};
 
-    const FIX: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../cellarr-meta/tests/fixtures");
+    const FIX: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../cellarr-meta/tests/fixtures"
+    );
     const BASE: &str = "https://mb.test/ws/2";
     const RADIOHEAD: &str = "a74b1b7f-71a5-4011-9441-d0b5e4122711";
 
@@ -289,15 +328,26 @@ mod catalogue {
 
     fn sync(db: &Database) -> MusicSync<RecordedFetcher> {
         let fetcher = RecordedFetcher::new()
-            .with_body(&format!("{BASE}/artist/{RADIOHEAD}"), fixture("mb_artist_radiohead.json"))
-            .with_body(&format!("{BASE}/release-group?artist="), fixture("mb_release_groups_radiohead.json"))
-            .with_body(&format!("{BASE}/release?release-group="), fixture("mb_releases_ok_computer.json"));
+            .with_body(
+                &format!("{BASE}/artist/{RADIOHEAD}"),
+                fixture("mb_artist_radiohead.json"),
+            )
+            .with_body(
+                &format!("{BASE}/release-group?artist="),
+                fixture("mb_release_groups_radiohead.json"),
+            )
+            .with_body(
+                &format!("{BASE}/release?release-group="),
+                fixture("mb_releases_ok_computer.json"),
+            );
         MusicSync::new(db.clone(), MusicBrainzSource::with_base_url(fetcher, BASE))
     }
 
     async fn empty_db() -> (Database, LibraryId) {
         let dir = tempfile::tempdir().unwrap();
-        let db = Database::open(dir.keep().join("t.sqlite").to_str().unwrap()).await.unwrap();
+        let db = Database::open(dir.keep().join("t.sqlite").to_str().unwrap())
+            .await
+            .unwrap();
         let lib = LibraryId::new();
         db.config()
             .upsert_library(&Library {
@@ -328,7 +378,10 @@ mod catalogue {
     #[tokio::test]
     async fn adding_an_artist_keeps_only_the_albums_its_profile_allows() {
         let (db, lib) = empty_db().await;
-        let artist = sync(&db).add_artist(req(lib, MonitorMode::All)).await.unwrap();
+        let artist = sync(&db)
+            .add_artist(req(lib, MonitorMode::All))
+            .await
+            .unwrap();
         assert_eq!(artist.name, "Radiohead");
         let titles: Vec<String> = db
             .music()
@@ -340,15 +393,27 @@ mod catalogue {
             .collect();
         assert!(titles.contains(&"OK Computer".to_string()));
         assert!(titles.contains(&"Kid A".to_string()));
-        assert!(!titles.contains(&"Man of War".to_string()), "singles are not kept");
-        assert!(!titles.iter().any(|t| t.contains("Astoria")), "live albums are not kept");
+        assert!(
+            !titles.contains(&"Man of War".to_string()),
+            "singles are not kept"
+        );
+        assert!(
+            !titles.iter().any(|t| t.contains("Astoria")),
+            "live albums are not kept"
+        );
     }
 
     #[tokio::test]
     async fn adding_the_same_artist_twice_is_one_artist() {
         let (db, lib) = empty_db().await;
-        let a = sync(&db).add_artist(req(lib, MonitorMode::All)).await.unwrap();
-        let b = sync(&db).add_artist(req(lib, MonitorMode::All)).await.unwrap();
+        let a = sync(&db)
+            .add_artist(req(lib, MonitorMode::All))
+            .await
+            .unwrap();
+        let b = sync(&db)
+            .add_artist(req(lib, MonitorMode::All))
+            .await
+            .unwrap();
         assert_eq!(a.id, b.id);
         assert_eq!(db.music().artists().await.unwrap().len(), 1);
     }
@@ -356,7 +421,10 @@ mod catalogue {
     #[tokio::test]
     async fn monitoring_the_latest_album_monitors_exactly_one() {
         let (db, lib) = empty_db().await;
-        let a = sync(&db).add_artist(req(lib, MonitorMode::LatestAlbum)).await.unwrap();
+        let a = sync(&db)
+            .add_artist(req(lib, MonitorMode::LatestAlbum))
+            .await
+            .unwrap();
         let monitored: Vec<String> = db
             .music()
             .albums_for_artist(a.content_id)
@@ -374,11 +442,26 @@ mod catalogue {
         let (db, lib) = empty_db().await;
         let s = sync(&db);
         let a = s.add_artist(req(lib, MonitorMode::All)).await.unwrap();
-        let ok = db.music().album_by_mbid("b1392450-e666-3926-a536-22c65f834433").await.unwrap().unwrap();
-        db.music().set_monitored(vec![ok.content_id], false).await.unwrap();
+        let ok = db
+            .music()
+            .album_by_mbid("b1392450-e666-3926-a536-22c65f834433")
+            .await
+            .unwrap()
+            .unwrap();
+        db.music()
+            .set_monitored(vec![ok.content_id], false)
+            .await
+            .unwrap();
         let report = s.refresh_artist(a.content_id).await.unwrap();
         assert!(report.new_albums.is_empty());
-        assert!(!db.music().album_by_content(ok.content_id).await.unwrap().unwrap().monitored);
+        assert!(
+            !db.music()
+                .album_by_content(ok.content_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .monitored
+        );
     }
 
     #[tokio::test]
@@ -386,11 +469,19 @@ mod catalogue {
         let (db, lib) = empty_db().await;
         let s = sync(&db);
         s.add_artist(req(lib, MonitorMode::All)).await.unwrap();
-        let ok = db.music().album_by_mbid("b1392450-e666-3926-a536-22c65f834433").await.unwrap().unwrap();
+        let ok = db
+            .music()
+            .album_by_mbid("b1392450-e666-3926-a536-22c65f834433")
+            .await
+            .unwrap()
+            .unwrap();
         let tracks = s.ensure_tracks(ok.content_id).await.unwrap();
         assert_eq!(tracks.len(), 12);
         assert_eq!(tracks[0].title, "Airbag");
         let again = s.ensure_tracks(ok.content_id).await.unwrap();
-        assert_eq!(again.iter().map(|t| t.id).collect::<Vec<_>>(), tracks.iter().map(|t| t.id).collect::<Vec<_>>());
+        assert_eq!(
+            again.iter().map(|t| t.id).collect::<Vec<_>>(),
+            tracks.iter().map(|t| t.id).collect::<Vec<_>>()
+        );
     }
 }

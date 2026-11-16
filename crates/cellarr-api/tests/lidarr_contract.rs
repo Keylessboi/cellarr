@@ -22,13 +22,19 @@ use lidarr_common::{start, Lidarr, OK_COMPUTER};
 use serde_json::{json, Value};
 
 fn contract() -> Value {
-    let path = format!("{}/tests/contracts/lidarr-v1.json", env!("CARGO_MANIFEST_DIR"));
+    let path = format!(
+        "{}/tests/contracts/lidarr-v1.json",
+        env!("CARGO_MANIFEST_DIR")
+    );
     serde_json::from_str(&std::fs::read_to_string(path).expect("the contract is committed"))
         .expect("the contract parses")
 }
 
 fn gaps() -> Value {
-    let path = format!("{}/tests/contracts/lidarr-gaps.json", env!("CARGO_MANIFEST_DIR"));
+    let path = format!(
+        "{}/tests/contracts/lidarr-gaps.json",
+        env!("CARGO_MANIFEST_DIR")
+    );
     serde_json::from_str(&std::fs::read_to_string(path).expect("the gaps file is committed"))
         .expect("the gaps file parses")
 }
@@ -38,7 +44,12 @@ fn gap_set(section: &str) -> BTreeMap<String, String> {
         .as_object()
         .unwrap_or_else(|| panic!("lidarr-gaps.json has no `{section}` object"))
         .iter()
-        .map(|(k, v)| (k.clone(), v.as_str().expect("a gap's reason is a string").to_string()))
+        .map(|(k, v)| {
+            (
+                k.clone(),
+                v.as_str().expect("a gap's reason is a string").to_string(),
+            )
+        })
         .collect()
 }
 
@@ -92,7 +103,11 @@ async fn every_lidarr_endpoint_is_served_or_a_documented_gap() {
             }
         }
     }
-    let unknown_gaps: Vec<_> = gaps.keys().filter(|k| !seen.contains(*k)).cloned().collect();
+    let unknown_gaps: Vec<_> = gaps
+        .keys()
+        .filter(|k| !seen.contains(*k))
+        .cloned()
+        .collect();
 
     assert!(
         unexpected.is_empty(),
@@ -130,7 +145,12 @@ fn type_matches(want: &str, nullable: bool, got: &Value) -> bool {
 }
 
 /// Compare one response object to a resource schema; return the problems.
-fn check_resource(name: &str, got: &Value, contract: &Value, gaps: &BTreeMap<String, String>) -> Vec<String> {
+fn check_resource(
+    name: &str,
+    got: &Value,
+    contract: &Value,
+    gaps: &BTreeMap<String, String>,
+) -> Vec<String> {
     let mut problems = Vec::new();
     let Some(obj) = got.as_object() else {
         return vec![format!("{name}: expected an object, got {got}")];
@@ -167,11 +187,23 @@ async fn seeded() -> Lidarr {
     let profile = l.flac_profile().await;
     l.add_radiohead(profile).await;
     let state = &l.state;
-    let album = state.db.music().album_by_mbid(OK_COMPUTER).await.unwrap().unwrap();
+    let album = state
+        .db
+        .music()
+        .album_by_mbid(OK_COMPUTER)
+        .await
+        .unwrap()
+        .unwrap();
 
     // A track file, so tracks and files have something to show.
     let tracks = l.get(&format!("/track?albumId={}", album.id)).await;
-    let first = state.db.music().track(tracks[0]["id"].as_i64().unwrap()).await.unwrap().unwrap();
+    let first = state
+        .db
+        .music()
+        .track(tracks[0]["id"].as_i64().unwrap())
+        .await
+        .unwrap()
+        .unwrap();
     state
         .db
         .music()
@@ -194,10 +226,11 @@ async fn seeded() -> Lidarr {
         .unwrap();
 
     // History, a queue row and a blocklist entry for the same album.
-    let album_ref = cellarr_core::repo::ContentRepository::get(&state.db.content(), album.content_id)
-        .await
-        .unwrap()
-        .unwrap();
+    let album_ref =
+        cellarr_core::repo::ContentRepository::get(&state.db.content(), album.content_id)
+            .await
+            .unwrap()
+            .unwrap();
     let release = cellarr_core::Release {
         indexer_id: cellarr_core::IndexerId::new(),
         title: "Radiohead - OK Computer (1997) [FLAC]".into(),
@@ -228,20 +261,34 @@ async fn seeded() -> Lidarr {
             at: time::OffsetDateTime::now_utc(),
             content_id: album.content_id,
             run_id: cellarr_core::PipelineRunId::new(),
-            event: cellarr_core::HistoryEvent::Grabbed { grab_id: grab, release_type: None },
+            event: cellarr_core::HistoryEvent::Grabbed {
+                grab_id: grab,
+                release_type: None,
+            },
         })
         .await
         .unwrap();
     cellarr_core::BlocklistRepository::add(
         &state.db.blocklist(),
-        &cellarr_core::BlocklistEntry::from_release(album.content_id, &release, "dead", time::OffsetDateTime::now_utc()),
+        &cellarr_core::BlocklistEntry::from_release(
+            album.content_id,
+            &release,
+            "dead",
+            time::OffsetDateTime::now_utc(),
+        ),
     )
     .await
     .unwrap();
     let _ = l
-        .send(reqwest::Method::POST, "/rootfolder", &json!({ "path": "/data/media/music" }))
+        .send(
+            reqwest::Method::POST,
+            "/rootfolder",
+            &json!({ "path": "/data/media/music" }),
+        )
         .await;
-    let _ = l.send(reqwest::Method::POST, "/tag", &json!({ "label": "x" })).await;
+    let _ = l
+        .send(reqwest::Method::POST, "/tag", &json!({ "label": "x" }))
+        .await;
     l
 }
 
@@ -250,7 +297,15 @@ async fn the_resources_clients_read_carry_every_field_lidarr_sends() {
     let l = seeded().await;
     let contract = contract();
     let gaps = gap_set("fields");
-    let album_id = l.state.db.music().album_by_mbid(OK_COMPUTER).await.unwrap().unwrap().id;
+    let album_id = l
+        .state
+        .db
+        .music()
+        .album_by_mbid(OK_COMPUTER)
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
 
     // (resource, a response that is one, and any nested resources to check as well)
     let artist = l.get("/artist/1").await;
@@ -261,7 +316,11 @@ async fn the_resources_clients_read_carry_every_field_lidarr_sends() {
     let history = l.get("/history?includeAlbum=true").await;
     let blocklist = l.get("/blocklist").await;
     let command = l
-        .send(reqwest::Method::POST, "/command", &json!({ "name": "CheckHealth" }))
+        .send(
+            reqwest::Method::POST,
+            "/command",
+            &json!({ "name": "CheckHealth" }),
+        )
         .await
         .json::<Value>()
         .await
@@ -274,14 +333,23 @@ async fn the_resources_clients_read_carry_every_field_lidarr_sends() {
         ("AlbumStatisticsResource", album["statistics"].clone()),
         ("TrackResource", tracks[0].clone()),
         ("TrackFileResource", files[0].clone()),
-        ("QualityProfileResource", l.get("/qualityprofile").await[0].clone()),
-        ("MetadataProfileResource", l.get("/metadataprofile").await[0].clone()),
+        (
+            "QualityProfileResource",
+            l.get("/qualityprofile").await[0].clone(),
+        ),
+        (
+            "MetadataProfileResource",
+            l.get("/metadataprofile").await[0].clone(),
+        ),
         ("QueueResource", queue["records"][0].clone()),
         ("HistoryResource", history["records"][0].clone()),
         ("BlocklistResource", blocklist["records"][0].clone()),
         ("CommandResource", command),
         ("SystemResource", l.get("/system/status").await),
-        ("QualityDefinitionResource", l.get("/qualitydefinition").await[0].clone()),
+        (
+            "QualityDefinitionResource",
+            l.get("/qualitydefinition").await[0].clone(),
+        ),
     ];
     let roots = l.get("/rootfolder").await;
     if let Some(r) = roots.as_array().and_then(|a| a.first()) {

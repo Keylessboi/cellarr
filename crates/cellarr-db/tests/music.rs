@@ -75,15 +75,27 @@ fn file(path: &str, size: u64) -> MediaFile {
 async fn ids_are_sequential_and_the_content_id_carries_the_same_number() {
     let db = common::test_database().await;
     let lib = music_library(&db).await;
-    let a = db.music().add_artist(lib, artist("Radiohead", "mb-a1")).await.unwrap();
-    let b = db.music().add_artist(lib, artist("Burial", "mb-a2")).await.unwrap();
+    let a = db
+        .music()
+        .add_artist(lib, artist("Radiohead", "mb-a1"))
+        .await
+        .unwrap();
+    let b = db
+        .music()
+        .add_artist(lib, artist("Burial", "mb-a2"))
+        .await
+        .unwrap();
     assert_eq!((a.id, b.id), (1, 2));
     assert_eq!(seq_of_uuid(a.content_id.as_uuid()), 1);
     assert_eq!(seq_of_uuid(b.content_id.as_uuid()), 2);
 
     let albums = db
         .music()
-        .upsert_albums(lib, a.content_id, vec![album("OK Computer", "mb-rg1", "1997-05-21")])
+        .upsert_albums(
+            lib,
+            a.content_id,
+            vec![album("OK Computer", "mb-rg1", "1997-05-21")],
+        )
         .await
         .unwrap();
     assert_eq!(albums[0].id, 1, "albums have their own sequence");
@@ -98,17 +110,31 @@ async fn a_preset_id_is_kept_and_later_ids_continue_above_it() {
     migrated.id = Some(907);
     let a = db.music().add_artist(lib, migrated).await.unwrap();
     assert_eq!(a.id, 907);
-    let b = db.music().add_artist(lib, artist("Burial", "mb-a2")).await.unwrap();
+    let b = db
+        .music()
+        .add_artist(lib, artist("Burial", "mb-a2"))
+        .await
+        .unwrap();
     assert_eq!(b.id, 908);
-    assert_eq!(db.music().artist(907).await.unwrap().unwrap().name, "Radiohead");
+    assert_eq!(
+        db.music().artist(907).await.unwrap().unwrap().name,
+        "Radiohead"
+    );
 }
 
 #[tokio::test]
 async fn an_artist_is_added_once_per_musicbrainz_id() {
     let db = common::test_database().await;
     let lib = music_library(&db).await;
-    db.music().add_artist(lib, artist("Radiohead", "mb-a1")).await.unwrap();
-    assert!(db.music().add_artist(lib, artist("Radiohead", "mb-a1")).await.is_err());
+    db.music()
+        .add_artist(lib, artist("Radiohead", "mb-a1"))
+        .await
+        .unwrap();
+    assert!(db
+        .music()
+        .add_artist(lib, artist("Radiohead", "mb-a1"))
+        .await
+        .is_err());
     assert_eq!(db.music().artists().await.unwrap().len(), 1);
 }
 
@@ -116,13 +142,24 @@ async fn an_artist_is_added_once_per_musicbrainz_id() {
 async fn a_refresh_updates_metadata_but_never_the_monitored_flag() {
     let db = common::test_database().await;
     let lib = music_library(&db).await;
-    let a = db.music().add_artist(lib, artist("Radiohead", "mb-a1")).await.unwrap();
-    let first = db
+    let a = db
         .music()
-        .upsert_albums(lib, a.content_id, vec![album("OK Computr", "mb-rg1", "1997")])
+        .add_artist(lib, artist("Radiohead", "mb-a1"))
         .await
         .unwrap();
-    db.music().set_monitored(vec![first[0].content_id], false).await.unwrap();
+    let first = db
+        .music()
+        .upsert_albums(
+            lib,
+            a.content_id,
+            vec![album("OK Computr", "mb-rg1", "1997")],
+        )
+        .await
+        .unwrap();
+    db.music()
+        .set_monitored(vec![first[0].content_id], false)
+        .await
+        .unwrap();
 
     let again = db
         .music()
@@ -142,7 +179,10 @@ async fn a_refresh_updates_metadata_but_never_the_monitored_flag() {
     let stored = db.music().album_by_mbid("mb-rg1").await.unwrap().unwrap();
     assert_eq!(stored.title, "OK Computer");
     assert_eq!(stored.release_date.as_deref(), Some("1997-05-21"));
-    assert!(!stored.monitored, "the user's unmonitor survives the refresh");
+    assert!(
+        !stored.monitored,
+        "the user's unmonitor survives the refresh"
+    );
     assert_eq!(stored.id, first[0].id, "the album keeps its id");
 }
 
@@ -154,7 +194,14 @@ async fn albums_are_found_by_normalized_artist_and_title_or_alias() {
     sr.aliases = vec!["Sigur Ros".into()];
     let a = db.music().add_artist(lib, sr).await.unwrap();
     db.music()
-        .upsert_albums(lib, a.content_id, vec![album("( )", "mb-rg0", "2002"), album("Ágætis byrjun", "mb-rg1", "1999")])
+        .upsert_albums(
+            lib,
+            a.content_id,
+            vec![
+                album("( )", "mb-rg0", "2002"),
+                album("Ágætis byrjun", "mb-rg1", "1999"),
+            ],
+        )
         .await
         .unwrap();
 
@@ -185,12 +232,20 @@ async fn albums_are_found_by_normalized_artist_and_title_or_alias() {
 async fn a_title_naming_artist_and_album_without_a_separator_is_matched_jointly() {
     let db = common::test_database().await;
     let lib = music_library(&db).await;
-    let a = db.music().add_artist(lib, artist("Boards of Canada", "mb-a1")).await.unwrap();
+    let a = db
+        .music()
+        .add_artist(lib, artist("Boards of Canada", "mb-a1"))
+        .await
+        .unwrap();
     db.music()
         .upsert_albums(lib, a.content_id, vec![album("Geogaddi", "mb-rg1", "2002")])
         .await
         .unwrap();
-    let hits = db.music().albums_named_jointly("boards of canada geogaddi").await.unwrap();
+    let hits = db
+        .music()
+        .albums_named_jointly("boards of canada geogaddi")
+        .await
+        .unwrap();
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].album.title, "Geogaddi");
 }
@@ -199,10 +254,18 @@ async fn a_title_naming_artist_and_album_without_a_separator_is_matched_jointly(
 async fn refetching_tracks_keeps_ids_and_never_orphans_a_file() {
     let db = common::test_database().await;
     let lib = music_library(&db).await;
-    let a = db.music().add_artist(lib, artist("Radiohead", "mb-a1")).await.unwrap();
+    let a = db
+        .music()
+        .add_artist(lib, artist("Radiohead", "mb-a1"))
+        .await
+        .unwrap();
     let al = db
         .music()
-        .upsert_albums(lib, a.content_id, vec![album("OK Computer", "mb-rg1", "1997")])
+        .upsert_albums(
+            lib,
+            a.content_id,
+            vec![album("OK Computer", "mb-rg1", "1997")],
+        )
         .await
         .unwrap()
         .remove(0);
@@ -213,7 +276,11 @@ async fn refetching_tracks_keeps_ids_and_never_orphans_a_file() {
             lib,
             al.content_id,
             Some("mb-rel1".into()),
-            vec![track(1, 1, "Airbag"), track(1, 2, "Paranoid Android"), track(1, 3, "Bonus")],
+            vec![
+                track(1, 1, "Airbag"),
+                track(1, 2, "Paranoid Android"),
+                track(1, 3, "Bonus"),
+            ],
         )
         .await
         .unwrap();
@@ -230,15 +297,27 @@ async fn refetching_tracks_keeps_ids_and_never_orphans_a_file() {
             lib,
             al.content_id,
             Some("mb-rel2".into()),
-            vec![track(1, 1, "Airbag"), track(1, 2, "Paranoid Android (Remaster)")],
+            vec![
+                track(1, 1, "Airbag"),
+                track(1, 2, "Paranoid Android (Remaster)"),
+            ],
         )
         .await
         .unwrap();
     assert_eq!(second[0].id, first[0].id, "a kept track keeps its id");
     assert_eq!(second[1].title, "Paranoid Android (Remaster)");
-    assert_eq!(second.len(), 3, "the dropped track survives because it has a file");
+    assert_eq!(
+        second.len(),
+        3,
+        "the dropped track survives because it has a file"
+    );
 
-    let stored = db.music().album_by_content(al.content_id).await.unwrap().unwrap();
+    let stored = db
+        .music()
+        .album_by_content(al.content_id)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(stored.release_mbid.as_deref(), Some("mb-rel2"));
     assert!(stored.tracks_fetched_at.is_some());
 }
@@ -247,7 +326,11 @@ async fn refetching_tracks_keeps_ids_and_never_orphans_a_file() {
 async fn an_album_is_missing_until_a_track_file_lands_and_the_sweep_agrees() {
     let db = common::test_database().await;
     let lib = music_library(&db).await;
-    let a = db.music().add_artist(lib, artist("Radiohead", "mb-a1")).await.unwrap();
+    let a = db
+        .music()
+        .add_artist(lib, artist("Radiohead", "mb-a1"))
+        .await
+        .unwrap();
     let albums = db
         .music()
         .upsert_albums(
@@ -312,7 +395,10 @@ async fn an_album_is_missing_until_a_track_file_lands_and_the_sweep_agrees() {
     assert_eq!(total, 1);
 
     // Unmonitoring the artist silences what is left.
-    db.music().set_monitored(vec![a.content_id], false).await.unwrap();
+    db.music()
+        .set_monitored(vec![a.content_id], false)
+        .await
+        .unwrap();
     assert!(sweep(db.clone()).await.is_empty());
 }
 
@@ -320,13 +406,20 @@ async fn an_album_is_missing_until_a_track_file_lands_and_the_sweep_agrees() {
 async fn statistics_count_albums_tracks_files_and_bytes() {
     let db = common::test_database().await;
     let lib = music_library(&db).await;
-    let a = db.music().add_artist(lib, artist("Radiohead", "mb-a1")).await.unwrap();
+    let a = db
+        .music()
+        .add_artist(lib, artist("Radiohead", "mb-a1"))
+        .await
+        .unwrap();
     let albums = db
         .music()
         .upsert_albums(
             lib,
             a.content_id,
-            vec![album("OK Computer", "mb-rg1", "1997"), album("Kid A", "mb-rg2", "2000")],
+            vec![
+                album("OK Computer", "mb-rg1", "1997"),
+                album("Kid A", "mb-rg2", "2000"),
+            ],
         )
         .await
         .unwrap();
@@ -347,14 +440,29 @@ async fn statistics_count_albums_tracks_files_and_bytes() {
 
     let artist_stats = db.music().artist_stats().await.unwrap();
     let s = artist_stats[&a.content_id];
-    assert_eq!((s.album_count, s.track_count, s.track_file_count, s.size_on_disk), (2, 2, 1, 1000));
+    assert_eq!(
+        (
+            s.album_count,
+            s.track_count,
+            s.track_file_count,
+            s.size_on_disk
+        ),
+        (2, 2, 1, 1000)
+    );
 
     let album_stats = db.music().album_stats(Some(a.content_id)).await.unwrap();
     let s = album_stats[&albums[0].content_id];
-    assert_eq!((s.track_count, s.track_file_count, s.size_on_disk), (2, 1, 1000));
+    assert_eq!(
+        (s.track_count, s.track_file_count, s.size_on_disk),
+        (2, 1, 1000)
+    );
     assert!(!album_stats.contains_key(&albums[1].content_id));
 
-    let files = db.music().track_files_for_album(albums[0].content_id).await.unwrap();
+    let files = db
+        .music()
+        .track_files_for_album(albums[0].content_id)
+        .await
+        .unwrap();
     assert_eq!(files.len(), 1);
     assert_eq!(files[0].file.quality.name, "FLAC");
     assert_eq!(files[0].artist_content_id, a.content_id);
@@ -364,10 +472,18 @@ async fn statistics_count_albums_tracks_files_and_bytes() {
 async fn deleting_an_artist_removes_the_subtree_and_reports_its_files() {
     let db = common::test_database().await;
     let lib = music_library(&db).await;
-    let a = db.music().add_artist(lib, artist("Radiohead", "mb-a1")).await.unwrap();
+    let a = db
+        .music()
+        .add_artist(lib, artist("Radiohead", "mb-a1"))
+        .await
+        .unwrap();
     let al = db
         .music()
-        .upsert_albums(lib, a.content_id, vec![album("OK Computer", "mb-rg1", "1997")])
+        .upsert_albums(
+            lib,
+            a.content_id,
+            vec![album("OK Computer", "mb-rg1", "1997")],
+        )
         .await
         .unwrap()
         .remove(0);
@@ -400,7 +516,14 @@ async fn the_standard_metadata_profile_exists_before_any_is_stored() {
     everything.id = 0;
     everything.name = "Everything".into();
     everything.primary_types = vec!["Album".into(), "EP".into(), "Single".into()];
-    let stored = db.music().upsert_metadata_profile(everything).await.unwrap();
-    assert_eq!(stored.id, 2, "a new profile never takes the standard profile's id");
+    let stored = db
+        .music()
+        .upsert_metadata_profile(everything)
+        .await
+        .unwrap();
+    assert_eq!(
+        stored.id, 2,
+        "a new profile never takes the standard profile's id"
+    );
     assert!(db.music().metadata_profile(2).await.unwrap().is_some());
 }

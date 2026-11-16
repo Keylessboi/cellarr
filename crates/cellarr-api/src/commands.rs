@@ -122,14 +122,16 @@ pub fn kind_for_command(name: &str, content_id: Option<String>) -> Option<JobKin
         }
         "diskspacecheck" => Some(JobKind::DiskSpaceCheck),
         // Reconcile in-flight grabs (clean redundant/dead downloads); also a cron.
-        "reconciledownloads" | "reconcilegrabs" | "reconcile" => {
-            Some(JobKind::ReconcileDownloads)
-        }
+        "reconciledownloads" | "reconcilegrabs" | "reconcile" => Some(JobKind::ReconcileDownloads),
         // Reconcile the library in place. cellarr's native name plus the *arr
         // rescan commands (a whole-library disk rescan) so ecosystem clients and the
         // UI's "Rescan" action all resolve to it.
-        "rescanlibrary" | "rescanfolders" | "rescanseries" | "rescanmovie"
-        | "downloadedmoviesscan" | "downloadedepisodesscan" => Some(JobKind::RescanLibrary),
+        "rescanlibrary"
+        | "rescanfolders"
+        | "rescanseries"
+        | "rescanmovie"
+        | "downloadedmoviesscan"
+        | "downloadedepisodesscan" => Some(JobKind::RescanLibrary),
         "manualsearch" | "moviesearch" | "episodesearch" | "seriessearch" => {
             content_id.map(|content_id| JobKind::ManualSearch { content_id })
         }

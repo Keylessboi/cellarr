@@ -98,12 +98,12 @@ pub fn field_meets(parsed: &ParsedRelease, field: ParsedField, threshold: f32) -
 // Re-export the per-extractor entry points so each is individually testable and
 // usable in isolation by callers that only want one slice of the parse.
 pub use audio::extract as extract_audio;
-pub use music::{parse_music_title, quality_of as music_quality_of};
 pub use codec::extract as extract_codec;
 pub use edition::extract as extract_edition;
 pub use group::extract as extract_group;
 pub use hdr::extract as extract_hdr;
 pub use language::extract as extract_language;
+pub use music::{parse_music_title, quality_of as music_quality_of};
 pub use numbering::extract as extract_numbering;
 pub use proper_repack::extract as extract_proper_repack;
 pub use resolution::extract as extract_resolution;

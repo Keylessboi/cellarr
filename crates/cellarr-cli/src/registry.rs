@@ -253,17 +253,29 @@ mod tests {
         let series = mk(
             ContentKind::Series,
             None,
-            Coordinates::Episode { season: 1, episode: 1, absolute: None },
+            Coordinates::Episode {
+                season: 1,
+                episode: 1,
+                absolute: None,
+            },
         );
         let season = mk(
             ContentKind::Season,
             Some(series.id),
-            Coordinates::Episode { season: 1, episode: 0, absolute: None },
+            Coordinates::Episode {
+                season: 1,
+                episode: 0,
+                absolute: None,
+            },
         );
         let episode = mk(
             ContentKind::Episode,
             Some(season.id),
-            Coordinates::Episode { season: 1, episode: 1, absolute: None },
+            Coordinates::Episode {
+                season: 1,
+                episode: 1,
+                absolute: None,
+            },
         );
         for n in [&series, &season, &episode] {
             db.content().upsert(n).await.unwrap();
@@ -323,17 +335,29 @@ mod tests {
         let series = mk(
             ContentKind::Series,
             None,
-            Coordinates::Episode { season: 1, episode: 1, absolute: None },
+            Coordinates::Episode {
+                season: 1,
+                episode: 1,
+                absolute: None,
+            },
         );
         let season = mk(
             ContentKind::Season,
             Some(series.id),
-            Coordinates::Episode { season: 1, episode: 0, absolute: None },
+            Coordinates::Episode {
+                season: 1,
+                episode: 0,
+                absolute: None,
+            },
         );
         let episode = mk(
             ContentKind::Episode,
             Some(season.id),
-            Coordinates::Episode { season: 1, episode: 1, absolute: Some(1) },
+            Coordinates::Episode {
+                season: 1,
+                episode: 1,
+                absolute: Some(1),
+            },
         );
         for n in [&series, &season, &episode] {
             db.content().upsert(n).await.unwrap();
@@ -345,7 +369,13 @@ mod tests {
             .unwrap();
         // Link an external id → creates the series_meta row, then store the alias.
         db.content()
-            .link_external_id(series.id, MediaType::Tv, "tvdb", "78857", "NARUTO－ナルト－")
+            .link_external_id(
+                series.id,
+                MediaType::Tv,
+                "tvdb",
+                "78857",
+                "NARUTO－ナルト－",
+            )
             .await
             .unwrap();
         db.content()

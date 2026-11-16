@@ -53,9 +53,9 @@ pub(crate) async fn profile_seqs(
 ) -> ApiResult<HashMap<QualityProfileId, i64>> {
     let mut known = state.db.music().profile_seqs().await?;
     for id in wanted {
-        if !known.contains_key(&id) {
+        if let std::collections::hash_map::Entry::Vacant(e) = known.entry(id) {
             let seq = state.db.music().profile_seq(id).await?;
-            known.insert(id, seq);
+            e.insert(seq);
         }
     }
     Ok(known)
@@ -93,7 +93,11 @@ async fn artist_resource(state: &AppState, a: &Artist) -> ApiResult<Value> {
 
 /// Fill each artist resource's `lastAlbum` (the newest released) and `nextAlbum`
 /// (the soonest to come), which dashboards and the artist list show.
-async fn attach_neighbours(state: &AppState, resources: &mut [Value], artists: &[&Artist]) -> ApiResult<()> {
+async fn attach_neighbours(
+    state: &AppState,
+    resources: &mut [Value],
+    artists: &[&Artist],
+) -> ApiResult<()> {
     let today = time::OffsetDateTime::now_utc().date().to_string();
     let bounds = state.db.music().artist_album_bounds(&today).await?;
     let wanted: Vec<ContentId> = artists
@@ -143,14 +147,29 @@ impl AlbumRenderer {
             .into_iter()
             .map(|a| (a.content_id, a))
             .collect();
-        let seqs = profile_seqs(state, artists.values().filter_map(|a| a.quality_profile_id).collect()).await?;
+        let seqs = profile_seqs(
+            state,
+            artists
+                .values()
+                .filter_map(|a| a.quality_profile_id)
+                .collect(),
+        )
+        .await?;
         Ok(Self { artists, seqs })
     }
 
     /// Render one slice of albums. Statistics are fetched for exactly the slice.
-    async fn render(&self, state: &AppState, albums: &[Album], with_tracks: bool) -> ApiResult<Vec<Value>> {
+    async fn render(
+        &self,
+        state: &AppState,
+        albums: &[Album],
+        with_tracks: bool,
+    ) -> ApiResult<Vec<Value>> {
         let music = state.db.music();
-        let seq_of = |a: &Artist| a.quality_profile_id.and_then(|p| self.seqs.get(&p).copied());
+        let seq_of = |a: &Artist| {
+            a.quality_profile_id
+                .and_then(|p| self.seqs.get(&p).copied())
+        };
         let wanted: Vec<ContentId> = albums.iter().map(|a| a.content_id).collect();
         let stats: HashMap<ContentId, MusicStats> = music.album_stats_for(&wanted).await?;
         let mut out = Vec::with_capacity(albums.len());
@@ -175,8 +194,15 @@ impl AlbumRenderer {
 }
 
 /// Render albums with their artists and statistics.
-async fn album_resources(state: &AppState, albums: &[Album], with_tracks: bool) -> ApiResult<Vec<Value>> {
-    AlbumRenderer::load(state).await?.render(state, albums, with_tracks).await
+async fn album_resources(
+    state: &AppState,
+    albums: &[Album],
+    with_tracks: bool,
+) -> ApiResult<Vec<Value>> {
+    AlbumRenderer::load(state)
+        .await?
+        .render(state, albums, with_tracks)
+        .await
 }
 
 /// Render albums straight to a JSON array body, a slice at a time.
@@ -185,7 +211,11 @@ async fn album_resources(state: &AppState, albums: &[Album], with_tracks: bool) 
 /// as one tree of values first would hold several times that in memory at once. Here
 /// each slice is rendered, written to the body, and dropped, so peak memory is the
 /// body itself plus one slice.
-async fn album_array(state: &AppState, albums: &[Album], with_tracks: bool) -> ApiResult<axum::response::Response> {
+async fn album_array(
+    state: &AppState,
+    albums: &[Album],
+    with_tracks: bool,
+) -> ApiResult<axum::response::Response> {
     use axum::response::IntoResponse;
     const SLICE: usize = 250;
     let renderer = AlbumRenderer::load(state).await?;
@@ -198,7 +228,8 @@ async fn album_array(state: &AppState, albums: &[Album], with_tracks: bool) -> A
                 body.push(b',');
             }
             first = false;
-            serde_json::to_writer(&mut body, &value).map_err(|e| ApiError::Internal(e.to_string()))?;
+            serde_json::to_writer(&mut body, &value)
+                .map_err(|e| ApiError::Internal(e.to_string()))?;
         }
     }
     body.push(b']');
@@ -222,7 +253,14 @@ pub(crate) async fn list_artists(
         artists.retain(|a| a.mbid.eq_ignore_ascii_case(mbid));
     }
     let stats = music.artist_stats().await?;
-    let seqs = profile_seqs(state, artists.iter().filter_map(|a| a.quality_profile_id).collect()).await?;
+    let seqs = profile_seqs(
+        state,
+        artists
+            .iter()
+            .filter_map(|a| a.quality_profile_id)
+            .collect(),
+    )
+    .await?;
     let mut out: Vec<Value> = artists
         .iter()
         .map(|a| {
@@ -279,11 +317,21 @@ async fn music_library(state: &AppState, root: Option<&str>) -> ApiResult<Librar
 fn safe_folder(name: &str) -> String {
     let cleaned: String = name
         .chars()
-        .map(|c| if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') { ' ' } else { c })
+        .map(|c| {
+            if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') {
+                ' '
+            } else {
+                c
+            }
+        })
         .collect();
     let collapsed = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
     let trimmed = collapsed.trim_matches('.').trim().to_string();
-    if trimmed.is_empty() { "Unknown Artist".to_string() } else { trimmed }
+    if trimmed.is_empty() {
+        "Unknown Artist".to_string()
+    } else {
+        trimmed
+    }
 }
 
 async fn resolve_profile(state: &AppState, body: &Value) -> ApiResult<Option<QualityProfileId>> {
@@ -314,8 +362,14 @@ async fn add_artist_from(state: &AppState, body: &Value) -> ApiResult<Artist> {
     if let Some(existing) = state.db.music().artist_by_mbid(mbid).await? {
         return Ok(existing);
     }
-    let name = body.get("artistName").and_then(Value::as_str).unwrap_or(mbid);
-    let root = body.get("rootFolderPath").and_then(Value::as_str).filter(|s| !s.is_empty());
+    let name = body
+        .get("artistName")
+        .and_then(Value::as_str)
+        .unwrap_or(mbid);
+    let root = body
+        .get("rootFolderPath")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty());
     let path = body
         .get("path")
         .and_then(Value::as_str)
@@ -332,21 +386,33 @@ async fn add_artist_from(state: &AppState, body: &Value) -> ApiResult<Artist> {
     let monitor_new = body
         .get("monitorNewItems")
         .and_then(Value::as_str)
-        .map_or(true, |m| !m.eq_ignore_ascii_case("none"));
+        .is_none_or(|m| !m.eq_ignore_ascii_case("none"));
     let artist = catalogue
         .add_artist(AddArtist {
             library: library.id,
             mbid: mbid.to_string(),
             path,
-            quality_profile_id: resolve_profile(state, body).await?.or(Some(library.default_quality_profile)),
-            metadata_profile_id: body.get("metadataProfileId").and_then(Value::as_i64).unwrap_or(1),
-            monitored: body.get("monitored").and_then(Value::as_bool).unwrap_or(true),
+            quality_profile_id: resolve_profile(state, body)
+                .await?
+                .or(Some(library.default_quality_profile)),
+            metadata_profile_id: body
+                .get("metadataProfileId")
+                .and_then(Value::as_i64)
+                .unwrap_or(1),
+            monitored: body
+                .get("monitored")
+                .and_then(Value::as_bool)
+                .unwrap_or(true),
             monitor,
             monitor_new_albums: monitor_new,
         })
         .await
         .map_err(catalogue_error)?;
-    if options.get("searchForMissingAlbums").and_then(Value::as_bool).unwrap_or(false) {
+    if options
+        .get("searchForMissingAlbums")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
         super::command::search_artist(state, &artist).await?;
     }
     Ok(artist)
@@ -383,16 +449,36 @@ async fn apply_artist_fields(state: &AppState, a: &mut Artist, body: &Value) -> 
     if let Some(m) = body.get("monitorNewItems").and_then(Value::as_str) {
         a.monitor_new_albums = !m.eq_ignore_ascii_case("none");
     }
-    if let Some(p) = body.get("metadataProfileId").and_then(Value::as_i64).filter(|p| *p > 0) {
+    if let Some(p) = body
+        .get("metadataProfileId")
+        .and_then(Value::as_i64)
+        .filter(|p| *p > 0)
+    {
         a.metadata_profile_id = p;
     }
-    if body.get("qualityProfileId").and_then(Value::as_i64).is_some_and(|p| p > 0) {
+    if body
+        .get("qualityProfileId")
+        .and_then(Value::as_i64)
+        .is_some_and(|p| p > 0)
+    {
         a.quality_profile_id = resolve_profile(state, body).await?;
     }
-    if let Some(path) = body.get("path").and_then(Value::as_str).filter(|p| !p.is_empty()) {
+    if let Some(path) = body
+        .get("path")
+        .and_then(Value::as_str)
+        .filter(|p| !p.is_empty())
+    {
         a.path = path.to_string();
-    } else if let Some(root) = body.get("rootFolderPath").and_then(Value::as_str).filter(|r| !r.is_empty()) {
-        a.path = format!("{}/{}", root.trim_end_matches('/'), resources::folder_of(&a.path));
+    } else if let Some(root) = body
+        .get("rootFolderPath")
+        .and_then(Value::as_str)
+        .filter(|r| !r.is_empty())
+    {
+        a.path = format!(
+            "{}/{}",
+            root.trim_end_matches('/'),
+            resources::folder_of(&a.path)
+        );
     }
     Ok(())
 }
@@ -400,10 +486,20 @@ async fn apply_artist_fields(state: &AppState, a: &mut Artist, body: &Value) -> 
 async fn remove_artist(state: &AppState, artist: &Artist, delete_files: bool) -> ApiResult<()> {
     let paths = state.db.music().delete_artist(artist.content_id).await?;
     if delete_files {
-        if let Some(node) = state.db.content().get_node(artist.content_id).await.ok().flatten() {
+        if let Some(node) = state
+            .db
+            .content()
+            .get_node(artist.content_id)
+            .await
+            .ok()
+            .flatten()
+        {
             shim::recycle_content_files(state, &node, &paths).await?;
         } else {
-            tracing::warn!(artist = artist.id, "artist already gone; its files were not removed");
+            tracing::warn!(
+                artist = artist.id,
+                "artist already gone; its files were not removed"
+            );
         }
     }
     Ok(())
@@ -448,7 +544,10 @@ pub(crate) async fn artist_editor_delete(
     Json(body): Json<Value>,
 ) -> ApiResult<Json<Value>> {
     let state = app(&fs);
-    let delete_files = body.get("deleteFiles").and_then(Value::as_bool).unwrap_or(false);
+    let delete_files = body
+        .get("deleteFiles")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     for id in id_list(&body, "artistIds") {
         if let Some(a) = state.db.music().artist(id).await? {
             let node = state.db.content().get_node(a.content_id).await?;
@@ -489,10 +588,24 @@ pub(crate) async fn artist_lookup(
         .ok_or_else(|| ApiError::Domain("no music metadata source is configured".into()))?;
     let hits = match mbid_term(term) {
         Some(mbid) => {
-            let profile = state.db.music().metadata_profile(1).await?.unwrap_or_else(MetadataProfile::standard);
-            vec![catalogue.lookup_artist(mbid, &profile).await.map_err(catalogue_error)?.0]
+            let profile = state
+                .db
+                .music()
+                .metadata_profile(1)
+                .await?
+                .unwrap_or_else(MetadataProfile::standard);
+            vec![
+                catalogue
+                    .lookup_artist(mbid, &profile)
+                    .await
+                    .map_err(catalogue_error)?
+                    .0,
+            ]
         }
-        None => catalogue.search_artists(term).await.map_err(catalogue_error)?,
+        None => catalogue
+            .search_artists(term)
+            .await
+            .map_err(catalogue_error)?,
     };
     let known: HashMap<String, Artist> = state
         .db
@@ -502,7 +615,11 @@ pub(crate) async fn artist_lookup(
         .into_iter()
         .map(|a| (a.mbid.clone(), a))
         .collect();
-    Ok(Json(hits.iter().map(|h| lookup_artist_resource(h, known.get(&h.mbid))).collect()))
+    Ok(Json(
+        hits.iter()
+            .map(|h| lookup_artist_resource(h, known.get(&h.mbid)))
+            .collect(),
+    ))
 }
 
 fn lookup_artist_resource(h: &cellarr_meta::MbArtist, known: Option<&Artist>) -> Value {
@@ -548,9 +665,16 @@ pub(crate) async fn list_albums(
         let a = artist_or_404(state, artist).await?;
         music.albums_for_artist(a.content_id).await?
     } else {
-        let ids: HashSet<i64> = params(&q, "albumIds").iter().filter_map(|v| v.parse().ok()).collect();
+        let ids: HashSet<i64> = params(&q, "albumIds")
+            .iter()
+            .filter_map(|v| v.parse().ok())
+            .collect();
         let all = music.albums().await?;
-        if ids.is_empty() { all } else { all.into_iter().filter(|a| ids.contains(&a.id)).collect() }
+        if ids.is_empty() {
+            all
+        } else {
+            all.into_iter().filter(|a| ids.contains(&a.id)).collect()
+        }
     };
     album_array(state, &albums, flag(&q, "includeTracks")).await
 }
@@ -572,10 +696,16 @@ pub(crate) async fn update_album(
     let state = app(&fs);
     let al = album_or_404(state, id).await?;
     if let Some(m) = body.get("monitored").and_then(Value::as_bool) {
-        state.db.music().set_monitored(vec![al.content_id], m).await?;
+        state
+            .db
+            .music()
+            .set_monitored(vec![al.content_id], m)
+            .await?;
     }
     let fresh = album_or_404(state, id).await?;
-    Ok(Json(album_resources(state, &[fresh], true).await?.remove(0)))
+    Ok(Json(
+        album_resources(state, &[fresh], true).await?.remove(0),
+    ))
 }
 
 pub(crate) async fn delete_album(
@@ -600,7 +730,10 @@ pub(crate) async fn album_monitor(
     Json(body): Json<Value>,
 ) -> ApiResult<Json<Vec<Value>>> {
     let state = app(&fs);
-    let monitored = body.get("monitored").and_then(Value::as_bool).unwrap_or(true);
+    let monitored = body
+        .get("monitored")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
     let mut albums = Vec::new();
     for id in id_list(&body, "albumIds") {
         albums.push(album_or_404(state, id).await?);
@@ -629,10 +762,16 @@ pub(crate) async fn add_album(
         .filter(|s| !s.is_empty())
         .ok_or_else(|| ApiError::BadRequest("foreignAlbumId is required".into()))?;
     if let Some(existing) = state.db.music().album_by_mbid(mbid).await? {
-        return Ok(Json(album_resources(state, &[existing], true).await?.remove(0)));
+        return Ok(Json(
+            album_resources(state, &[existing], true).await?.remove(0),
+        ));
     }
     // The album's artist: by id when the client names one we hold, else added.
-    let artist = match body.get("artistId").and_then(Value::as_i64).filter(|i| *i > 0) {
+    let artist = match body
+        .get("artistId")
+        .and_then(Value::as_i64)
+        .filter(|i| *i > 0)
+    {
         Some(id) => artist_or_404(state, id).await?,
         None => {
             let artist_body = body
@@ -653,7 +792,11 @@ pub(crate) async fn add_album(
         let secondary: Vec<String> = body
             .get("secondaryTypes")
             .and_then(Value::as_array)
-            .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect()
+            })
             .unwrap_or_default();
         state
             .db
@@ -664,16 +807,31 @@ pub(crate) async fn add_album(
                 vec![NewAlbum {
                     id: None,
                     mbid: mbid.to_string(),
-                    title: body.get("title").and_then(Value::as_str).unwrap_or_default().to_string(),
-                    disambiguation: body.get("disambiguation").and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_string),
-                    album_type: body.get("albumType").and_then(Value::as_str).unwrap_or("Album").to_string(),
+                    title: body
+                        .get("title")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                    disambiguation: body
+                        .get("disambiguation")
+                        .and_then(Value::as_str)
+                        .filter(|s| !s.is_empty())
+                        .map(str::to_string),
+                    album_type: body
+                        .get("albumType")
+                        .and_then(Value::as_str)
+                        .unwrap_or("Album")
+                        .to_string(),
                     secondary_types: secondary,
                     release_date: body
                         .get("releaseDate")
                         .and_then(Value::as_str)
                         .map(|d| d.chars().take(10).collect()),
                     release_mbid: None,
-                    monitored: body.get("monitored").and_then(Value::as_bool).unwrap_or(true),
+                    monitored: body
+                        .get("monitored")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(true),
                     added_at: None,
                 }],
             )
@@ -685,11 +843,22 @@ pub(crate) async fn add_album(
         .album_by_mbid(mbid)
         .await?
         .ok_or_else(|| ApiError::Internal("album vanished after being added".into()))?;
-    if body.get("monitored").and_then(Value::as_bool).unwrap_or(true) && !album.monitored {
-        state.db.music().set_monitored(vec![album.content_id], true).await?;
+    if body
+        .get("monitored")
+        .and_then(Value::as_bool)
+        .unwrap_or(true)
+        && !album.monitored
+    {
+        state
+            .db
+            .music()
+            .set_monitored(vec![album.content_id], true)
+            .await?;
     }
     let fresh = album_or_404(state, album.id).await?;
-    Ok(Json(album_resources(state, &[fresh], true).await?.remove(0)))
+    Ok(Json(
+        album_resources(state, &[fresh], true).await?.remove(0),
+    ))
 }
 
 pub(crate) async fn album_lookup(
@@ -705,7 +874,10 @@ pub(crate) async fn album_lookup(
         .music
         .as_ref()
         .ok_or_else(|| ApiError::Domain("no music metadata source is configured".into()))?;
-    let hits = catalogue.search_albums(term).await.map_err(catalogue_error)?;
+    let hits = catalogue
+        .search_albums(term)
+        .await
+        .map_err(catalogue_error)?;
     let known_albums: HashMap<String, Album> = state
         .db
         .music()
@@ -825,15 +997,21 @@ pub(crate) async fn list_tracks(
 ) -> ApiResult<Json<Vec<Value>>> {
     let state = app(&fs);
     let music = state.db.music();
-    let albums: Vec<Album> = if let Some(id) = param(&q, "albumId").and_then(|v| v.parse::<i64>().ok()) {
-        vec![album_or_404(state, id).await?]
-    } else if let Some(id) = param(&q, "artistId").and_then(|v| v.parse::<i64>().ok()) {
-        let a = artist_or_404(state, id).await?;
-        music.albums_for_artist(a.content_id).await?
-    } else {
-        return Err(ApiError::BadRequest("albumId or artistId is required".into()));
-    };
-    let wanted: HashSet<i64> = params(&q, "trackIds").iter().filter_map(|v| v.parse().ok()).collect();
+    let albums: Vec<Album> =
+        if let Some(id) = param(&q, "albumId").and_then(|v| v.parse::<i64>().ok()) {
+            vec![album_or_404(state, id).await?]
+        } else if let Some(id) = param(&q, "artistId").and_then(|v| v.parse::<i64>().ok()) {
+            let a = artist_or_404(state, id).await?;
+            music.albums_for_artist(a.content_id).await?
+        } else {
+            return Err(ApiError::BadRequest(
+                "albumId or artistId is required".into(),
+            ));
+        };
+    let wanted: HashSet<i64> = params(&q, "trackIds")
+        .iter()
+        .filter_map(|v| v.parse().ok())
+        .collect();
     let mut tracks = tracks_for_albums(state, &albums).await?;
     if !wanted.is_empty() {
         tracks.retain(|t| t["id"].as_i64().is_some_and(|i| wanted.contains(&i)));
@@ -890,10 +1068,23 @@ async fn cutoff_ranks(state: &AppState) -> ApiResult<HashMap<ContentId, u32>> {
         .collect())
 }
 
-async fn file_resources(state: &AppState, files: Vec<cellarr_core::TrackFile>) -> ApiResult<Vec<Value>> {
+async fn file_resources(
+    state: &AppState,
+    files: Vec<cellarr_core::TrackFile>,
+) -> ApiResult<Vec<Value>> {
     let music = state.db.music();
-    let artists: HashMap<ContentId, i64> = music.artists().await?.into_iter().map(|a| (a.content_id, a.id)).collect();
-    let albums: HashMap<ContentId, i64> = music.albums().await?.into_iter().map(|a| (a.content_id, a.id)).collect();
+    let artists: HashMap<ContentId, i64> = music
+        .artists()
+        .await?
+        .into_iter()
+        .map(|a| (a.content_id, a.id))
+        .collect();
+    let albums: HashMap<ContentId, i64> = music
+        .albums()
+        .await?
+        .into_iter()
+        .map(|a| (a.content_id, a.id))
+        .collect();
     let cutoffs = cutoff_ranks(state).await?;
     Ok(files
         .iter()
@@ -919,13 +1110,22 @@ pub(crate) async fn list_track_files(
         return Ok(Json(Vec::new()));
     }
     let files = if let Some(id) = param(&q, "albumId").and_then(|v| v.parse::<i64>().ok()) {
-        music.track_files_for_album(album_or_404(state, id).await?.content_id).await?
+        music
+            .track_files_for_album(album_or_404(state, id).await?.content_id)
+            .await?
     } else if let Some(id) = param(&q, "artistId").and_then(|v| v.parse::<i64>().ok()) {
-        music.track_files_for_artist(artist_or_404(state, id).await?.content_id).await?
+        music
+            .track_files_for_artist(artist_or_404(state, id).await?.content_id)
+            .await?
     } else {
-        let ids: Vec<i64> = params(&q, "trackFileIds").iter().filter_map(|v| v.parse().ok()).collect();
+        let ids: Vec<i64> = params(&q, "trackFileIds")
+            .iter()
+            .filter_map(|v| v.parse().ok())
+            .collect();
         if ids.is_empty() {
-            return Err(ApiError::BadRequest("albumId, artistId or trackFileIds is required".into()));
+            return Err(ApiError::BadRequest(
+                "albumId, artistId or trackFileIds is required".into(),
+            ));
         }
         let mut found = Vec::new();
         for id in ids {
@@ -1017,8 +1217,15 @@ fn profile_resource(p: &QualityProfile, seq: i64) -> Value {
 fn profile_from_body(body: &Value, id: QualityProfileId) -> ApiResult<QualityProfile> {
     fn walk(items: &[Value], allowed: &mut Vec<u32>) {
         for item in items {
-            let on = item.get("allowed").and_then(Value::as_bool).unwrap_or(false);
-            if let Some(q) = item.get("quality").and_then(|q| q.get("id")).and_then(Value::as_u64) {
+            let on = item
+                .get("allowed")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            if let Some(q) = item
+                .get("quality")
+                .and_then(|q| q.get("id"))
+                .and_then(Value::as_u64)
+            {
                 if let Some(rank) = u32::try_from(q).ok().and_then(rank_for_id) {
                     if on && !allowed.contains(&rank) {
                         allowed.push(rank);
@@ -1063,9 +1270,14 @@ fn profile_from_body(body: &Value, id: QualityProfileId) -> ApiResult<QualityPro
         walk(items, &mut allowed);
     }
     if allowed.is_empty() {
-        return Err(ApiError::BadRequest("a quality profile must allow at least one quality".into()));
+        return Err(ApiError::BadRequest(
+            "a quality profile must allow at least one quality".into(),
+        ));
     }
-    let cutoff_id = body.get("cutoff").and_then(Value::as_u64).and_then(|c| u32::try_from(c).ok());
+    let cutoff_id = body
+        .get("cutoff")
+        .and_then(Value::as_u64)
+        .and_then(|c| u32::try_from(c).ok());
     let cutoff = cutoff_id
         .and_then(rank_for_id)
         .filter(|r| allowed.contains(r))
@@ -1077,10 +1289,21 @@ fn profile_from_body(body: &Value, id: QualityProfileId) -> ApiResult<QualityPro
         id,
         name: name.to_string(),
         allowed_qualities: allowed,
-        upgrades_allowed: body.get("upgradeAllowed").and_then(Value::as_bool).unwrap_or(true),
+        upgrades_allowed: body
+            .get("upgradeAllowed")
+            .and_then(Value::as_bool)
+            .unwrap_or(true),
         cutoff_quality: cutoff,
-        min_custom_format_score: body.get("minFormatScore").and_then(Value::as_i64).and_then(|v| i32::try_from(v).ok()).unwrap_or(0),
-        upgrade_until_custom_format_score: body.get("cutoffFormatScore").and_then(Value::as_i64).and_then(|v| i32::try_from(v).ok()).unwrap_or(0),
+        min_custom_format_score: body
+            .get("minFormatScore")
+            .and_then(Value::as_i64)
+            .and_then(|v| i32::try_from(v).ok())
+            .unwrap_or(0),
+        upgrade_until_custom_format_score: body
+            .get("cutoffFormatScore")
+            .and_then(Value::as_i64)
+            .and_then(|v| i32::try_from(v).ok())
+            .unwrap_or(0),
         required_languages: Vec::new(),
     })
 }
@@ -1104,7 +1327,12 @@ pub(crate) async fn quality_profiles(State(fs): State<FaceState>) -> ApiResult<J
         .filter(is_music_profile)
         .collect();
     let seqs = profile_seqs(state, profiles.iter().map(|p| p.id).collect()).await?;
-    Ok(Json(profiles.iter().map(|p| profile_resource(p, seqs[&p.id])).collect()))
+    Ok(Json(
+        profiles
+            .iter()
+            .map(|p| profile_resource(p, seqs[&p.id]))
+            .collect(),
+    ))
 }
 
 pub(crate) async fn get_quality_profile(
@@ -1188,7 +1416,9 @@ pub(crate) async fn delete_quality_profile(
             .iter()
             .any(|a| a.quality_profile_id == Some(pid));
         if in_use {
-            return Err(ApiError::BadRequest("the profile is in use by an artist".into()));
+            return Err(ApiError::BadRequest(
+                "the profile is in use by an artist".into(),
+            ));
         }
         state.db.profiles().delete_profile(pid).await?;
     }
@@ -1220,7 +1450,9 @@ pub(crate) async fn quality_definitions(State(_fs): State<FaceState>) -> Json<Ve
 
 pub(crate) async fn metadata_profiles(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
     let profiles = app(&fs).db.music().metadata_profiles().await?;
-    Ok(Json(profiles.iter().map(resources::metadata_profile).collect()))
+    Ok(Json(
+        profiles.iter().map(resources::metadata_profile).collect(),
+    ))
 }
 
 pub(crate) async fn get_metadata_profile(
@@ -1277,10 +1509,21 @@ pub(crate) async fn delete_metadata_profile(
 ) -> ApiResult<Json<Value>> {
     let state = app(&fs);
     if id == 1 {
-        return Err(ApiError::BadRequest("the default metadata profile cannot be deleted".into()));
+        return Err(ApiError::BadRequest(
+            "the default metadata profile cannot be deleted".into(),
+        ));
     }
-    if state.db.music().artists().await?.iter().any(|a| a.metadata_profile_id == id) {
-        return Err(ApiError::BadRequest("the profile is in use by an artist".into()));
+    if state
+        .db
+        .music()
+        .artists()
+        .await?
+        .iter()
+        .any(|a| a.metadata_profile_id == id)
+    {
+        return Err(ApiError::BadRequest(
+            "the profile is in use by an artist".into(),
+        ));
     }
     state.db.music().delete_metadata_profile(id).await?;
     Ok(Json(json!({})))
@@ -1294,12 +1537,18 @@ pub(crate) async fn root_folders(State(fs): State<FaceState>) -> ApiResult<Json<
         base.into_iter()
             .map(|mut v| {
                 if let Some(o) = v.as_object_mut() {
-                    let path = o.get("path").and_then(Value::as_str).unwrap_or_default().to_string();
-                    o.entry("name").or_insert_with(|| json!(resources::folder_of(&path)));
+                    let path = o
+                        .get("path")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string();
+                    o.entry("name")
+                        .or_insert_with(|| json!(resources::folder_of(&path)));
                     o.entry("defaultMetadataProfileId").or_insert(json!(1));
                     o.entry("defaultQualityProfileId").or_insert(json!(0));
                     o.entry("defaultMonitorOption").or_insert(json!("all"));
-                    o.entry("defaultNewItemMonitorOption").or_insert(json!("all"));
+                    o.entry("defaultNewItemMonitorOption")
+                        .or_insert(json!("all"));
                     o.entry("defaultTags").or_insert(json!([]));
                     o.entry("totalSpace").or_insert(json!(0));
                 }
@@ -1327,7 +1576,11 @@ pub(crate) async fn diskspace(State(fs): State<FaceState>) -> ApiResult<Json<Vec
 }
 
 pub(crate) async fn config_host(State(fs): State<FaceState>) -> Json<Value> {
-    let auth = if app(&fs).auth.accepts(None) { "none" } else { "external" };
+    let auth = if app(&fs).auth.accepts(None) {
+        "none"
+    } else {
+        "external"
+    };
     Json(json!({
         "id": 1, "bindAddress": "*", "port": 8686, "sslPort": 6868, "enableSsl": false,
         "launchBrowser": false, "authenticationMethod": auth, "authenticationRequired": "disabledForLocalAddresses",
@@ -1352,7 +1605,9 @@ pub(crate) async fn config_ui(State(_fs): State<FaceState>) -> Json<Value> {
 }
 
 pub(crate) async fn config_indexer(State(_fs): State<FaceState>) -> Json<Value> {
-    Json(json!({ "id": 1, "minimumAge": 0, "maximumSize": 0, "retention": 0, "rssSyncInterval": 15 }))
+    Json(
+        json!({ "id": 1, "minimumAge": 0, "maximumSize": 0, "retention": 0, "rssSyncInterval": 15 }),
+    )
 }
 
 pub(crate) async fn config_downloadclient(State(_fs): State<FaceState>) -> Json<Value> {
@@ -1378,7 +1633,9 @@ pub(crate) async fn config_naming(State(_fs): State<FaceState>) -> Json<Value> {
 }
 
 pub(crate) async fn languages(State(_fs): State<FaceState>) -> Json<Vec<Value>> {
-    Json(vec![json!({ "id": 1, "name": "English", "nameLower": "english" })])
+    Json(vec![
+        json!({ "id": 1, "name": "English", "nameLower": "english" }),
+    ])
 }
 
 pub(crate) async fn indexer_flags(State(_fs): State<FaceState>) -> Json<Vec<Value>> {
@@ -1396,7 +1653,8 @@ pub(crate) async fn system_status(
     let _ = &q;
     let Json(mut v) = shim::system_status(State(fs), Query(shim::StatusQuery::default())).await?;
     if let Some(o) = v.as_object_mut() {
-        o.entry("packageUpdateMechanismMessage").or_insert(Value::Null);
+        o.entry("packageUpdateMechanismMessage")
+            .or_insert(Value::Null);
     }
     Ok(Json(v))
 }
@@ -1465,9 +1723,14 @@ pub(crate) async fn quality_definition(
         .ok_or_else(|| ApiError::NotFound(format!("quality definition {id} not found")))
 }
 
-pub(crate) async fn language(State(_fs): State<FaceState>, Path(id): Path<i64>) -> ApiResult<Json<Value>> {
+pub(crate) async fn language(
+    State(_fs): State<FaceState>,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<Value>> {
     if id == 1 {
-        Ok(Json(json!({ "id": 1, "name": "English", "nameLower": "english" })))
+        Ok(Json(
+            json!({ "id": 1, "name": "English", "nameLower": "english" }),
+        ))
     } else {
         Err(ApiError::NotFound(format!("language {id} not found")))
     }
@@ -1491,7 +1754,8 @@ pub(crate) async fn naming_examples(State(_fs): State<FaceState>) -> Json<Value>
         }
         cellarr_fs::render_name(format, &cellarr_core::NamingTokens { tokens }).unwrap_or_default()
     };
-    let single = "{Artist Folder}/{Album Title} ({Release Year})/{Track} - {Track Title}.{Extension}";
+    let single =
+        "{Artist Folder}/{Album Title} ({Release Year})/{Track} - {Track Title}.{Extension}";
     let multi = "{Artist Folder}/{Album Title} ({Release Year})/CD{Medium}/{Track} - {Track Title}.{Extension}";
     Json(json!({
         "singleTrackExample": render(single, false),

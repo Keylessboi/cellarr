@@ -157,7 +157,11 @@ impl<F: Fetcher> MusicBrainzSource<F> {
     ///
     /// # Errors
     /// Returns a [`MetaError`] on transport, HTTP or decode failure.
-    pub async fn search_artists(&self, query: &str, limit: u32) -> Result<Vec<MbArtist>, MetaError> {
+    pub async fn search_artists(
+        &self,
+        query: &str,
+        limit: u32,
+    ) -> Result<Vec<MbArtist>, MetaError> {
         let lucene = format!("artist:\"{}\"", escape_lucene(query));
         let url = format!(
             "{}/artist?query={}&fmt=json&limit={limit}",
@@ -322,15 +326,22 @@ impl<F: Fetcher> MusicBrainzSource<F> {
 /// 3. among those, the fewest discs (a single CD over the same songs on two LPs);
 /// 4. then the earliest release date, then the id, so the choice is stable.
 #[must_use]
-pub fn pick_release<'a>(releases: &'a [MbRelease], allowed_statuses: &[String]) -> Option<&'a MbRelease> {
+pub fn pick_release<'a>(
+    releases: &'a [MbRelease],
+    allowed_statuses: &[String],
+) -> Option<&'a MbRelease> {
     let status_ok = |r: &MbRelease| {
         allowed_statuses.is_empty()
-            || r.status.as_deref().is_some_and(|s| {
-                allowed_statuses.iter().any(|a| a.eq_ignore_ascii_case(s))
-            })
+            || r.status
+                .as_deref()
+                .is_some_and(|s| allowed_statuses.iter().any(|a| a.eq_ignore_ascii_case(s)))
     };
     let with_tracks: Vec<&MbRelease> = releases.iter().filter(|r| r.track_count() > 0).collect();
-    let mut pool: Vec<&MbRelease> = with_tracks.iter().copied().filter(|r| status_ok(r)).collect();
+    let mut pool: Vec<&MbRelease> = with_tracks
+        .iter()
+        .copied()
+        .filter(|r| status_ok(r))
+        .collect();
     if pool.is_empty() {
         pool = with_tracks;
     }
@@ -540,8 +551,6 @@ struct RawRelease {
 
 #[derive(Deserialize)]
 struct RawMedium {
-    #[serde(default)]
-    position: u32,
     format: Option<String>,
     #[serde(default)]
     tracks: Vec<RawTrack>,
@@ -674,7 +683,10 @@ mod tests {
         ];
         assert_eq!(pick_release(&releases, &official()).unwrap().mbid, "real");
         let only_bootleg = vec![release("boot", "Bootleg", Some("1990"), &[9])];
-        assert_eq!(pick_release(&only_bootleg, &official()).unwrap().mbid, "boot");
+        assert_eq!(
+            pick_release(&only_bootleg, &official()).unwrap().mbid,
+            "boot"
+        );
     }
 
     #[test]
@@ -696,6 +708,9 @@ mod tests {
     #[test]
     fn query_values_are_percent_encoded_and_phrases_escaped() {
         assert_eq!(encode("a b&c=d/é"), "a%20b%26c%3Dd%2F%C3%A9");
-        assert_eq!(escape_lucene("say \"hi\" \\ bye"), "say \\\"hi\\\" \\\\ bye");
+        assert_eq!(
+            escape_lucene("say \"hi\" \\ bye"),
+            "say \\\"hi\\\" \\\\ bye"
+        );
     }
 }

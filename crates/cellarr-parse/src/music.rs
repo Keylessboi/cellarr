@@ -80,7 +80,11 @@ pub fn quality_of(input: &str) -> Option<&'static str> {
     // Bit depth: a `24` only counts next to a lossless marker or an explicit
     // `bit`, so a track count or a sample rate is not mistaken for it.
     let hi_res = any(&["24bit", "24b", "24bits", "hires", "hi-res"])
-        || adjacent(&tokens, "24", &["bit", "bits", "44", "48", "88", "96", "176", "192"])
+        || adjacent(
+            &tokens,
+            "24",
+            &["bit", "bits", "44", "48", "88", "96", "176", "192"],
+        )
         || tokens.iter().any(|t| {
             t.starts_with("24-") && t[3..].chars().all(|c| c.is_ascii_digit() || c == '.')
         });
@@ -112,7 +116,11 @@ pub fn quality_of(input: &str) -> Option<&'static str> {
 
     if has("mp3") || vbr_preset.is_some() {
         if let Some(preset) = vbr_preset {
-            return Some(if preset == 0 { "MP3-VBR-V0" } else { "MP3-VBR-V2" });
+            return Some(if preset == 0 {
+                "MP3-VBR-V0"
+            } else {
+                "MP3-VBR-V2"
+            });
         }
         return bitrate.and_then(mp3_bucket);
     }
@@ -146,7 +154,10 @@ pub fn quality_of(input: &str) -> Option<&'static str> {
     }
     // A bare bitrate with a `kbps` unit and no codec is MP3 in practice: it is the
     // only lossy format routinely advertised by bitrate alone.
-    if tokens.iter().any(|t| t.ends_with("kbps") || t.ends_with("kbit")) {
+    if tokens
+        .iter()
+        .any(|t| t.ends_with("kbps") || t.ends_with("kbit"))
+    {
         return bitrate.and_then(mp3_bucket);
     }
     None
@@ -299,11 +310,51 @@ fn is_scene_tag(field: &str) -> bool {
     let f = f.trim_matches(|c| c == '(' || c == ')' || c == '[' || c == ']');
     matches!(
         f,
-        "web" | "cd" | "cds" | "cdm" | "cdr" | "cdep" | "ep" | "lp" | "vinyl" | "vls" | "flac"
-            | "mp3" | "retail" | "promo" | "proper" | "repack" | "reissue" | "remastered"
-            | "deluxe" | "bootleg" | "dvd" | "sat" | "fm" | "cable" | "tape" | "mag" | "single"
-            | "digital" | "limited" | "advance" | "bonus" | "ost" | "16bit" | "24bit" | "2cd"
-            | "3cd" | "4cd" | "2lp" | "it" | "de" | "fr" | "es" | "nl" | "se" | "jp"
+        "web"
+            | "cd"
+            | "cds"
+            | "cdm"
+            | "cdr"
+            | "cdep"
+            | "ep"
+            | "lp"
+            | "vinyl"
+            | "vls"
+            | "flac"
+            | "mp3"
+            | "retail"
+            | "promo"
+            | "proper"
+            | "repack"
+            | "reissue"
+            | "remastered"
+            | "deluxe"
+            | "bootleg"
+            | "dvd"
+            | "sat"
+            | "fm"
+            | "cable"
+            | "tape"
+            | "mag"
+            | "single"
+            | "digital"
+            | "limited"
+            | "advance"
+            | "bonus"
+            | "ost"
+            | "16bit"
+            | "24bit"
+            | "2cd"
+            | "3cd"
+            | "4cd"
+            | "2lp"
+            | "it"
+            | "de"
+            | "fr"
+            | "es"
+            | "nl"
+            | "se"
+            | "jp"
     ) || (f.len() == 4 && f.chars().all(|c| c.is_ascii_digit()))
         || f.starts_with("24bit")
         || f.starts_with("16bit")
@@ -414,15 +465,36 @@ fn clean_name(segment: &str) -> String {
             break;
         }
     }
-    words.join(" ").trim_matches(|c| c == '-' || c == ' ').to_string()
+    words
+        .join(" ")
+        .trim_matches(|c| c == '-' || c == ' ')
+        .to_string()
 }
 
 fn is_format_word(word: &str) -> bool {
     let w = word.to_lowercase();
     matches!(
         w.as_str(),
-        "flac" | "mp3" | "aac" | "alac" | "ogg" | "wav" | "ape" | "m4a" | "320" | "v0" | "v2"
-            | "320kbps" | "cbr" | "vbr" | "web" | "cd" | "vinyl" | "24bit" | "16bit" | "lossless"
+        "flac"
+            | "mp3"
+            | "aac"
+            | "alac"
+            | "ogg"
+            | "wav"
+            | "ape"
+            | "m4a"
+            | "320"
+            | "v0"
+            | "v2"
+            | "320kbps"
+            | "cbr"
+            | "vbr"
+            | "web"
+            | "cd"
+            | "vinyl"
+            | "24bit"
+            | "16bit"
+            | "lossless"
             | "kbps"
     )
 }
@@ -506,7 +578,10 @@ mod tests {
             names("Burial - 2007 - Untrue [FLAC]"),
             (Some("Burial".into()), Some("Untrue".into()))
         );
-        assert_eq!(parse_music_title("Burial - 2007 - Untrue [FLAC]").year, Some(2007));
+        assert_eq!(
+            parse_music_title("Burial - 2007 - Untrue [FLAC]").year,
+            Some(2007)
+        );
     }
 
     #[test]
@@ -534,7 +609,10 @@ mod tests {
     #[test]
     fn a_scene_title_with_no_format_states_no_quality() {
         let p = parse_music_title("Four_Tet-Rounds-WEB-2003-GRP");
-        assert_eq!(names("Four_Tet-Rounds-WEB-2003-GRP").1.as_deref(), Some("Rounds"));
+        assert_eq!(
+            names("Four_Tet-Rounds-WEB-2003-GRP").1.as_deref(),
+            Some("Rounds")
+        );
         assert_eq!(p.music.unwrap().quality, None);
     }
 
@@ -548,16 +626,28 @@ mod tests {
     #[test]
     fn lossless_qualities_resolve_with_bit_depth() {
         assert_eq!(quality("A - B [FLAC]").as_deref(), Some("FLAC"));
-        assert_eq!(quality("A - B [FLAC 24bit 96kHz]").as_deref(), Some("FLAC 24bit"));
-        assert_eq!(quality("A - B (2020) [24-96 FLAC]").as_deref(), Some("FLAC 24bit"));
-        assert_eq!(quality("A - B [FLAC 24 bit]").as_deref(), Some("FLAC 24bit"));
+        assert_eq!(
+            quality("A - B [FLAC 24bit 96kHz]").as_deref(),
+            Some("FLAC 24bit")
+        );
+        assert_eq!(
+            quality("A - B (2020) [24-96 FLAC]").as_deref(),
+            Some("FLAC 24bit")
+        );
+        assert_eq!(
+            quality("A - B [FLAC 24 bit]").as_deref(),
+            Some("FLAC 24bit")
+        );
         assert_eq!(quality("A - B [ALAC]").as_deref(), Some("ALAC"));
         assert_eq!(quality("A - B [WAV]").as_deref(), Some("WAV"));
     }
 
     #[test]
     fn a_track_count_next_to_flac_is_not_a_bit_depth() {
-        assert_eq!(quality("A - 24 Greatest Hits [FLAC]").as_deref(), Some("FLAC"));
+        assert_eq!(
+            quality("A - 24 Greatest Hits [FLAC]").as_deref(),
+            Some("FLAC")
+        );
     }
 
     #[test]
@@ -601,7 +691,17 @@ mod tests {
 
     #[test]
     fn arbitrary_input_never_panics() {
-        for input in ["", "-", " - ", "((((", "]]]", "a-b-c", "é - ü (", "24-", "-----"] {
+        for input in [
+            "",
+            "-",
+            " - ",
+            "((((",
+            "]]]",
+            "a-b-c",
+            "é - ü (",
+            "24-",
+            "-----",
+        ] {
             let _ = parse_music_title(input);
         }
     }

@@ -21,8 +21,8 @@ use std::collections::HashMap;
 
 use cellarr_core::music::{lidarr_quality_name, normalize_name};
 use cellarr_core::{
-    ContentId, Library, LibraryId, MediaFile, MediaFileId, MetadataProfile, Quality, QualityProfile,
-    QualityProfileId, QualityRanking, RemotePathMapping,
+    ContentId, Library, LibraryId, MediaFile, MediaFileId, MetadataProfile, Quality,
+    QualityProfile, QualityProfileId, QualityRanking, RemotePathMapping,
 };
 use cellarr_db::{Database, NewAlbum, NewArtist, NewTrack};
 use serde_json::Value;
@@ -61,11 +61,13 @@ pub struct MusicReport {
 }
 
 pub(crate) async fn table_exists(pool: &SqlitePool, name: &str) -> Result<bool> {
-    Ok(sqlx::query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1 LIMIT 1")
-        .bind(name)
-        .fetch_optional(pool)
-        .await?
-        .is_some())
+    Ok(
+        sqlx::query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1 LIMIT 1")
+            .bind(name)
+            .fetch_optional(pool)
+            .await?
+            .is_some(),
+    )
 }
 
 /// Whether the database is a Lidarr one: it has the artist/album/release trio.
@@ -115,7 +117,11 @@ pub(crate) async fn preview(pool: &SqlitePool) -> Result<MusicReport> {
 /// read the same.
 fn lower_keys(v: Value) -> Value {
     match v {
-        Value::Object(m) => Value::Object(m.into_iter().map(|(k, v)| (k.to_lowercase(), lower_keys(v))).collect()),
+        Value::Object(m) => Value::Object(
+            m.into_iter()
+                .map(|(k, v)| (k.to_lowercase(), lower_keys(v)))
+                .collect(),
+        ),
         Value::Array(a) => Value::Array(a.into_iter().map(lower_keys).collect()),
         other => other,
     }
@@ -143,8 +149,11 @@ fn quality_of(v: &Value, ranking: &QualityRanking) -> Quality {
         .and_then(lidarr_quality_name)
         .map(str::to_string)
         .or_else(|| ref_name(q));
-    name.and_then(|n| ranking.by_name(&n))
-        .unwrap_or_else(|| ranking.by_name("Unknown").unwrap_or_else(|| Quality::new("Unknown", 0)))
+    name.and_then(|n| ranking.by_name(&n)).unwrap_or_else(|| {
+        ranking
+            .by_name("Unknown")
+            .unwrap_or_else(|| Quality::new("Unknown", 0))
+    })
 }
 
 /// A date column as `yyyy-mm-dd` (Lidarr stores a full timestamp).
@@ -156,7 +165,11 @@ fn date_part(raw: Option<String>) -> Option<String> {
 fn timestamp(raw: Option<String>) -> Option<String> {
     raw.map(|s| {
         let s = s.trim().replace(' ', "T");
-        if s.ends_with('Z') || s.contains('+') { s } else { format!("{s}Z") }
+        if s.ends_with('Z') || s.contains('+') {
+            s
+        } else {
+            format!("{s}Z")
+        }
     })
     .filter(|s| s.len() >= 10)
 }
@@ -170,8 +183,15 @@ fn quality_profile(row: &SqliteRow, ranking: &QualityRanking) -> (i64, QualityPr
     // Group id → the ranks of its members, for resolving a cutoff set on a group.
     let mut groups: HashMap<i64, Vec<u32>> = HashMap::new();
     for item in items.as_array().into_iter().flatten() {
-        let on = item.get("allowed").and_then(Value::as_bool).unwrap_or(false);
-        let members: Vec<u32> = match item.get("items").and_then(Value::as_array).filter(|a| !a.is_empty()) {
+        let on = item
+            .get("allowed")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let members: Vec<u32> = match item
+            .get("items")
+            .and_then(Value::as_array)
+            .filter(|a| !a.is_empty())
+        {
             Some(children) => children
                 .iter()
                 .map(|c| quality_of(c, ranking).rank)
@@ -313,15 +333,23 @@ pub(crate) async fn import(pool: &SqlitePool, db: &Database) -> Result<MusicRepo
 
     // --- profiles: keep Lidarr's integer ids -----------------------------------
     let mut profile_ids: HashMap<i64, QualityProfileId> = HashMap::new();
-    for row in sqlx::query("SELECT * FROM QualityProfiles ORDER BY Id ASC").fetch_all(pool).await? {
+    for row in sqlx::query("SELECT * FROM QualityProfiles ORDER BY Id ASC")
+        .fetch_all(pool)
+        .await?
+    {
         let (seq, profile) = quality_profile(&row, &ranking);
         db.profiles().upsert_profile(&profile).await?;
         music.claim_profile_seq(profile.id, seq).await?;
         profile_ids.insert(seq, profile.id);
         report.quality_profiles += 1;
     }
-    for row in sqlx::query("SELECT * FROM MetadataProfiles ORDER BY Id ASC").fetch_all(pool).await? {
-        music.upsert_metadata_profile(metadata_profile(&row)).await?;
+    for row in sqlx::query("SELECT * FROM MetadataProfiles ORDER BY Id ASC")
+        .fetch_all(pool)
+        .await?
+    {
+        music
+            .upsert_metadata_profile(metadata_profile(&row))
+            .await?;
         report.metadata_profiles += 1;
     }
 
@@ -455,7 +483,11 @@ pub(crate) async fn import(pool: &SqlitePool, db: &Database) -> Result<MusicRepo
             let release = selected.get(&al.id).cloned();
             albums_by_id.insert(
                 al.id,
-                (al.content_id, release.as_ref().map_or(0, |r| r.0), release.map(|r| r.1)),
+                (
+                    al.content_id,
+                    release.as_ref().map_or(0, |r| r.0),
+                    release.map(|r| r.1),
+                ),
             );
         }
     }
@@ -685,24 +717,52 @@ mod tests {
     #[test]
     fn a_reference_is_a_bare_id_or_an_object_with_one() {
         assert_eq!(ref_id(&serde_json::json!(6)), Some(6));
-        assert_eq!(ref_id(&serde_json::json!({ "id": 6, "name": "FLAC" })), Some(6));
+        assert_eq!(
+            ref_id(&serde_json::json!({ "id": 6, "name": "FLAC" })),
+            Some(6)
+        );
         assert_eq!(ref_id(&serde_json::json!("x")), None);
     }
 
     #[test]
     fn timestamps_and_dates_are_normalized() {
-        assert_eq!(date_part(Some("2019-05-01 00:00:00".into())).as_deref(), Some("2019-05-01"));
-        assert_eq!(date_part(Some("2019-05-01T00:00:00Z".into())).as_deref(), Some("2019-05-01"));
+        assert_eq!(
+            date_part(Some("2019-05-01 00:00:00".into())).as_deref(),
+            Some("2019-05-01")
+        );
+        assert_eq!(
+            date_part(Some("2019-05-01T00:00:00Z".into())).as_deref(),
+            Some("2019-05-01")
+        );
         assert_eq!(date_part(Some("".into())), None);
-        assert_eq!(timestamp(Some("2020-01-02 03:04:05".into())).as_deref(), Some("2020-01-02T03:04:05Z"));
-        assert_eq!(timestamp(Some("2020-01-02T03:04:05Z".into())).as_deref(), Some("2020-01-02T03:04:05Z"));
+        assert_eq!(
+            timestamp(Some("2020-01-02 03:04:05".into())).as_deref(),
+            Some("2020-01-02T03:04:05Z")
+        );
+        assert_eq!(
+            timestamp(Some("2020-01-02T03:04:05Z".into())).as_deref(),
+            Some("2020-01-02T03:04:05Z")
+        );
     }
 
     #[test]
     fn a_quality_is_read_from_an_int_or_an_object() {
         let r = QualityRanking::default();
-        assert_eq!(quality_of(&serde_json::json!({ "quality": 6 }), &r).name, "FLAC");
-        assert_eq!(quality_of(&serde_json::json!({ "quality": { "id": 4, "name": "MP3-320" } }), &r).name, "MP3-320");
-        assert_eq!(quality_of(&serde_json::json!({ "quality": 999 }), &r).name, "Unknown");
+        assert_eq!(
+            quality_of(&serde_json::json!({ "quality": 6 }), &r).name,
+            "FLAC"
+        );
+        assert_eq!(
+            quality_of(
+                &serde_json::json!({ "quality": { "id": 4, "name": "MP3-320" } }),
+                &r
+            )
+            .name,
+            "MP3-320"
+        );
+        assert_eq!(
+            quality_of(&serde_json::json!({ "quality": 999 }), &r).name,
+            "Unknown"
+        );
     }
 }

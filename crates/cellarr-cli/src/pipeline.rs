@@ -202,7 +202,10 @@ impl<E: PipelineEnv> LivePipelineHandler<E> {
                 detail: format!("refresh artist: bad id {content_id}"),
             };
         };
-        match music.refresh_artist(cellarr_core::ContentId::from_uuid(uuid)).await {
+        match music
+            .refresh_artist(cellarr_core::ContentId::from_uuid(uuid))
+            .await
+        {
             Ok(report) => {
                 if !report.new_albums.is_empty() {
                     tracing::info!(
@@ -214,7 +217,9 @@ impl<E: PipelineEnv> LivePipelineHandler<E> {
                 JobResult::Success
             }
             Err(CatalogueError::NotFound(detail)) => JobResult::Permanent { detail },
-            Err(e) => JobResult::Retryable { detail: e.to_string() },
+            Err(e) => JobResult::Retryable {
+                detail: e.to_string(),
+            },
         }
     }
 
@@ -244,12 +249,18 @@ impl<E: PipelineEnv> LivePipelineHandler<E> {
                         tracing::warn!(artist = artist.id, error = %e, "artist refresh failed");
                         // Back off for the whole run if MusicBrainz is struggling.
                         if matches!(e, cellarr_jobs::music_sync::CatalogueError::Metadata(_)) {
-                            return JobResult::Retryable { detail: e.to_string() };
+                            return JobResult::Retryable {
+                                detail: e.to_string(),
+                            };
                         }
                     }
                 }
             }
-            Err(e) => return JobResult::Retryable { detail: e.to_string() },
+            Err(e) => {
+                return JobResult::Retryable {
+                    detail: e.to_string(),
+                }
+            }
         }
         match repo.albums_without_tracks(ALBUMS_PER_RUN).await {
             Ok(albums) => {
@@ -257,13 +268,17 @@ impl<E: PipelineEnv> LivePipelineHandler<E> {
                     if let Err(e) = music.ensure_tracks(album.content_id).await {
                         tracing::warn!(album = album.id, error = %e, "track fetch failed");
                         if matches!(e, cellarr_jobs::music_sync::CatalogueError::Metadata(_)) {
-                            return JobResult::Retryable { detail: e.to_string() };
+                            return JobResult::Retryable {
+                                detail: e.to_string(),
+                            };
                         }
                     }
                 }
                 JobResult::Success
             }
-            Err(e) => JobResult::Retryable { detail: e.to_string() },
+            Err(e) => JobResult::Retryable {
+                detail: e.to_string(),
+            },
         }
     }
 
@@ -752,10 +767,7 @@ impl<E: PipelineEnv> LivePipelineHandler<E> {
     /// download the client reports complete, so the row means the bytes are on disk.
     /// A load failure falls back to counting everything, which is the conservative
     /// direction — it throttles rather than floods.
-    async fn active_download_count(
-        &self,
-        in_flight_grabs: usize,
-    ) -> usize {
+    async fn active_download_count(&self, in_flight_grabs: usize) -> usize {
         match self.db.grabs().awaiting_import().await {
             Ok(finished) => in_flight_grabs.saturating_sub(finished.len()),
             Err(e) => {
@@ -1116,9 +1128,15 @@ impl<E: PipelineEnv> LivePipelineHandler<E> {
                         // Bound the batch (and thus the walk cost + onboard write
                         // burst) to `ONBOARD_BATCH_CAP` so a huge library drains gently
                         // over many passes rather than crushing the database in one.
-                        let batch = remaining.map_or(ONBOARD_BATCH_CAP, |r| r.min(ONBOARD_BATCH_CAP));
+                        let batch =
+                            remaining.map_or(ONBOARD_BATCH_CAP, |r| r.min(ONBOARD_BATCH_CAP));
                         match runner
-                            .scan_manual_import(Some(&config.library_root), Some(batch), false, false)
+                            .scan_manual_import(
+                                Some(&config.library_root),
+                                Some(batch),
+                                false,
+                                false,
+                            )
                             .await
                         {
                             Ok(candidates) => {
@@ -1541,9 +1559,7 @@ impl<E: PipelineEnv> LivePipelineHandler<E> {
                     // download whose bytes are on disk is left for a human and never
                     // abandoned, and a cap would abandon a good one whose import hit
                     // a transient (a database blip lasting hours burns any cap).
-                    if let Ok(Some((attempts, last))) =
-                        self.db.grabs().import_attempt(g.id).await
-                    {
+                    if let Ok(Some((attempts, last))) = self.db.grabs().import_attempt(g.id).await {
                         let wait = import_retry_backoff(attempts);
                         let due = last + wait;
                         if time::OffsetDateTime::now_utc() < due {
@@ -1751,14 +1767,18 @@ impl<E: PipelineEnv> LivePipelineHandler<E> {
         // the user may have unmonitored it). Best-effort: a failure is logged and the
         // sweep still succeeds — the daily MissingItemSearch remains the backstop.
         if !to_reacquire.is_empty() {
-            let missing: std::collections::HashSet<cellarr_core::ContentId> =
-                match self.db.content().monitored_missing().await {
-                    Ok(nodes) => nodes.into_iter().map(|n| n.id).collect(),
-                    Err(e) => {
-                        tracing::warn!(error = %e, "reconcile-downloads: monitored-missing load failed; skipping re-acquire");
-                        std::collections::HashSet::new()
-                    }
-                };
+            let missing: std::collections::HashSet<cellarr_core::ContentId> = match self
+                .db
+                .content()
+                .monitored_missing()
+                .await
+            {
+                Ok(nodes) => nodes.into_iter().map(|n| n.id).collect(),
+                Err(e) => {
+                    tracing::warn!(error = %e, "reconcile-downloads: monitored-missing load failed; skipping re-acquire");
+                    std::collections::HashSet::new()
+                }
+            };
             for content in to_reacquire {
                 if !missing.contains(&content.id) {
                     continue; // satisfied or unmonitored since — nothing to re-acquire.
@@ -1817,10 +1837,10 @@ impl<E: PipelineEnv> LivePipelineHandler<E> {
 
 /// The native external id `(scheme, value)` of a lookup candidate — tvdb for TV,
 /// tmdb for movies, then imdb. `None` when the candidate carries no id.
-fn native_external_id<'a>(
-    candidate: &'a cellarr_api::LookupCandidate,
+fn native_external_id(
+    candidate: &cellarr_api::LookupCandidate,
     media_type: MediaType,
-) -> Option<(&'static str, &'a str)> {
+) -> Option<(&'static str, &str)> {
     if media_type == MediaType::Tv {
         if let Some(v) = candidate.external_id("tvdb") {
             return Some(("tvdb", v));
@@ -2073,18 +2093,16 @@ impl<E: PipelineEnv> JobHandler for LivePipelineHandler<E> {
             // Sweep every file for missing wanted-language subtitles, and the
             // on-demand single-node variant behind the UI "Search subtitles" button.
             JobKind::SubtitleScan => self.run_subtitle_scan().await,
-            JobKind::SubtitleSearch { content_id } => {
-                match self.one_node(content_id).await {
-                    Ok(Some(node)) => {
-                        self.fetch_subtitles_for_node(&node).await;
-                        JobResult::Success
-                    }
-                    Ok(None) => JobResult::Permanent {
-                        detail: format!("subtitle search: content {content_id} not found"),
-                    },
-                    Err(detail) => JobResult::Permanent { detail },
+            JobKind::SubtitleSearch { content_id } => match self.one_node(content_id).await {
+                Ok(Some(node)) => {
+                    self.fetch_subtitles_for_node(&node).await;
+                    JobResult::Success
                 }
-            }
+                Ok(None) => JobResult::Permanent {
+                    detail: format!("subtitle search: content {content_id} not found"),
+                },
+                Err(detail) => JobResult::Permanent { detail },
+            },
             JobKind::RefreshArtist { content_id } => self.refresh_artist(content_id).await,
             JobKind::FillTracks => self.fill_music().await,
             // Not pipeline work: a benign success so the scheduler keeps its cadence.
@@ -2129,7 +2147,13 @@ fn pick_best_subtitle<'a>(
 /// Derive the sidecar path a subtitle is written to, beside the media file:
 /// `Movie (2019).mkv` → `Movie (2019).en.srt` (with `.forced`/`.hi` modifiers for
 /// the accessibility variants), the convention media players auto-detect.
-fn subtitle_sidecar_path(media_path: &str, lang: &str, forced: bool, hi: bool, format: &str) -> String {
+fn subtitle_sidecar_path(
+    media_path: &str,
+    lang: &str,
+    forced: bool,
+    hi: bool,
+    format: &str,
+) -> String {
     let p = std::path::Path::new(media_path);
     let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("subtitle");
     let mut name = format!("{stem}.{lang}");
@@ -3698,7 +3722,10 @@ mod import_backoff_tests {
         let mut previous = time::Duration::ZERO;
         for attempts in 1..40u32 {
             let wait = import_retry_backoff(attempts);
-            assert!(wait > time::Duration::ZERO, "attempt {attempts} waited zero");
+            assert!(
+                wait > time::Duration::ZERO,
+                "attempt {attempts} waited zero"
+            );
             assert!(wait >= previous, "attempt {attempts} went backwards");
             assert!(wait <= time::Duration::hours(6));
             previous = wait;

@@ -27,8 +27,8 @@
 #![warn(missing_docs)]
 
 mod config_read;
-mod lidarr;
 mod error;
+mod lidarr;
 mod model;
 mod profiles;
 mod radarr;

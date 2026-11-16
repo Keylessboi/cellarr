@@ -87,8 +87,7 @@ pub trait MusicLookup: Send + Sync {
     ) -> Result<Vec<AlbumCandidate>, Self::Error>;
 
     /// Albums for which `"<artist> <album>"`, normalized, equals `blob`.
-    async fn albums_named_jointly(&self, blob: &str)
-        -> Result<Vec<AlbumCandidate>, Self::Error>;
+    async fn albums_named_jointly(&self, blob: &str) -> Result<Vec<AlbumCandidate>, Self::Error>;
 }
 
 /// Errors from the music module.
@@ -187,7 +186,10 @@ where
                     .await
                     .map_err(MusicModuleError::Lookup)?;
                 for cand in found {
-                    if raw.iter().any(|(c, _)| c.content_ref.id == cand.content_ref.id) {
+                    if raw
+                        .iter()
+                        .any(|(c, _)| c.content_ref.id == cand.content_ref.id)
+                    {
                         continue;
                     }
                     let is_exact = exact_hits
@@ -197,7 +199,8 @@ where
                 }
             }
             _ => {
-                let blob = normalize_name(parsed.clean_title.as_deref().unwrap_or(&parsed.raw_title));
+                let blob =
+                    normalize_name(parsed.clean_title.as_deref().unwrap_or(&parsed.raw_title));
                 if !blob.is_empty() {
                     for cand in self
                         .lookup
@@ -205,7 +208,10 @@ where
                         .await
                         .map_err(MusicModuleError::Lookup)?
                     {
-                        if !raw.iter().any(|(c, _)| c.content_ref.id == cand.content_ref.id) {
+                        if !raw
+                            .iter()
+                            .any(|(c, _)| c.content_ref.id == cand.content_ref.id)
+                        {
                             raw.push((cand, CONF_LOOSE));
                         }
                     }
@@ -316,7 +322,11 @@ fn finalize(raw: Vec<(AlbumCandidate, f32)>, release_year: Option<u16>) -> Vec<C
             let confident = !rivals || (unique_year_match && year_matches(&cand));
             ContentMatch {
                 content_ref: cand.content_ref,
-                confidence: Confidence::new(if confident { conf } else { AMBIGUOUS_CONFIDENCE }),
+                confidence: Confidence::new(if confident {
+                    conf
+                } else {
+                    AMBIGUOUS_CONFIDENCE
+                }),
             }
         })
         .collect()
@@ -416,13 +426,19 @@ mod tests {
             Ok(out)
         }
 
-        async fn albums_named_jointly(&self, blob: &str) -> Result<Vec<AlbumCandidate>, Infallible> {
+        async fn albums_named_jointly(
+            &self,
+            blob: &str,
+        ) -> Result<Vec<AlbumCandidate>, Infallible> {
             Ok(self
                 .albums
                 .iter()
                 .filter(|(_, a)| {
-                    format!("{} {}", normalize_name(&a.artist_name), normalize_name(&a.album_title))
-                        == blob
+                    format!(
+                        "{} {}",
+                        normalize_name(&a.artist_name),
+                        normalize_name(&a.album_title)
+                    ) == blob
                 })
                 .map(|(r, a)| AlbumCandidate {
                     content_ref: r.clone(),
@@ -475,7 +491,10 @@ mod tests {
         let shelf = Shelf::with(&[("Radiohead", "OK Computer", Some(1997))]);
         let (shelf, out) = matches(shelf, "radiohead - ok.computer").await;
         assert_eq!(out.len(), 1);
-        assert_eq!(out[0].content_ref.id, shelf.id_of("OK Computer", Some(1997)));
+        assert_eq!(
+            out[0].content_ref.id,
+            shelf.id_of("OK Computer", Some(1997))
+        );
         assert_eq!(out[0].confidence.value(), CONF_EXACT);
     }
 
@@ -519,7 +538,9 @@ mod tests {
             ("Weezer", "Weezer", Some(2001)),
         ]);
         let (_, out) = matches(shelf, "Weezer - Weezer").await;
-        assert!(out.iter().all(|m| m.confidence.value() == AMBIGUOUS_CONFIDENCE));
+        assert!(out
+            .iter()
+            .all(|m| m.confidence.value() == AMBIGUOUS_CONFIDENCE));
     }
 
     #[tokio::test]
@@ -554,8 +575,12 @@ mod tests {
         content.id = id;
         let terms = module.search_terms(&content).await.unwrap();
         assert_eq!(terms.queries, vec!["Radiohead OK Computer".to_string()]);
-        assert!(terms.ids.contains(&("artist".to_string(), "Radiohead".to_string())));
-        assert!(terms.ids.contains(&("album".to_string(), "OK Computer".to_string())));
+        assert!(terms
+            .ids
+            .contains(&("artist".to_string(), "Radiohead".to_string())));
+        assert!(terms
+            .ids
+            .contains(&("album".to_string(), "OK Computer".to_string())));
         assert_eq!(terms.categories, vec![3000]);
     }
 
@@ -580,8 +605,14 @@ mod tests {
     #[test]
     fn only_trailing_edition_groups_are_stripped() {
         assert_eq!(strip_edition("Nevermind (Deluxe Edition)"), "Nevermind");
-        assert_eq!(strip_edition("Nevermind (Deluxe) [Remastered]"), "Nevermind");
-        assert_eq!(strip_edition("(What's the Story) Morning Glory?"), "(What's the Story) Morning Glory?");
+        assert_eq!(
+            strip_edition("Nevermind (Deluxe) [Remastered]"),
+            "Nevermind"
+        );
+        assert_eq!(
+            strip_edition("(What's the Story) Morning Glory?"),
+            "(What's the Story) Morning Glory?"
+        );
         assert_eq!(strip_edition("( )"), "( )");
         assert_eq!(strip_edition("Plain"), "Plain");
     }

@@ -46,11 +46,11 @@ fn walk(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) -> std::io::Result<()>
             continue;
         }
         if kind.is_dir() {
-            let name = entry
-                .file_name()
-                .to_string_lossy()
-                .to_ascii_lowercase();
-            if !matches!(name.as_str(), "scans" | "artwork" | "covers" | "extras" | "video") {
+            let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+            if !matches!(
+                name.as_str(),
+                "scans" | "artwork" | "covers" | "extras" | "video"
+            ) {
                 walk(&path, depth + 1, out)?;
             }
         } else if kind.is_file() && is_audio_file(&path) {
@@ -76,7 +76,10 @@ pub struct FileClaim {
 /// (`CD2/05 - Song.flac`), so a disc folder name is read too.
 #[must_use]
 pub fn claim_of(path: &Path, tags: Option<&AudioTags>) -> FileClaim {
-    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default();
     let (name_disc, name_track, name_title) = parse_file_name(stem);
     let folder_disc = path
         .parent()
@@ -86,9 +89,7 @@ pub fn claim_of(path: &Path, tags: Option<&AudioTags>) -> FileClaim {
     FileClaim {
         disc: tags.and_then(|t| t.disc).or(name_disc).or(folder_disc),
         track: tags.and_then(|t| t.track).or(name_track),
-        title: tags
-            .and_then(|t| t.title.clone())
-            .or(name_title),
+        title: tags.and_then(|t| t.title.clone()).or(name_title),
     }
 }
 
@@ -113,13 +114,21 @@ fn parse_file_name(stem: &str) -> (Option<u32>, Option<u32>, Option<String>) {
     }
     // `1-03 Title`: disc, track, then a title with no ` - ` separator.
     if let Some((d, rest)) = stem.split_once('-') {
-        let t_digits: String = rest.trim_start().chars().take_while(char::is_ascii_digit).collect();
+        let t_digits: String = rest
+            .trim_start()
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect();
         if let (Ok(d), Ok(t)) = (d.trim().parse::<u32>(), t_digits.parse::<u32>()) {
             let after = rest.trim_start()[t_digits.len()..]
-                .trim_start_matches(|c: char| matches!(c, '.' | ' ' | '_' | '-'))
+                .trim_start_matches(['.', ' ', '_', '-'])
                 .trim();
             if d > 0 && d < 100 && t > 0 && !t_digits.is_empty() && t_digits.len() <= 3 {
-                return (Some(d), Some(t), (!after.is_empty()).then(|| after.to_string()));
+                return (
+                    Some(d),
+                    Some(t),
+                    (!after.is_empty()).then(|| after.to_string()),
+                );
             }
         }
     }
@@ -127,7 +136,7 @@ fn parse_file_name(stem: &str) -> (Option<u32>, Option<u32>, Option<String>) {
     let digits: String = stem.chars().take_while(char::is_ascii_digit).collect();
     if !digits.is_empty() && digits.len() <= 3 {
         let rest = stem[digits.len()..]
-            .trim_start_matches(|c: char| matches!(c, '.' | ' ' | '_' | '-'))
+            .trim_start_matches(['.', ' ', '_', '-'])
             .trim();
         if let Ok(t) = digits.parse::<u32>() {
             if t > 0 {
@@ -203,7 +212,10 @@ pub async fn plan_album_placements(
             };
             if taken.insert((disc, track)) {
                 derived.push(NewTrack {
-                    title: claim.title.clone().unwrap_or_else(|| format!("Track {track}")),
+                    title: claim
+                        .title
+                        .clone()
+                        .unwrap_or_else(|| format!("Track {track}")),
                     disc,
                     position: track,
                     ..NewTrack::default()
@@ -245,7 +257,10 @@ pub async fn plan_album_placements(
 fn locate<'a>(tracks: &'a [Track], claim: &FileClaim, only_disc: Option<u32>) -> Option<&'a Track> {
     if let Some(number) = claim.track {
         let disc = claim.disc.or(only_disc).unwrap_or(1);
-        if let Some(t) = tracks.iter().find(|t| t.disc == disc && t.position == number) {
+        if let Some(t) = tracks
+            .iter()
+            .find(|t| t.disc == disc && t.position == number)
+        {
             return Some(t);
         }
         // A disc-less number on a multi-disc album may be a continuous count.
@@ -318,8 +333,14 @@ mod tests {
         assert_eq!(t("03. Airbag"), (None, Some(3), Some("Airbag".into())));
         assert_eq!(t("03_Airbag"), (None, Some(3), Some("Airbag".into())));
         assert_eq!(t("1-03 Airbag"), (Some(1), Some(3), Some("Airbag".into())));
-        assert_eq!(t("2-07 - Airbag"), (Some(2), Some(7), Some("Airbag".into())));
-        assert_eq!(t("Radiohead - 03 - Airbag"), (None, Some(3), Some("Airbag".into())));
+        assert_eq!(
+            t("2-07 - Airbag"),
+            (Some(2), Some(7), Some("Airbag".into()))
+        );
+        assert_eq!(
+            t("Radiohead - 03 - Airbag"),
+            (None, Some(3), Some("Airbag".into()))
+        );
         assert_eq!(t("Airbag"), (None, None, Some("Airbag".into())));
     }
 
@@ -346,26 +367,50 @@ mod tests {
 
     #[test]
     fn a_file_is_placed_by_disc_and_track_then_by_title() {
-        let tracks = vec![track(1, 1, 1, "Airbag"), track(2, 1, 2, "Lucky"), track(3, 2, 1, "Bonus")];
-        let by_number = FileClaim { disc: Some(2), track: Some(1), title: None };
+        let tracks = vec![
+            track(1, 1, 1, "Airbag"),
+            track(2, 1, 2, "Lucky"),
+            track(3, 2, 1, "Bonus"),
+        ];
+        let by_number = FileClaim {
+            disc: Some(2),
+            track: Some(1),
+            title: None,
+        };
         assert_eq!(locate(&tracks, &by_number, None).unwrap().id, 3);
-        let by_title = FileClaim { disc: None, track: None, title: Some("LUCKY!".into()) };
+        let by_title = FileClaim {
+            disc: None,
+            track: None,
+            title: Some("LUCKY!".into()),
+        };
         assert_eq!(locate(&tracks, &by_title, None).unwrap().id, 2);
-        let unknown = FileClaim { disc: Some(1), track: Some(9), title: Some("Nothing".into()) };
+        let unknown = FileClaim {
+            disc: Some(1),
+            track: Some(9),
+            title: Some("Nothing".into()),
+        };
         assert!(locate(&tracks, &unknown, None).is_none());
     }
 
     #[test]
     fn a_track_number_alone_uses_the_only_disc() {
         let tracks = vec![track(1, 1, 1, "A"), track(2, 1, 2, "B")];
-        let claim = FileClaim { disc: None, track: Some(2), title: None };
+        let claim = FileClaim {
+            disc: None,
+            track: Some(2),
+            title: None,
+        };
         assert_eq!(locate(&tracks, &claim, Some(1)).unwrap().id, 2);
     }
 
     fn tagged(album: Option<&str>) -> (PathBuf, Option<AudioTags>) {
         (
             PathBuf::from("x.flac"),
-            Some(AudioTags { album: album.map(String::from), codec: "flac".into(), ..AudioTags::default() }),
+            Some(AudioTags {
+                album: album.map(String::from),
+                codec: "flac".into(),
+                ..AudioTags::default()
+            }),
         )
     }
 
@@ -373,7 +418,10 @@ mod tests {
     fn a_folder_tagged_as_another_album_is_refused() {
         let wrong = vec![tagged(Some("Kid A")), tagged(Some("Kid A"))];
         assert!(guard_identity("OK Computer", &wrong).is_err());
-        let right = vec![tagged(Some("OK Computer (Remastered)")), tagged(Some("OK Computer"))];
+        let right = vec![
+            tagged(Some("OK Computer (Remastered)")),
+            tagged(Some("OK Computer")),
+        ];
         assert!(guard_identity("OK Computer", &right).is_ok());
         let untagged = vec![tagged(None), tagged(None)];
         assert!(guard_identity("OK Computer", &untagged).is_ok());

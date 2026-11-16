@@ -60,10 +60,18 @@ mod tests {
         let mut seen = std::collections::HashSet::new();
         for q in QualityRanking::default().for_media(cellarr_core::MediaType::Music) {
             let id = lidarr_quality_id(&q.name);
-            assert!(q.name == "Unknown" || id != 0, "{} has no Lidarr id", q.name);
+            assert!(
+                q.name == "Unknown" || id != 0,
+                "{} has no Lidarr id",
+                q.name
+            );
             assert!(seen.insert(id), "{}", q.name);
         }
-        assert_eq!(cellarr_core::music::LIDARR_QUALITY_IDS.len(), seen.len(), "the table and the catalogue agree");
+        assert_eq!(
+            cellarr_core::music::LIDARR_QUALITY_IDS.len(),
+            seen.len(),
+            "the table and the catalogue agree"
+        );
     }
 
     #[test]
