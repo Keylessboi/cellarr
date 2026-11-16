@@ -106,6 +106,32 @@ test-pg *ARGS:
         cargo test -p cellarr-db --features postgres {{ARGS}}
     fi
 
+# --- Lidarr parity -------------------------------------------------------------------------
+
+# Compare cellarr's Lidarr face with a REAL running Lidarr, request for request (status and
+# JSON shape). Needs a Lidarr you started yourself: LIDARR_URL (default :8686) and
+# LIDARR_KEY, with an empty config and its music root at MUSIC_ROOT (a directory both can
+# see). Starts a throwaway cellarr on ephemeral ports in this run's data dir. Add
+# `--record DIR` to refresh the committed recordings (then regenerate the shapes in
+# tests/contracts/real-lidarr/ and run `UPDATE_BASELINE=1 cargo test -p cellarr-api --test lidarr_replay`).
+lidarr-compare *ARGS:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    : "${LIDARR_KEY:?set LIDARR_KEY to the real Lidarr API key}"
+    lidarr="${LIDARR_URL:-http://127.0.0.1:8686}"
+    root="${MUSIC_ROOT:-$(mktemp -d)}"
+    data="$(mktemp -d)"
+    port=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1])')
+    cargo build -p cellarr-cli
+    CELLARR_DATA_DIR="$data" CELLARR_API__PORT=0 CELLARR_API__API_KEY="$LIDARR_KEY" \
+      CELLARR_MUSIC__LIDARR_PORT="$port" ./target/debug/cellarr >"$data/cellarr.log" 2>&1 &
+    pid=$!
+    trap 'kill $pid 2>/dev/null || true; rm -rf "$data"' EXIT
+    for _ in $(seq 1 60); do
+      curl -fs -H "X-Api-Key: $LIDARR_KEY" "http://127.0.0.1:$port/api/v1/system/status" >/dev/null && break; sleep 1
+    done
+    python3 scripts/lidarr-compare "$lidarr" "http://127.0.0.1:$port" --key "$LIDARR_KEY" --music-root "$root" {{ARGS}}
+
 # --- differential oracle (pinned Sonarr/Radarr in Docker) -----------------------------------
 
 # Run the parser parity oracle: bring up pinned Sonarr/Radarr, extract their API

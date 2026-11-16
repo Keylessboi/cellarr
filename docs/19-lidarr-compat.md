@@ -251,3 +251,20 @@ requests identical. The rest are documented differences:
 Download clients use Lidarr's `musicCategory` field name on this face and the shared
 `category` column internally. The indexer and download-client schemas are recorded from a
 real Lidarr (`src/lidarr/templates/`).
+
+## How it is tested
+
+| Layer | Where | Runs in | What it proves |
+|---|---|---|---|
+| Unit and face tests | `cellarr-*/src`, `lidarr_face.rs` | `just test` | Handlers, resources, importer logic |
+| Contract | `lidarr_contract.rs` | `just test` | Every Lidarr path and field is served or a documented gap |
+| Whole daemon | `cellarr-cli/tests/lidarr_e2e.rs` | `just test` | A real daemon, driven only through the Lidarr API against local stubs (metadata, Torznab, qBittorrent): search, grab, download, import, history, queue, and a mis-tagged download that must not reach the library |
+| Offline replay | `lidarr_replay.rs` | `just test` | cellarr against the status and shape a real Lidarr gave for the 127-request scenario. Known differences are a baseline that may only shrink |
+| Live comparison | `just lidarr-compare` | by hand / before release | The same scenario against a running real Lidarr |
+
+Refreshing for a new Lidarr release: run `just lidarr-compare --record DIR` against it,
+regenerate the shapes under `tests/contracts/real-lidarr/`, and rerun the replay test with
+`UPDATE_BASELINE=1`. The diff of the baseline is exactly what moved.
+
+Not covered yet: a real Prowlarr pointed at cellarr, and a migration round trip from a
+Lidarr database the scenario produced.

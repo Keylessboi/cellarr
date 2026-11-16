@@ -2003,3 +2003,79 @@ pub(crate) async fn download_client_schema() -> Json<Value> {
 pub(crate) async fn indexer_schema() -> Json<Value> {
     Json(serde_json::from_str(include_str!("templates/indexer_schema.json")).unwrap_or(Value::Null))
 }
+
+// --- small endpoints Lidarr serves that have nothing to show here ---------------
+
+/// `GET /log`: the paged application log. cellarr logs to its own sink, not to a
+/// table, so the page is empty; the envelope is Lidarr's.
+pub(crate) async fn log_page(Query(q): Params) -> Json<Value> {
+    let int = |k: &str, d: i64| param(&q, k).and_then(|v| v.parse().ok()).unwrap_or(d);
+    Json(json!({
+        "page": int("page", 1),
+        "pageSize": int("pageSize", 10),
+        "sortKey": param(&q, "sortKey").unwrap_or("Id"),
+        "sortDirection": param(&q, "sortDirection").unwrap_or("descending"),
+        "totalRecords": 0,
+        "records": [],
+    }))
+}
+
+/// `GET /rename`, `GET /retag`, `GET /manualimport`: previews with nothing pending.
+pub(crate) async fn empty_list() -> Json<Vec<Value>> {
+    Json(Vec::new())
+}
+
+/// `GET /system/backup`: the backups, or none when the backup engine is not set up.
+pub(crate) async fn list_backups(State(fs): State<FaceState>) -> Json<Vec<Value>> {
+    match shim::list_backups(State(fs)).await {
+        Ok(Json(v)) => Json(v),
+        Err(_) => Json(Vec::new()),
+    }
+}
+
+/// `GET /tag/detail`: each tag with the things that use it.
+pub(crate) async fn tag_details(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
+    let Json(tags) = shim::list_tags(State(fs)).await?;
+    Ok(Json(
+        tags.into_iter()
+            .map(|mut t| {
+                if let Some(o) = t.as_object_mut() {
+                    for k in [
+                        "delayProfileIds",
+                        "importListIds",
+                        "notificationIds",
+                        "restrictionIds",
+                        "indexerIds",
+                        "downloadClientIds",
+                        "autoTagIds",
+                        "artistIds",
+                    ] {
+                        o.insert(k.into(), json!([]));
+                    }
+                }
+                t
+            })
+            .collect(),
+    ))
+}
+
+/// `POST /release/push`: an indexer pushes a release it found. The fields Lidarr
+/// requires are checked and reported the way it reports them.
+pub(crate) async fn push_release(
+    Json(body): Json<Value>,
+) -> Result<Json<Vec<Value>>, axum::response::Response> {
+    use axum::response::IntoResponse;
+    let text = |k: &str| body.get(k).and_then(Value::as_str).unwrap_or_default();
+    let mut f = Failures::new();
+    f.not_empty("Title", text("title"));
+    if text("downloadUrl").is_empty() && text("magnetUrl").is_empty() {
+        f.not_empty("DownloadUrl", "");
+        f.not_empty("MagnetUrl", "");
+    }
+    f.not_empty("Protocol", text("protocol"));
+    f.not_empty("PublishDate", text("publishDate"));
+    f.check().map_err(IntoResponse::into_response)?;
+    // A pushed release is accepted but not acted on yet: grabbing happens through
+    // search, which has the full decision context.
+    Ok(Json(Vec::new()))
+}

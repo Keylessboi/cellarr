@@ -352,10 +352,7 @@
     "[].presets[]: Lidarr has no elements, cellarr has"
   ],
   "log": [
-    "status: Lidarr 200, cellarr 404"
-  ],
-  "manualimport": [
-    "status: Lidarr 200, cellarr 404"
+    ".records[]: Lidarr has elements, cellarr has none"
   ],
   "notification_schema": [
     "[].fields[].helpLink: missing from cellarr (Lidarr: string)",
@@ -447,15 +444,6 @@
   "qualityprofile_put_404": [
     "status: Lidarr 500, cellarr 404"
   ],
-  "release_push_bad": [
-    "status: Lidarr 400, cellarr 404"
-  ],
-  "rename": [
-    "status: Lidarr 200, cellarr 404"
-  ],
-  "retag": [
-    "status: Lidarr 200, cellarr 404"
-  ],
   "rootfolder_missing_path": [
     "[].formattedMessagePlaceholderValues.comparisonProperty: missing from cellarr (Lidarr: string)",
     "[].formattedMessagePlaceholderValues.comparisonValue: missing from cellarr (Lidarr: integer)"
@@ -463,14 +451,8 @@
   "rootfolder_nonexistent": [
     "[].formattedMessagePlaceholderValues.path: missing from cellarr (Lidarr: string)"
   ],
-  "system_backup": [
-    "status: Lidarr 200, cellarr 500"
-  ],
   "system_task": [
     "[]: Lidarr has elements, cellarr has none"
-  ],
-  "tag_detail": [
-    "status: Lidarr 200, cellarr 400"
   ],
   "track_list_by_artist": [
     "[].artist: extra in cellarr"

@@ -69,7 +69,7 @@ pub fn router(state: AppState) -> Router {
         .route("/health", get(shim::health))
         .route(
             "/system/backup",
-            get(shim::list_backups).post(shim::create_backup),
+            get(handlers::list_backups).post(shim::create_backup),
         )
         .route("/system/backup/{id}", delete(shim::delete_backup))
         .route("/system/backup/restore/{id}", post(shim::restore_backup_id))
@@ -77,6 +77,12 @@ pub fn router(state: AppState) -> Router {
             "/system/backup/restore/upload",
             post(shim::restore_backup_upload),
         )
+        .route("/log", get(handlers::log_page))
+        .route("/rename", get(handlers::empty_list))
+        .route("/retag", get(handlers::empty_list))
+        .route("/manualimport", get(handlers::empty_list))
+        .route("/release/push", post(handlers::push_release))
+        .route("/tag/detail", get(handlers::tag_details))
         .route("/log/file", get(shim::list_log_files))
         .route("/log/file/{name}", get(shim::read_log_file))
         .route("/update", get(shim::list_updates))
