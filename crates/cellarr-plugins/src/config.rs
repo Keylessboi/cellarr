@@ -78,6 +78,16 @@ impl HostConfig {
     }
 
     /// Override the fuel budget. `None` disables fuel metering.
+    /// Core instances one call may create. A component built from a core module
+    /// has a few (the module plus its adapter shims).
+    #[must_use]
+    pub fn with_max_instances(mut self, n: usize) -> Self {
+        self.max_instances = n;
+        // Each core instance may bring its own table.
+        self.max_tables = self.max_tables.max(n);
+        self
+    }
+
     #[must_use]
     pub fn with_fuel(mut self, fuel: Option<u64>) -> Self {
         self.fuel = fuel;

@@ -306,3 +306,14 @@ clean-run:
     -docker compose -p "cellarr-oracle-{{run_id}}" -f tests/oracle/docker-compose.yml down -v >/dev/null 2>&1
     -rm -rf "{{run_dir}}"
     @echo "cleaned run {{run_id}}"
+
+# Rebuild the example WASM plugins and refresh the host's test fixtures.
+plugin-examples:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    rustup target add wasm32-unknown-unknown >/dev/null
+    for p in torznab-indexer:torznab qbit-client:qbit; do
+      dir=${p%%:*}; out=${p##*:}
+      (cd examples/plugins/$dir && cargo build --release --target wasm32-unknown-unknown)
+      cp examples/plugins/$dir/target/wasm32-unknown-unknown/release/*.wasm crates/cellarr-plugins/tests/fixtures/$out.wasm
+    done

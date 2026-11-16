@@ -1,24 +1,14 @@
-//! The wasmtime Component-Model host (behind the `wasm` feature).
+//! The wasmtime host (behind the `wasm` feature).
 //!
-//! [`IndexerPluginHost`] compiles a WASM component implementing the
-//! `cellarr:plugins/indexer-plugin` world, instantiates it under strict
-//! resource limits, grants only the explicitly configured capabilities, and
-//! adapts the result to the shapes the rest of cellarr speaks.
+//! A [`Plugin`] is one compiled component implementing either the
+//! `indexer-plugin` or the `download-client-plugin` world of `wit/plugins.wit`.
+//! Compilation happens once; every call gets a fresh store and instance, under
+//! fuel, an epoch deadline and memory limits, with an HTTP capability scoped to
+//! the hosts that call's settings name. Nothing survives between calls.
 //!
-//! Design notes:
-//! - **No ambient authority.** The linker is built empty and given exactly one
-//!   import — `cellarr:plugins/http` — wired to either the granted
-//!   [`HttpCapability`] or a deny-all stub depending on [`HostConfig::grant_http`].
-//!   No WASI, no sockets, no clocks, no filesystem are added.
-//! - **Three resource controls.** Fuel (via `Config::consume_fuel` +
-//!   `Store::set_fuel`), epoch interruption (via `Config::epoch_interruption` +
-//!   `Store::set_epoch_deadline`, ticked by a background thread), and memory via
-//!   `StoreLimits`. A guest that exhausts any of them traps; the host maps the
-//!   trap to [`PluginError::ResourceLimit`] and drops the instance, so a
-//!   misbehaving plugin cannot affect the daemon.
-//! - **Fresh instance per invocation.** Each call builds a new `Store` and
-//!   instance; `max_instances` is 1. This is the spec's posture for untrusted
-//!   code — no state survives between calls.
+//! A plugin may be shipped as a component or as a plain core module built with
+//! `wit-bindgen` for `wasm32-unknown-unknown`; a core module is turned into a
+//! component at load time, so authors need nothing beyond `cargo build`.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -27,81 +17,265 @@ use std::time::Duration;
 use wasmtime::component::{Component, HasSelf, Linker};
 use wasmtime::{Config, Engine, Store, StoreLimits, StoreLimitsBuilder};
 
-use cellarr_core::ids::IndexerId;
-use cellarr_core::release::{Protocol, Release};
-use cellarr_core::traits::SearchTerms;
-
-use crate::capability::{DenyAllHttp, HttpCapability};
+use crate::capability::{
+    origins_in_settings, AllowListHttp, DenyAllHttp, HttpCapability, HttpRequest, HttpResponse,
+};
 use crate::config::HostConfig;
 use crate::error::{PluginError, Result};
 
-// Generate host/guest bindings from the WIT world. The host implements the
-// imported `http` interface; the guest implements the exported `indexer`.
-// WASIp2 sync per the spec's default posture — no async.
-wasmtime::component::bindgen!({
-    path: "wit/indexer.wit",
-    world: "indexer-plugin",
-});
+mod idx {
+    wasmtime::component::bindgen!({
+        path: "wit/plugins.wit",
+        world: "indexer-plugin",
+    });
+}
 
-use cellarr::plugins::http::{Host as HttpHost, HttpResponse as WitHttpResponse};
-use cellarr::plugins::types::{
-    PluginError as WitPluginError, Protocol as WitProtocol, Release as WitRelease,
-    SearchTerms as WitSearchTerms,
-};
+mod dlc {
+    wasmtime::component::bindgen!({
+        path: "wit/plugins.wit",
+        world: "download-client-plugin",
+    });
+}
 
-/// Per-store data: the resource limiter plus the granted capability.
-///
-/// wasmtime threads this through every host import and the `Store::limiter`
-/// callback. Keeping the capability here is what lets the same generated `Host`
-/// impl serve a real fetcher or a deny-all stub with no branching in the guest.
+/// The network a plugin's HTTP capability uses once a request is allowed.
+pub type Transport = Arc<dyn Fn(&HttpRequest) -> Result<HttpResponse> + Send + Sync>;
+
+/// Which interface a plugin implements.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PluginKind {
+    /// An indexer.
+    Indexer,
+    /// A download client.
+    DownloadClient,
+}
+
+/// The protocol a plugin's releases or downloads use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PluginProtocol {
+    /// BitTorrent.
+    Torrent,
+    /// Usenet.
+    Usenet,
+}
+
+/// Who a plugin says it is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginInfo {
+    /// The implementation name *arr clients see.
+    pub name: String,
+    /// The plugin's version.
+    pub version: String,
+    /// One line about it.
+    pub description: String,
+    /// Torrent or Usenet.
+    pub protocol: PluginProtocol,
+}
+
+/// One setting the plugin takes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginField {
+    /// Field name (the settings key).
+    pub name: String,
+    /// Label.
+    pub label: String,
+    /// *arr field type.
+    pub kind: String,
+    /// Default, as JSON.
+    pub default_value: String,
+    /// Help text.
+    pub help_text: String,
+    /// Hidden behind "advanced".
+    pub advanced: bool,
+    /// A secret.
+    pub privacy: bool,
+}
+
+/// A release a plugin indexer returned.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginRelease {
+    /// Title.
+    pub title: String,
+    /// Where to get it.
+    pub download_url: String,
+    /// Stable id.
+    pub guid: Option<String>,
+    /// Protocol.
+    pub protocol: PluginProtocol,
+    /// Bytes.
+    pub size: Option<u64>,
+    /// Seeders.
+    pub seeders: Option<u32>,
+    /// Flags (`freeleech`, ...).
+    pub indexer_flags: Vec<String>,
+}
+
+/// Search terms handed to a plugin indexer.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PluginSearch {
+    /// Free-text queries.
+    pub queries: Vec<String>,
+    /// Structured terms (`artist`, `album`, ...).
+    pub ids: Vec<(String, String)>,
+    /// Numbering (`season`, `ep`, ...).
+    pub numbering: Vec<(String, String)>,
+}
+
+/// A download's state, from a plugin client.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PluginDownloadState {
+    /// Waiting.
+    Queued,
+    /// In progress.
+    Downloading,
+    /// Done and importable.
+    Completed,
+    /// Failed.
+    Failed,
+}
+
+/// A download's status, from a plugin client.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PluginDownloadStatus {
+    /// State.
+    pub state: PluginDownloadState,
+    /// 0..=1.
+    pub progress: f32,
+    /// Where the finished content is.
+    pub content_path: Option<String>,
+    /// Seed ratio.
+    pub ratio: Option<f32>,
+    /// Seconds seeded.
+    pub seeding_time_secs: Option<u64>,
+    /// Connected peers.
+    pub peers: Option<u32>,
+    /// Why it failed.
+    pub error_message: Option<String>,
+}
+
 struct HostState {
     limits: StoreLimits,
     http: Arc<dyn HttpCapability>,
 }
 
-// The generated `http::Host` trait — the host side of the one granted import.
-// A guest calling `fetch` lands here; we defer entirely to the configured
-// capability, which enforces allow-list / deny-all policy.
-impl HttpHost for HostState {
-    fn fetch(&mut self, url: String) -> std::result::Result<WitHttpResponse, WitPluginError> {
-        match self.http.fetch(&url) {
-            Ok(resp) => Ok(WitHttpResponse {
-                status: resp.status,
-                body: resp.body,
-            }),
-            // A denied/failed capability is a *guest-visible* error, not a host
-            // trap: the guest gets a `result::err` it can handle.
-            Err(e) => Err(WitPluginError {
-                message: e.to_string(),
-            }),
-        }
+impl HostState {
+    fn send(&self, req: &HttpRequest) -> std::result::Result<HttpResponse, String> {
+        self.http.send(req).map_err(|e| e.to_string())
     }
 }
 
-/// A compiled indexer plugin, ready to instantiate per call.
-///
-/// Compilation (the expensive step) happens once in [`IndexerPluginHost::from_bytes`];
-/// each `search`/`latest`/`name` call gets a fresh `Store` and instance.
-pub struct IndexerPluginHost {
+impl idx::cellarr::plugins::http::Host for HostState {
+    fn send(
+        &mut self,
+        req: idx::cellarr::plugins::http::HttpRequest,
+    ) -> std::result::Result<
+        idx::cellarr::plugins::http::HttpResponse,
+        idx::cellarr::plugins::types::PluginError,
+    > {
+        let r = HttpRequest {
+            method: req.method,
+            url: req.url,
+            headers: req.headers,
+            body: req.body,
+        };
+        HostState::send(self, &r)
+            .map(|r| idx::cellarr::plugins::http::HttpResponse {
+                status: r.status,
+                headers: r.headers,
+                body: r.body,
+            })
+            .map_err(|message| idx::cellarr::plugins::types::PluginError { message })
+    }
+}
+impl idx::cellarr::plugins::types::Host for HostState {}
+
+impl dlc::cellarr::plugins::http::Host for HostState {
+    fn send(
+        &mut self,
+        req: dlc::cellarr::plugins::http::HttpRequest,
+    ) -> std::result::Result<
+        dlc::cellarr::plugins::http::HttpResponse,
+        dlc::cellarr::plugins::types::PluginError,
+    > {
+        let r = HttpRequest {
+            method: req.method,
+            url: req.url,
+            headers: req.headers,
+            body: req.body,
+        };
+        HostState::send(self, &r)
+            .map(|r| dlc::cellarr::plugins::http::HttpResponse {
+                status: r.status,
+                headers: r.headers,
+                body: r.body,
+            })
+            .map_err(|message| dlc::cellarr::plugins::types::PluginError { message })
+    }
+}
+impl dlc::cellarr::plugins::types::Host for HostState {}
+
+enum Linked {
+    Indexer(Linker<HostState>),
+    DownloadClient(Linker<HostState>),
+}
+
+/// A compiled plugin.
+pub struct Plugin {
     engine: Engine,
     component: Component,
-    linker: Linker<HostState>,
+    linked: Linked,
     config: HostConfig,
-    indexer_id: IndexerId,
-    /// The granted HTTP capability, if any. `None` (or `grant_http == false`)
-    /// means every fetch is denied.
-    http_capability: Option<Arc<dyn HttpCapability>>,
-    /// Set when the background epoch ticker should stop (on drop).
+    info: PluginInfo,
+    fields: Vec<PluginField>,
+    extra_origins: Vec<String>,
+    transport: Option<Transport>,
     epoch_stop: Arc<AtomicBool>,
 }
 
-impl IndexerPluginHost {
-    /// Compile a component from raw bytes (a `.wasm` component, or WAT text that
-    /// wasmtime's `wat` feature accepts) under the given policy.
+/// Turn a core module carrying `wit-bindgen` metadata into a component; pass a
+/// component through untouched.
+fn as_component(bytes: &[u8]) -> Result<Vec<u8>> {
+    if wasmparser::Parser::is_core_wasm(bytes) {
+        wit_component::ComponentEncoder::default()
+            .module(bytes)
+            .and_then(|e| e.validate(true).encode())
+            .map_err(|e| PluginError::Load(format!("not a cellarr plugin module: {e:#}")))
+    } else {
+        Ok(bytes.to_vec())
+    }
+}
+
+fn kind_of(engine: &Engine, component: &Component) -> Result<PluginKind> {
+    let ty = component.component_type();
+    let exports: Vec<String> = ty.exports(engine).map(|(n, _)| n.to_string()).collect();
+    let has = |iface: &str| {
+        exports
+            .iter()
+            .any(|e| e.starts_with(&format!("cellarr:plugins/{iface}@0.2")))
+    };
+    if !has("plugin") {
+        return Err(PluginError::Load(format!(
+            "the component does not export cellarr:plugins/plugin@0.2 (exports: {exports:?})"
+        )));
+    }
+    if has("indexer") {
+        Ok(PluginKind::Indexer)
+    } else if has("download-client") {
+        Ok(PluginKind::DownloadClient)
+    } else {
+        Err(PluginError::Load(
+            "the component exports neither an indexer nor a download client".into(),
+        ))
+    }
+}
+
+impl Plugin {
+    /// Compile a plugin from a component or a `wit-bindgen` core module.
     ///
-    /// `indexer_id` is the id the host stamps onto every [`Release`] the guest
-    /// returns — the guest never invents one.
-    pub fn from_bytes(bytes: &[u8], config: HostConfig, indexer_id: IndexerId) -> Result<Self> {
+    /// # Errors
+    /// [`PluginError::Load`] when it is not a cellarr plugin, or its `info`/`fields`
+    /// calls fail.
+    pub fn from_bytes(bytes: &[u8], config: HostConfig) -> Result<Self> {
+        let bytes = as_component(bytes)?;
         let mut wasm_config = Config::new();
         wasm_config.wasm_component_model(true);
         if config.fuel.is_some() {
@@ -110,193 +284,399 @@ impl IndexerPluginHost {
         if config.epoch_timeout.is_some() {
             wasm_config.epoch_interruption(true);
         }
-
         let engine = Engine::new(&wasm_config).map_err(|e| PluginError::Load(e.to_string()))?;
-
         let component =
-            Component::new(&engine, bytes).map_err(|e| PluginError::Load(e.to_string()))?;
-
-        // Build the linker with ONLY the http import. No WASI is added: a guest
-        // referencing any other interface fails to instantiate.
+            Component::new(&engine, &bytes).map_err(|e| PluginError::Load(format!("{e:#}")))?;
+        let kind = kind_of(&engine, &component)?;
+        // Only the http import (and the types it uses) is linked. No WASI: a
+        // guest asking for anything else fails to instantiate.
         let mut linker: Linker<HostState> = Linker::new(&engine);
-        cellarr::plugins::http::add_to_linker::<HostState, HasSelf<HostState>>(&mut linker, |s| s)
-            .map_err(|e| PluginError::Host(e.to_string()))?;
-
+        let linked = match kind {
+            PluginKind::Indexer => {
+                idx::IndexerPlugin::add_to_linker::<HostState, HasSelf<HostState>>(
+                    &mut linker,
+                    |s| s,
+                )
+                .map_err(|e| PluginError::Host(e.to_string()))?;
+                Linked::Indexer(linker)
+            }
+            PluginKind::DownloadClient => {
+                dlc::DownloadClientPlugin::add_to_linker::<HostState, HasSelf<HostState>>(
+                    &mut linker,
+                    |s| s,
+                )
+                .map_err(|e| PluginError::Host(e.to_string()))?;
+                Linked::DownloadClient(linker)
+            }
+        };
         let epoch_stop = Arc::new(AtomicBool::new(false));
         if let Some(timeout) = config.epoch_timeout {
-            Self::spawn_epoch_ticker(&engine, timeout, Arc::clone(&epoch_stop));
+            spawn_epoch_ticker(&engine, timeout, Arc::clone(&epoch_stop));
         }
-
-        Ok(Self {
+        let mut plugin = Self {
             engine,
             component,
-            linker,
+            linked,
             config,
-            indexer_id,
-            http_capability: None,
+            info: PluginInfo {
+                name: String::new(),
+                version: String::new(),
+                description: String::new(),
+                protocol: PluginProtocol::Torrent,
+            },
+            fields: Vec::new(),
+            extra_origins: Vec::new(),
+            transport: None,
             epoch_stop,
-        })
+        };
+        let (info, fields) = plugin.describe()?;
+        if info.name.trim().is_empty() {
+            return Err(PluginError::Load("the plugin reports an empty name".into()));
+        }
+        plugin.info = info;
+        plugin.fields = fields;
+        Ok(plugin)
     }
 
-    /// Grant a concrete HTTP capability to this host.
-    ///
-    /// Only takes effect when [`HostConfig::grant_http`] is `true`; otherwise the
-    /// host stays deny-all regardless. This is the explicit grant — there is no
-    /// way for a guest to obtain network access except through a capability
-    /// installed here.
+    /// The network requests go out on, once allowed.
     #[must_use]
-    pub fn with_http_capability(mut self, cap: Arc<dyn HttpCapability>) -> Self {
-        self.http_capability = Some(cap);
+    pub fn with_transport(mut self, transport: Transport) -> Self {
+        self.transport = Some(transport);
         self
     }
 
-    /// Spawn a background thread that bumps the engine's epoch once per
-    /// `timeout`. Combined with a per-call deadline of 1 tick, this gives each
-    /// guest call roughly `timeout` of wall-clock before it traps — catching
-    /// tight loops that consume no fuel-measurable progress.
-    fn spawn_epoch_ticker(engine: &Engine, timeout: Duration, stop: Arc<AtomicBool>) {
-        let engine = engine.clone();
-        std::thread::spawn(move || {
-            while !stop.load(Ordering::Relaxed) {
-                std::thread::sleep(timeout);
-                engine.increment_epoch();
-            }
-        });
+    /// Origins the plugin may reach whatever its settings say (from its manifest).
+    #[must_use]
+    pub fn with_allowed_origins(mut self, origins: Vec<String>) -> Self {
+        self.extra_origins = origins;
+        self
     }
 
-    /// Build a fresh store for one invocation, applying fuel, epoch deadline,
-    /// memory limits, and the configured capability.
-    fn fresh_store(&self) -> Result<Store<HostState>> {
+    /// Indexer or download client.
+    #[must_use]
+    pub fn kind(&self) -> PluginKind {
+        match self.linked {
+            Linked::Indexer(_) => PluginKind::Indexer,
+            Linked::DownloadClient(_) => PluginKind::DownloadClient,
+        }
+    }
+
+    /// Who the plugin says it is.
+    #[must_use]
+    pub fn info(&self) -> &PluginInfo {
+        &self.info
+    }
+
+    /// The settings it takes.
+    #[must_use]
+    pub fn fields(&self) -> &[PluginField] {
+        &self.fields
+    }
+
+    fn store(&self, settings: Option<&serde_json::Value>) -> Result<Store<HostState>> {
         let limits = StoreLimitsBuilder::new()
             .memory_size(self.config.max_memory_bytes)
             .tables(self.config.max_tables)
             .table_elements(self.config.max_table_elements)
             .instances(self.config.max_instances)
-            .memories(1)
+            .memories(self.config.max_instances.max(1))
             .build();
-
-        let http: Arc<dyn HttpCapability> = if self.config.grant_http {
-            // A granted-but-unset http is still deny-all — the safe direction.
-            self.http_capability
-                .clone()
-                .unwrap_or_else(|| Arc::new(DenyAllHttp))
-        } else {
-            Arc::new(DenyAllHttp)
-        };
-
+        let http: Arc<dyn HttpCapability> =
+            match (settings, &self.transport, self.config.grant_http) {
+                (Some(s), Some(t), true) => {
+                    let mut origins = origins_in_settings(s);
+                    origins.extend(self.extra_origins.iter().cloned());
+                    let t = Arc::clone(t);
+                    Arc::new(AllowListHttp::new(origins, move |r: &HttpRequest| t(r)))
+                }
+                _ => Arc::new(DenyAllHttp),
+            };
         let mut store = Store::new(&self.engine, HostState { limits, http });
         store.limiter(|state| &mut state.limits);
-
         if let Some(fuel) = self.config.fuel {
             store
                 .set_fuel(fuel)
                 .map_err(|e| PluginError::Host(e.to_string()))?;
         }
         if self.config.epoch_timeout.is_some() {
-            // One tick of headroom; the ticker bumps the epoch every `timeout`.
             store.set_epoch_deadline(1);
         }
         Ok(store)
     }
 
-    /// Instantiate and call the guest's `name()`.
-    pub fn name(&self) -> Result<String> {
-        let mut store = self.fresh_store()?;
-        let instance = self.instantiate(&mut store)?;
-        let guest = instance.cellarr_plugins_indexer();
-        guest
-            .call_name(&mut store)
-            .map_err(Self::map_invocation_error)
+    fn describe(&self) -> Result<(PluginInfo, Vec<PluginField>)> {
+        let mut store = self.store(None)?;
+        match &self.linked {
+            Linked::Indexer(linker) => {
+                let inst = idx::IndexerPlugin::instantiate(&mut store, &self.component, linker)
+                    .map_err(map_trap)?;
+                let p = inst.cellarr_plugins_plugin();
+                let info = p.call_info(&mut store).map_err(map_trap)?;
+                let fields = p.call_fields(&mut store).map_err(map_trap)?;
+                Ok((
+                    PluginInfo {
+                        name: info.name,
+                        version: info.version,
+                        description: info.description,
+                        protocol: match info.protocol {
+                            idx::cellarr::plugins::types::Protocol::Torrent => {
+                                PluginProtocol::Torrent
+                            }
+                            idx::cellarr::plugins::types::Protocol::Usenet => {
+                                PluginProtocol::Usenet
+                            }
+                        },
+                    },
+                    fields
+                        .into_iter()
+                        .map(|f| PluginField {
+                            name: f.name,
+                            label: f.label,
+                            kind: f.kind,
+                            default_value: f.default_value,
+                            help_text: f.help_text,
+                            advanced: f.advanced,
+                            privacy: f.privacy,
+                        })
+                        .collect(),
+                ))
+            }
+            Linked::DownloadClient(linker) => {
+                let inst =
+                    dlc::DownloadClientPlugin::instantiate(&mut store, &self.component, linker)
+                        .map_err(map_trap)?;
+                let p = inst.cellarr_plugins_plugin();
+                let info = p.call_info(&mut store).map_err(map_trap)?;
+                let fields = p.call_fields(&mut store).map_err(map_trap)?;
+                Ok((
+                    PluginInfo {
+                        name: info.name,
+                        version: info.version,
+                        description: info.description,
+                        protocol: match info.protocol {
+                            dlc::cellarr::plugins::types::Protocol::Torrent => {
+                                PluginProtocol::Torrent
+                            }
+                            dlc::cellarr::plugins::types::Protocol::Usenet => {
+                                PluginProtocol::Usenet
+                            }
+                        },
+                    },
+                    fields
+                        .into_iter()
+                        .map(|f| PluginField {
+                            name: f.name,
+                            label: f.label,
+                            kind: f.kind,
+                            default_value: f.default_value,
+                            help_text: f.help_text,
+                            advanced: f.advanced,
+                            privacy: f.privacy,
+                        })
+                        .collect(),
+                ))
+            }
+        }
     }
 
-    /// Instantiate and call the guest's `search()`, adapting to core types.
-    pub fn search(&self, terms: &SearchTerms) -> Result<Vec<Release>> {
-        let mut store = self.fresh_store()?;
-        let instance = self.instantiate(&mut store)?;
-        let guest = instance.cellarr_plugins_indexer();
-        let wit_terms = to_wit_terms(terms);
-        let result = guest
-            .call_search(&mut store, &wit_terms)
-            .map_err(Self::map_invocation_error)?;
-        self.adapt_release_result(result)
-    }
-
-    /// Instantiate and call the guest's `latest()`, adapting to core types.
-    pub fn latest(&self) -> Result<Vec<Release>> {
-        let mut store = self.fresh_store()?;
-        let instance = self.instantiate(&mut store)?;
-        let guest = instance.cellarr_plugins_indexer();
-        let result = guest
-            .call_latest(&mut store)
-            .map_err(Self::map_invocation_error)?;
-        self.adapt_release_result(result)
-    }
-
-    fn instantiate(&self, store: &mut Store<HostState>) -> Result<IndexerPlugin> {
-        IndexerPlugin::instantiate(store, &self.component, &self.linker)
-            .map_err(Self::map_invocation_error)
-    }
-
-    fn adapt_release_result(
+    fn indexer(
         &self,
-        result: std::result::Result<Vec<WitRelease>, WitPluginError>,
-    ) -> Result<Vec<Release>> {
-        match result {
-            Ok(rs) => Ok(rs
-                .into_iter()
-                .map(|r| from_wit_release(r, self.indexer_id))
-                .collect()),
-            Err(e) => Err(PluginError::Guest(e.message)),
+        settings: &serde_json::Value,
+    ) -> Result<(Store<HostState>, idx::IndexerPlugin)> {
+        let Linked::Indexer(linker) = &self.linked else {
+            return Err(PluginError::Host(format!(
+                "{} is not an indexer plugin",
+                self.info.name
+            )));
+        };
+        let mut store = self.store(Some(settings))?;
+        let inst = idx::IndexerPlugin::instantiate(&mut store, &self.component, linker)
+            .map_err(map_trap)?;
+        Ok((store, inst))
+    }
+
+    fn client(
+        &self,
+        settings: &serde_json::Value,
+    ) -> Result<(Store<HostState>, dlc::DownloadClientPlugin)> {
+        let Linked::DownloadClient(linker) = &self.linked else {
+            return Err(PluginError::Host(format!(
+                "{} is not a download-client plugin",
+                self.info.name
+            )));
+        };
+        let mut store = self.store(Some(settings))?;
+        let inst = dlc::DownloadClientPlugin::instantiate(&mut store, &self.component, linker)
+            .map_err(map_trap)?;
+        Ok((store, inst))
+    }
+
+    /// Search.
+    ///
+    /// # Errors
+    /// A guest error, a denied capability, or a resource limit.
+    pub fn search(
+        &self,
+        settings: &serde_json::Value,
+        terms: &PluginSearch,
+    ) -> Result<Vec<PluginRelease>> {
+        let (mut store, inst) = self.indexer(settings)?;
+        let terms = idx::cellarr::plugins::types::SearchTerms {
+            queries: terms.queries.clone(),
+            ids: terms.ids.clone(),
+            numbering: terms.numbering.clone(),
+        };
+        let r = inst
+            .cellarr_plugins_indexer()
+            .call_search(&mut store, &settings.to_string(), &terms)
+            .map_err(map_trap)?;
+        r.map(|v| v.into_iter().map(release_from).collect())
+            .map_err(|e| PluginError::Guest(e.message))
+    }
+
+    /// Recent releases (RSS).
+    ///
+    /// # Errors
+    /// As [`Plugin::search`].
+    pub fn latest(&self, settings: &serde_json::Value) -> Result<Vec<PluginRelease>> {
+        let (mut store, inst) = self.indexer(settings)?;
+        let r = inst
+            .cellarr_plugins_indexer()
+            .call_latest(&mut store, &settings.to_string())
+            .map_err(map_trap)?;
+        r.map(|v| v.into_iter().map(release_from).collect())
+            .map_err(|e| PluginError::Guest(e.message))
+    }
+
+    /// Check the settings work.
+    ///
+    /// # Errors
+    /// What the plugin reports as wrong.
+    pub fn test(&self, settings: &serde_json::Value) -> Result<()> {
+        match self.kind() {
+            PluginKind::Indexer => {
+                let (mut store, inst) = self.indexer(settings)?;
+                inst.cellarr_plugins_indexer()
+                    .call_test(&mut store, &settings.to_string())
+                    .map_err(map_trap)?
+                    .map_err(|e| PluginError::Guest(e.message))
+            }
+            PluginKind::DownloadClient => {
+                let (mut store, inst) = self.client(settings)?;
+                inst.cellarr_plugins_download_client()
+                    .call_test(&mut store, &settings.to_string())
+                    .map_err(map_trap)?
+                    .map_err(|e| PluginError::Guest(e.message))
+            }
         }
     }
 
-    /// Map a wasmtime invocation error: a fuel/epoch/memory trap becomes
-    /// [`PluginError::ResourceLimit`], everything else [`PluginError::Host`].
-    fn map_invocation_error(e: wasmtime::Error) -> PluginError {
-        let msg = format!("{e:#}");
-        let lower = msg.to_lowercase();
-        if lower.contains("fuel")
-            || lower.contains("epoch")
-            || lower.contains("interrupt")
-            || lower.contains("out of bounds")
-            || lower.contains("maximum")
-            || lower.contains("grow")
-            || lower.contains("limit")
-        {
-            PluginError::ResourceLimit(msg)
-        } else {
-            PluginError::Host(msg)
-        }
+    /// Hand a download to the client; returns its id.
+    ///
+    /// # Errors
+    /// As [`Plugin::search`].
+    pub fn add(&self, settings: &serde_json::Value, url: &str, category: &str) -> Result<String> {
+        let (mut store, inst) = self.client(settings)?;
+        inst.cellarr_plugins_download_client()
+            .call_add(&mut store, &settings.to_string(), url, category)
+            .map_err(map_trap)?
+            .map_err(|e| PluginError::Guest(e.message))
+    }
+
+    /// A download's status.
+    ///
+    /// # Errors
+    /// As [`Plugin::search`].
+    pub fn status(&self, settings: &serde_json::Value, id: &str) -> Result<PluginDownloadStatus> {
+        use dlc::exports::cellarr::plugins::download_client::DownloadState as S;
+        let (mut store, inst) = self.client(settings)?;
+        let s = inst
+            .cellarr_plugins_download_client()
+            .call_status(&mut store, &settings.to_string(), id)
+            .map_err(map_trap)?
+            .map_err(|e| PluginError::Guest(e.message))?;
+        Ok(PluginDownloadStatus {
+            state: match s.state {
+                S::Queued => PluginDownloadState::Queued,
+                S::Downloading => PluginDownloadState::Downloading,
+                S::Completed => PluginDownloadState::Completed,
+                S::Failed => PluginDownloadState::Failed,
+            },
+            progress: s.progress,
+            content_path: s.content_path,
+            ratio: s.ratio,
+            seeding_time_secs: s.seeding_time_secs,
+            peers: s.peers,
+            error_message: s.error_message,
+        })
+    }
+
+    /// Remove a download.
+    ///
+    /// # Errors
+    /// As [`Plugin::search`].
+    pub fn remove(&self, settings: &serde_json::Value, id: &str, delete_data: bool) -> Result<()> {
+        let (mut store, inst) = self.client(settings)?;
+        inst.cellarr_plugins_download_client()
+            .call_remove(&mut store, &settings.to_string(), id, delete_data)
+            .map_err(map_trap)?
+            .map_err(|e| PluginError::Guest(e.message))
     }
 }
 
-impl Drop for IndexerPluginHost {
+impl Drop for Plugin {
     fn drop(&mut self) {
-        // Stop the epoch ticker so we don't leak the thread.
         self.epoch_stop.store(true, Ordering::Relaxed);
     }
 }
 
-fn to_wit_terms(terms: &SearchTerms) -> WitSearchTerms {
-    WitSearchTerms {
-        queries: terms.queries.clone(),
-        ids: terms.ids.clone(),
-        numbering: terms.numbering.clone(),
-    }
-}
-
-fn from_wit_release(r: WitRelease, indexer_id: IndexerId) -> Release {
-    Release {
-        indexer_id,
+fn release_from(r: idx::cellarr::plugins::types::Release) -> PluginRelease {
+    PluginRelease {
         title: r.title,
         download_url: r.download_url,
         guid: r.guid,
         protocol: match r.protocol {
-            WitProtocol::Torrent => Protocol::Torrent,
-            WitProtocol::Usenet => Protocol::Usenet,
+            idx::cellarr::plugins::types::Protocol::Torrent => PluginProtocol::Torrent,
+            idx::cellarr::plugins::types::Protocol::Usenet => PluginProtocol::Usenet,
         },
         size: r.size,
         seeders: r.seeders,
         indexer_flags: r.indexer_flags,
+    }
+}
+
+fn spawn_epoch_ticker(engine: &Engine, timeout: Duration, stop: Arc<AtomicBool>) {
+    let engine = engine.clone();
+    std::thread::spawn(move || {
+        while !stop.load(Ordering::Relaxed) {
+            std::thread::sleep(timeout);
+            engine.increment_epoch();
+        }
+    });
+}
+
+/// A fuel/epoch/memory trap is a [`PluginError::ResourceLimit`]; anything else a
+/// [`PluginError::Host`].
+fn map_trap(e: wasmtime::Error) -> PluginError {
+    let msg = format!("{e:#}");
+    if let Some(trap) = e.downcast_ref::<wasmtime::Trap>() {
+        if matches!(
+            trap,
+            wasmtime::Trap::OutOfFuel
+                | wasmtime::Trap::Interrupt
+                | wasmtime::Trap::MemoryOutOfBounds
+        ) {
+            return PluginError::ResourceLimit(msg);
+        }
+    }
+    let lower = msg.to_lowercase();
+    if lower.contains("fuel")
+        || lower.contains("epoch")
+        || lower.contains("interrupt")
+        || lower.contains("limit")
+    {
+        PluginError::ResourceLimit(msg)
+    } else {
+        PluginError::Host(msg)
     }
 }

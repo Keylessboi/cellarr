@@ -1,0 +1,136 @@
+// The cellarr plugin contract, version 0.2.
+//
+// A plugin is a WASM component that exports `plugin` (who it is and which
+// settings it takes) and one kind interface: `indexer` or `download-client`.
+// It imports exactly one capability, `http`, which the host scopes to the hosts
+// the plugin's own settings name (plus any its manifest declares). There is no
+// filesystem, no environment, no clock, no sockets.
+//
+// Settings travel as a JSON object (field name -> value) on every call, so a
+// plugin keeps no state between calls and the host can run each call in a
+// fresh instance. The fields a plugin declares are shown to *arr clients the
+// same way a built-in implementation's fields are, so a Lidarr UI or Prowlarr
+// can configure it without knowing it is a plugin.
+
+package cellarr:plugins@0.2.0;
+
+interface types {
+    enum protocol {
+        torrent,
+        usenet,
+    }
+
+    record release {
+        title: string,
+        download-url: string,
+        guid: option<string>,
+        protocol: protocol,
+        size: option<u64>,
+        seeders: option<u32>,
+        indexer-flags: list<string>,
+    }
+
+    // `queries` are free-text searches; `ids` carry structured terms such as
+    // ("artist", "Radiohead") and ("album", "Kid A").
+    record search-terms {
+        queries: list<string>,
+        ids: list<tuple<string, string>>,
+        numbering: list<tuple<string, string>>,
+    }
+
+    record plugin-error {
+        message: string,
+    }
+
+    // One setting, rendered as an *arr "field". `kind` is the *arr field type
+    // (`textbox`, `password`, `number`, `checkbox`, `select`, `url`, ...).
+    // `default-value` is JSON.
+    record field {
+        name: string,
+        label: string,
+        kind: string,
+        default-value: string,
+        help-text: string,
+        advanced: bool,
+        privacy: bool,
+    }
+
+    record plugin-info {
+        name: string,
+        version: string,
+        description: string,
+        protocol: protocol,
+    }
+}
+
+interface http {
+    use types.{plugin-error};
+
+    record http-request {
+        method: string,
+        url: string,
+        headers: list<tuple<string, string>>,
+        body: list<u8>,
+    }
+
+    record http-response {
+        status: u16,
+        headers: list<tuple<string, string>>,
+        body: list<u8>,
+    }
+
+    send: func(req: http-request) -> result<http-response, plugin-error>;
+}
+
+interface plugin {
+    use types.{plugin-info, field};
+
+    info: func() -> plugin-info;
+    fields: func() -> list<field>;
+}
+
+interface indexer {
+    use types.{release, search-terms, plugin-error};
+
+    search: func(settings: string, terms: search-terms) -> result<list<release>, plugin-error>;
+    latest: func(settings: string) -> result<list<release>, plugin-error>;
+    test: func(settings: string) -> result<_, plugin-error>;
+}
+
+interface download-client {
+    use types.{plugin-error};
+
+    enum download-state {
+        queued,
+        downloading,
+        completed,
+        failed,
+    }
+
+    record download-status {
+        state: download-state,
+        progress: f32,
+        content-path: option<string>,
+        ratio: option<f32>,
+        seeding-time-secs: option<u64>,
+        peers: option<u32>,
+        error-message: option<string>,
+    }
+
+    add: func(settings: string, url: string, category: string) -> result<string, plugin-error>;
+    status: func(settings: string, id: string) -> result<download-status, plugin-error>;
+    remove: func(settings: string, id: string, delete-data: bool) -> result<_, plugin-error>;
+    test: func(settings: string) -> result<_, plugin-error>;
+}
+
+world indexer-plugin {
+    import http;
+    export plugin;
+    export indexer;
+}
+
+world download-client-plugin {
+    import http;
+    export plugin;
+    export download-client;
+}

@@ -1,0 +1,24 @@
+[package]
+name = "cellarr-plugin-torznab"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+publish = false
+description = "Example cellarr plugin: a Torznab indexer, as a sandboxed WASM component."
+
+# Not part of the cellarr workspace: built for wasm32-unknown-unknown.
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = "0.63"
+serde_json = "1"
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+codegen-units = 1
+panic = "abort"

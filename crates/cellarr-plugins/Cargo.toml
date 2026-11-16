@@ -8,11 +8,20 @@ publish = false
 
 [features]
 default = []
-wasm = ["dep:wasmtime", "dep:wasmtime-wasi"]
+wasm = ["dep:wasmtime", "dep:wit-component", "dep:wasmparser", "dep:reqwest", "dep:tokio", "dep:async-trait", "dep:tracing"]
 
 [dependencies]
 cellarr-core.workspace = true
 wasmtime = { workspace = true, optional = true }
-wasmtime-wasi = { workspace = true, optional = true }
+wit-component = { version = "0.251", optional = true }
+wasmparser = { version = "0.251", optional = true }
+reqwest = { workspace = true, features = ["blocking"], optional = true }
+tokio = { workspace = true, features = ["rt"], optional = true }
+async-trait = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
+serde_json.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

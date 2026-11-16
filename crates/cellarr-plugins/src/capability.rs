@@ -1,62 +1,84 @@
-//! The capability layer — the *only* authority a plugin can have.
+//! The one capability a plugin can be granted: HTTP, scoped by an allow-list.
 //!
-//! The WIT world imports exactly one host capability (`http.fetch`). This module
-//! defines what that capability is and how the host decides whether a given
-//! plugin gets it. The default is **deny-all**: a freshly built [`HostConfig`]
-//! grants nothing, so a plugin can compute but cannot touch the network. The
-//! host opts a plugin in by handing it an [`HttpCapability`] (typically an
-//! allow-list-scoped fetcher), never raw sockets.
-//!
-//! This indirection is what lets the production daemon plug a real
-//! `reqwest`-backed fetcher behind the same trait the unit tests exercise with
-//! an in-memory stub — without the guest ever knowing the difference.
+//! A guest never opens a socket. It hands the host a request; the host checks
+//! the URL against the plugin's allow-list and performs the request itself (or
+//! refuses). The allow-list is built from the hosts the plugin's own settings
+//! name (an indexer's base URL, a download client's address) plus any its
+//! manifest declares, so a plugin can reach exactly the services the user
+//! pointed it at.
 
 use crate::error::{PluginError, Result};
 
-/// A response the host returns to a guest's HTTP fetch.
+/// A request a guest asks the host to make.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HttpResponse {
-    /// HTTP status code.
-    pub status: u16,
-    /// Response body bytes.
+pub struct HttpRequest {
+    /// `GET`, `POST`, ….
+    pub method: String,
+    /// Absolute URL.
+    pub url: String,
+    /// Request headers.
+    pub headers: Vec<(String, String)>,
+    /// Request body (empty for none).
     pub body: Vec<u8>,
 }
 
-/// The single network capability a plugin may be granted.
-///
-/// Implementations enforce *all* policy: which URLs are reachable, timeouts, and
-/// response-size caps. The guest cannot widen this — it only sees a `fetch(url)`
-/// that may succeed or fail. The daemon's production impl wraps `reqwest` with
-/// an allow-list; tests use deterministic in-memory impls.
-pub trait HttpCapability: Send + Sync {
-    /// Fetch `url`. Returns [`PluginError::CapabilityDenied`] if policy forbids
-    /// the request, so a guest probing for ambient authority gets a clean,
-    /// typed refusal rather than silent success.
-    fn fetch(&self, url: &str) -> Result<HttpResponse>;
+impl HttpRequest {
+    /// A bare GET.
+    #[must_use]
+    pub fn get(url: &str) -> Self {
+        Self {
+            method: "GET".into(),
+            url: url.into(),
+            headers: Vec::new(),
+            body: Vec::new(),
+        }
+    }
 }
 
-/// The default capability: deny every request.
-///
-/// A plugin wired to this can do nothing on the network. This is what a
-/// plugin gets unless the host explicitly grants something narrower.
+/// What came back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HttpResponse {
+    /// HTTP status.
+    pub status: u16,
+    /// Response headers.
+    pub headers: Vec<(String, String)>,
+    /// Response body.
+    pub body: Vec<u8>,
+}
+
+/// Something that can perform (or refuse) a guest's HTTP request.
+pub trait HttpCapability: Send + Sync {
+    /// Perform `req`, or refuse it.
+    ///
+    /// # Errors
+    /// [`PluginError::CapabilityDenied`] when the request is not allowed, or a
+    /// transport error.
+    fn send(&self, req: &HttpRequest) -> Result<HttpResponse>;
+
+    /// Convenience: a bare GET.
+    ///
+    /// # Errors
+    /// As [`HttpCapability::send`].
+    fn fetch(&self, url: &str) -> Result<HttpResponse> {
+        self.send(&HttpRequest::get(url))
+    }
+}
+
+/// Refuses everything.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DenyAllHttp;
 
 impl HttpCapability for DenyAllHttp {
-    fn fetch(&self, url: &str) -> Result<HttpResponse> {
+    fn send(&self, req: &HttpRequest) -> Result<HttpResponse> {
         Err(PluginError::CapabilityDenied(format!(
-            "http fetch is not granted to this plugin (attempted: {url})"
+            "http is not granted to this plugin (attempted: {})",
+            req.url
         )))
     }
 }
 
-/// An allow-list-scoped HTTP capability.
-///
-/// Only requests whose URL begins with one of the configured prefixes are
-/// allowed; everything else is denied. The actual transport is injected as a
-/// closure so the daemon can supply a real client and tests can supply a
-/// fixture — neither widens what the guest can reach, because the allow-list is
-/// checked here, before the transport ever runs.
+/// Allows requests whose URL starts with one of the allowed prefixes, and hands
+/// them to `transport`.
 pub struct AllowListHttp<F> {
     allowed_prefixes: Vec<String>,
     transport: F,
@@ -64,10 +86,9 @@ pub struct AllowListHttp<F> {
 
 impl<F> AllowListHttp<F>
 where
-    F: Fn(&str) -> Result<HttpResponse> + Send + Sync,
+    F: Fn(&HttpRequest) -> Result<HttpResponse> + Send + Sync,
 {
-    /// Build an allow-list capability over `transport`, permitting only URLs
-    /// that start with one of `allowed_prefixes`.
+    /// An allow-list over `transport`.
     pub fn new(allowed_prefixes: Vec<String>, transport: F) -> Self {
         Self {
             allowed_prefixes,
@@ -76,51 +97,127 @@ where
     }
 
     fn is_allowed(&self, url: &str) -> bool {
-        self.allowed_prefixes.iter().any(|p| url.starts_with(p))
+        // Compare on a prefix that ends at the authority, so `http://a.test`
+        // does not admit `http://a.test.evil`.
+        self.allowed_prefixes.iter().any(|p| {
+            url.strip_prefix(p.as_str())
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with(['/', '?', '#']))
+        })
     }
 }
 
 impl<F> HttpCapability for AllowListHttp<F>
 where
-    F: Fn(&str) -> Result<HttpResponse> + Send + Sync,
+    F: Fn(&HttpRequest) -> Result<HttpResponse> + Send + Sync,
 {
-    fn fetch(&self, url: &str) -> Result<HttpResponse> {
-        if !self.is_allowed(url) {
+    fn send(&self, req: &HttpRequest) -> Result<HttpResponse> {
+        if !self.is_allowed(&req.url) {
             return Err(PluginError::CapabilityDenied(format!(
-                "url not on allow-list: {url}"
+                "url not on this plugin's allow-list: {}",
+                req.url
             )));
         }
-        (self.transport)(url)
+        (self.transport)(req)
     }
+}
+
+/// The `scheme://host[:port]` origin of a URL, when it is an http(s) URL.
+#[must_use]
+pub fn origin_of(url: &str) -> Option<String> {
+    let (scheme, rest) = url.split_once("://")?;
+    if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
+        return None;
+    }
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    if authority.is_empty() {
+        return None;
+    }
+    Some(format!("{}://{}", scheme.to_ascii_lowercase(), authority))
+}
+
+/// The origins a plugin's settings point at: every string value that is an
+/// http(s) URL, plus `host`/`port`/`useSsl` style triples.
+#[must_use]
+pub fn origins_in_settings(settings: &serde_json::Value) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Some(o) = settings.as_object() {
+        for v in o.values() {
+            if let Some(origin) = v.as_str().and_then(origin_of) {
+                out.push(origin);
+            }
+        }
+        if let Some(host) = o
+            .get("host")
+            .and_then(|v| v.as_str())
+            .filter(|h| !h.is_empty())
+        {
+            let ssl = o
+                .get("useSsl")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
+            let scheme = if ssl { "https" } else { "http" };
+            match o.get("port").and_then(serde_json::Value::as_u64) {
+                Some(port) => out.push(format!("{scheme}://{host}:{port}")),
+                None => out.push(format!("{scheme}://{host}")),
+            }
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn ok(req: &HttpRequest) -> Result<HttpResponse> {
+        Ok(HttpResponse {
+            status: 200,
+            headers: Vec::new(),
+            body: req.url.as_bytes().to_vec(),
+        })
+    }
+
     #[test]
     fn deny_all_refuses_everything() {
-        let cap = DenyAllHttp;
-        let err = cap.fetch("https://example.invalid/caps").unwrap_err();
+        let err = DenyAllHttp
+            .fetch("https://example.invalid/caps")
+            .unwrap_err();
         assert!(matches!(err, PluginError::CapabilityDenied(_)));
     }
 
     #[test]
-    fn allow_list_permits_only_matching_prefix() {
-        let cap = AllowListHttp::new(vec!["https://api.allowed.test/".to_string()], |url| {
-            Ok(HttpResponse {
-                status: 200,
-                body: url.as_bytes().to_vec(),
-            })
-        });
-
-        let ok = cap.fetch("https://api.allowed.test/search").unwrap();
-        assert_eq!(ok.status, 200);
-
-        let denied = cap.fetch("https://evil.test/exfiltrate").unwrap_err();
-        assert!(
-            matches!(denied, PluginError::CapabilityDenied(_)),
-            "off-list URL must be denied, got {denied:?}"
+    fn allow_list_permits_only_its_origins() {
+        let cap = AllowListHttp::new(vec!["https://api.allowed.test".to_string()], ok);
+        assert_eq!(
+            cap.fetch("https://api.allowed.test/search").unwrap().status,
+            200
         );
+        assert_eq!(cap.fetch("https://api.allowed.test").unwrap().status, 200);
+        for bad in [
+            "https://evil.test/exfiltrate",
+            "https://api.allowed.test.evil/x",
+            "https://api.allowed.testx/",
+        ] {
+            assert!(
+                matches!(cap.fetch(bad), Err(PluginError::CapabilityDenied(_))),
+                "{bad} must be denied"
+            );
+        }
+    }
+
+    #[test]
+    fn settings_name_the_origins_a_plugin_may_reach() {
+        let s = serde_json::json!({
+            "baseUrl": "http://prowlarr.local:9696/1/",
+            "apiKey": "k",
+            "host": "qbit.lan", "port": 8080, "useSsl": false,
+        });
+        assert_eq!(
+            origins_in_settings(&s),
+            ["http://prowlarr.local:9696", "http://qbit.lan:8080"]
+        );
+        assert_eq!(origin_of("ftp://x/y"), None);
     }
 }
