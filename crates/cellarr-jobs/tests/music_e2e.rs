@@ -326,7 +326,7 @@ mod catalogue {
         std::fs::read(format!("{FIX}/{n}")).unwrap()
     }
 
-    fn sync(db: &Database) -> MusicSync<RecordedFetcher> {
+    fn sync(db: &Database) -> MusicSync<MusicBrainzSource<RecordedFetcher>> {
         let fetcher = RecordedFetcher::new()
             .with_body(
                 &format!("{BASE}/artist/{RADIOHEAD}"),

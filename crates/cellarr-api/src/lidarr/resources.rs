@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 use super::quality::lidarr_quality_id;
 
 /// Where an album's cover art is served from when cellarr holds none locally.
-const COVER_ART_BASE: &str = "https://coverartarchive.org/release-group";
+pub(crate) const COVER_ART_BASE: &str = "https://coverartarchive.org/release-group";
 
 /// The quality object a file or release carries.
 #[must_use]
@@ -77,9 +77,50 @@ pub fn clean_name(name: &str) -> String {
         .to_lowercase()
 }
 
+/// `links`, `images` and `ratings` for an artist, from its stored extras
+/// document, in the shapes Lidarr serves.
+fn artist_extras(extras: Option<&str>) -> (Value, Value, Value) {
+    let doc: Value = extras
+        .and_then(|e| serde_json::from_str(e).ok())
+        .unwrap_or(Value::Null);
+    let links = doc.get("links").cloned().unwrap_or_else(|| json!([]));
+    let images = images_of(doc.get("images"));
+    let ratings = match doc.get("rating") {
+        Some(r) if r.is_object() => r.clone(),
+        _ => json!({ "votes": 0, "value": 0.0 }),
+    };
+    (links, images, ratings)
+}
+
+/// Render stored `{coverType, url}` pairs as Lidarr image resources.
+#[must_use]
+pub fn images_of(raw: Option<&Value>) -> Value {
+    let list = raw.and_then(Value::as_array).cloned().unwrap_or_default();
+    Value::Array(
+        list.iter()
+            .filter_map(|i| {
+                let url = i.get("url")?.as_str()?;
+                let ext = url
+                    .rsplit('.')
+                    .next()
+                    .filter(|e| e.len() <= 4 && !e.contains('/'))
+                    .map(|e| format!(".{e}"))
+                    .unwrap_or_default();
+                Some(json!({
+                    "url": url,
+                    "coverType": i.get("coverType").and_then(Value::as_str).unwrap_or("cover").to_lowercase(),
+                    "extension": ext,
+                    "remoteUrl": url,
+                }))
+            })
+            .collect(),
+    )
+}
+
 /// An artist resource.
 #[must_use]
 pub fn artist(a: &Artist, stats: Option<MusicStats>, profile_seq: Option<i64>) -> Value {
+    let (links, images, ratings) = artist_extras(a.extras.as_deref());
     let mut v = json!({
         "id": a.id,
         "status": if a.ended { "ended" } else { "continuing" },
@@ -93,10 +134,10 @@ pub fn artist(a: &Artist, stats: Option<MusicStats>, profile_seq: Option<i64>) -
         "overview": a.overview.clone().unwrap_or_default(),
         "artistType": a.artist_type.clone().unwrap_or_default(),
         "disambiguation": a.disambiguation.clone().unwrap_or_default(),
-        "links": [],
+        "links": links,
         "nextAlbum": null,
         "lastAlbum": null,
-        "images": [],
+        "images": images,
         "members": [],
         "remotePoster": null,
         "addOptions": {
@@ -117,7 +158,7 @@ pub fn artist(a: &Artist, stats: Option<MusicStats>, profile_seq: Option<i64>) -
         "sortName": a.sort_name.clone().unwrap_or_else(|| a.name.to_lowercase()),
         "tags": [],
         "added": a.added_at,
-        "ratings": { "votes": 0, "value": 0.0 },
+        "ratings": ratings,
     });
     if let Some(stats) = stats {
         v["statistics"] = statistics(stats, true);

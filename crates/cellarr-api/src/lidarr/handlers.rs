@@ -625,32 +625,47 @@ pub(crate) async fn artist_lookup(
 }
 
 fn lookup_artist_resource(h: &cellarr_meta::MbArtist, known: Option<&Artist>) -> Value {
-    json!({
-        "id": known.map_or(0, |a| a.id),
+    let images: Vec<Value> = h
+        .images
+        .iter()
+        .map(|i| json!({ "coverType": i.cover_type, "url": i.url }))
+        .collect();
+    let mut v = json!({
         "status": if h.ended { "ended" } else { "continuing" },
         "ended": h.ended,
         "artistName": h.name,
         "foreignArtistId": h.mbid,
-        "mbId": h.mbid,
         "tadbId": 0,
         "discogsId": 0,
-        "allMusicId": "",
-        "overview": "",
+        "overview": h.overview.clone().unwrap_or_default(),
         "artistType": h.artist_type.clone().unwrap_or_default(),
         "disambiguation": h.disambiguation.clone().unwrap_or_default(),
-        "links": [],
-        "images": [],
-        "genres": h.genres,
-        "cleanName": resources::clean_name(&h.name),
-        "sortName": h.sort_name.clone().unwrap_or_else(|| h.name.to_lowercase()),
-        "tags": [],
-        "ratings": { "votes": 0, "value": 0.0 },
-        "monitored": known.is_some_and(|a| a.monitored),
-        "path": known.map(|a| a.path.clone()),
+        "links": h.links.iter().map(|l| json!({ "url": l.url, "name": l.name })).collect::<Vec<_>>(),
+        "nextAlbum": null,
+        "lastAlbum": null,
+        "images": resources::images_of(Some(&Value::Array(images))),
         "qualityProfileId": 0,
         "metadataProfileId": 0,
+        "monitored": known.is_some_and(|a| a.monitored),
         "monitorNewItems": "all",
-    })
+        "folder": resources::folder_of(&h.name),
+        "genres": h.genres,
+        "tags": [],
+        "added": "0001-01-01T00:00:00Z",
+        "ratings": h.rating.map_or(json!({ "votes": 0, "value": 0.0 }), |r| json!({ "votes": r.votes, "value": r.value })),
+    });
+    // A lookup of an artist already in the library carries its identity, like
+    // Lidarr's: the id and the library path.
+    if let (Some(a), Some(o)) = (known, v.as_object_mut()) {
+        o.insert("id".into(), json!(a.id));
+        o.insert("path".into(), json!(a.path));
+        o.insert("cleanName".into(), json!(resources::clean_name(&a.name)));
+        o.insert(
+            "sortName".into(),
+            json!(a.sort_name.clone().unwrap_or_else(|| a.name.to_lowercase())),
+        );
+    }
+    v
 }
 
 // --- albums --------------------------------------------------------------------
@@ -920,35 +935,94 @@ pub(crate) async fn album_lookup(
             |a| resources::artist_ref(a, None),
         );
         let existing = known_albums.get(&h.mbid);
-        out.push(json!({
-            "id": existing.map_or(0, |a| a.id),
+        let releases: Vec<Value> = h
+            .releases
+            .iter()
+            .enumerate()
+            .map(|(n, r)| lookup_release(r, n == 0))
+            .collect();
+        let duration = h.releases.first().map_or(0, release_duration);
+        let media = h.releases.first().map_or_else(Vec::new, release_media);
+        let images: Vec<Value> = if h.images.is_empty() {
+            vec![json!({
+                "coverType": "cover",
+                "url": format!("{}/{}/front-500", resources::COVER_ART_BASE, h.mbid),
+            })]
+        } else {
+            h.images
+                .iter()
+                .map(|i| json!({ "coverType": i.cover_type, "url": i.url }))
+                .collect()
+        };
+        let mut album = json!({
             "title": h.title,
             "disambiguation": h.disambiguation.clone().unwrap_or_default(),
-            "overview": "",
+            "overview": h.overview.clone().unwrap_or_default(),
             "artistId": artist.map_or(0, |a| a.id),
             "foreignAlbumId": h.mbid,
             "monitored": existing.is_some_and(|a| a.monitored),
             "anyReleaseOk": true,
             "profileId": 0,
-            "duration": 0,
+            "duration": duration,
             "albumType": h.primary_type,
             "secondaryTypes": h.secondary_types,
-            "mediumCount": 0,
-            "ratings": { "votes": 0, "value": 0.0 },
+            "mediumCount": media.len(),
+            "ratings": h.rating.map_or(json!({ "votes": 0, "value": 0 }), |r| json!({ "votes": r.votes, "value": r.value })),
             "releaseDate": resources::release_date_iso(h.first_release_date.as_deref()),
-            "releases": [],
-            "genres": [],
-            "media": [],
+            "releases": releases,
+            "genres": h.genres,
+            "media": media,
             "artist": artist_json,
-            "images": [{
-                "coverType": "cover",
-                "url": format!("https://coverartarchive.org/release-group/{}/front-500", h.mbid),
-                "remoteUrl": format!("https://coverartarchive.org/release-group/{}/front-500", h.mbid),
-            }],
-            "links": [],
-        }));
+            "images": resources::images_of(Some(&Value::Array(images))),
+            "links": h.links.iter().map(|l| json!({ "url": l.url, "name": l.name })).collect::<Vec<_>>(),
+        });
+        if let (Some(al), Some(o)) = (existing, album.as_object_mut()) {
+            o.insert("id".into(), json!(al.id));
+        }
+        out.push(album);
     }
     Ok(Json(out))
+}
+
+fn release_duration(r: &cellarr_meta::MbRelease) -> u64 {
+    r.media
+        .iter()
+        .flat_map(|m| &m.tracks)
+        .filter_map(|t| t.length_ms)
+        .map(u64::from)
+        .sum()
+}
+
+fn release_media(r: &cellarr_meta::MbRelease) -> Vec<Value> {
+    r.media
+        .iter()
+        .map(|m| {
+            json!({
+                "mediumNumber": m.position,
+                "mediumName": "",
+                "mediumFormat": m.format.clone().unwrap_or_default(),
+            })
+        })
+        .collect()
+}
+
+fn lookup_release(r: &cellarr_meta::MbRelease, first: bool) -> Value {
+    json!({
+        "id": 0,
+        "albumId": 0,
+        "foreignReleaseId": r.mbid,
+        "title": r.title,
+        "status": r.status.clone().unwrap_or_default(),
+        "duration": release_duration(r),
+        "trackCount": r.track_count(),
+        "media": release_media(r),
+        "mediaCount": r.media.len(),
+        "disambiguation": "",
+        "country": r.country.iter().collect::<Vec<_>>(),
+        "label": [],
+        "format": r.media.first().and_then(|m| m.format.clone()).unwrap_or_default(),
+        "monitored": first,
+    })
 }
 
 // --- tracks and files ----------------------------------------------------------

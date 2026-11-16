@@ -11,10 +11,13 @@ Standard library only.
 """
 import argparse, json, os, sys, time, urllib.request, urllib.error
 
-def call(base, key, method, path, body=None):
-    data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(base + "/api/v1" + path, data=data, method=method,
-                                 headers={"X-Api-Key": key, "Content-Type": "application/json"})
+def call(base, key, method, path, body=None, raw=None, headers=None):
+    data = raw.encode() if raw is not None else (json.dumps(body).encode() if body is not None else None)
+    hdrs = {"X-Api-Key": key, "Content-Type": "application/json"}
+    for k, v in (headers or {}).items():
+        if v is None: hdrs.pop(k, None)
+        else: hdrs[k] = v
+    req = urllib.request.Request(base + "/api/v1" + path, data=data, method=method, headers=hdrs)
     try:
         with urllib.request.urlopen(req, timeout=180) as r:
             raw = r.read(); status = r.status
@@ -78,27 +81,28 @@ def main():
     ap.add_argument("--scenario", default=os.path.join(os.path.dirname(__file__), "lidarr-compare-scenario.json"))
     a = ap.parse_args()
     steps = json.load(open(a.scenario))
-    ctx = {"root": a.music_root}
+    ctxs = {a.lidarr: {"root": a.music_root}, a.cellarr: {"root": a.music_root}}
     bad = total = 0
     for step in steps:
         name, method = step["name"], step.get("method", "GET")
-        def sub(s):
-            if not isinstance(s, str): return s
-            for k, v in ctx.items(): s = s.replace("{" + k + "}", str(v))
-            return s
-        path = sub(step["path"])
-        body = json.loads(sub(json.dumps(step["body"]))) if "body" in step else None
         results = []
         for base in (a.lidarr, a.cellarr):
+            ctx = ctxs[base]
+            def sub(s):
+                if not isinstance(s, str): return s
+                for k, v in ctx.items(): s = s.replace("{" + k + "}", str(v))
+                return s
+            path = sub(step["path"])
+            body = json.loads(sub(json.dumps(step["body"]))) if "body" in step else None
+            raw = step.get("raw")
             for attempt in range(6):
-                st, js = call(base, a.key, method, path, body)
+                st, js = call(base, a.key, method, path, body, raw, step.get("headers"))
                 if not step.get("retry") or (st < 500 and js not in ([], None)): break
                 time.sleep(5)
             results.append((st, js))
-            if "save" in step and base == a.lidarr:
-                ctx[step["save"]] = eval(step["from"], {}, {"j": js})
-            if "save2" in step and base == a.cellarr:
-                ctx[step["save2"]] = eval(step["from"], {}, {"j": js})
+            if "save" in step:
+                try: ctx[step["save"]] = eval(step["from"], {}, {"j": js})
+                except Exception: ctx[step["save"]] = 0
         (s1, j1), (s2, j2) = results
         if a.record:
             os.makedirs(a.record, exist_ok=True)
@@ -108,6 +112,9 @@ def main():
         if s1 != s2: problems.append(f"status: Lidarr {s1}, cellarr {s2}")
         if s1 == s2 and j1 is not None and j2 is not None and not step.get("shape_only_status"):
             problems += diff(shape(j1), shape(j2))
+        for field in step.get("same", []):
+            v1, v2 = (j.get(field) if isinstance(j, dict) else None for j in (j1, j2))
+            if v1 != v2: problems.append(f"value of {field}: Lidarr {v1!r}, cellarr {v2!r}")
         if problems:
             bad += 1
             print(f"✗ {method} {path}  [{name}]")

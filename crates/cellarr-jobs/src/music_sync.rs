@@ -10,7 +10,7 @@
 use async_trait::async_trait;
 use cellarr_core::{Album, Artist, ContentId, LibraryId, MetadataProfile, QualityProfileId, Track};
 use cellarr_db::{Database, DbError, NewAlbum, NewArtist, NewTrack};
-use cellarr_meta::{pick_release, Fetcher, MbArtist, MbReleaseGroup, MetaError, MusicBrainzSource};
+use cellarr_meta::{pick_release, MbArtist, MbReleaseGroup, MetaError, MusicMeta};
 
 /// Which of an artist's albums start out monitored when the artist is added.
 ///
@@ -149,14 +149,14 @@ pub trait MusicCatalogue: Send + Sync {
 }
 
 /// The MusicBrainz-backed catalogue.
-pub struct MusicSync<F: Fetcher> {
+pub struct MusicSync<M: MusicMeta> {
     db: Database,
-    mb: MusicBrainzSource<F>,
+    mb: M,
 }
 
-impl<F: Fetcher> MusicSync<F> {
+impl<M: MusicMeta> MusicSync<M> {
     /// A catalogue over `db`, reading MusicBrainz through `mb`.
-    pub fn new(db: Database, mb: MusicBrainzSource<F>) -> Self {
+    pub fn new(db: Database, mb: M) -> Self {
         Self { db, mb }
     }
 
@@ -191,6 +191,17 @@ impl<F: Fetcher> MusicSync<F> {
     }
 }
 
+/// The rich-metadata document stored beside an artist: what a Lidarr client
+/// shows (links, artwork, rating) and the identity columns do not carry.
+fn artist_extras(a: &MbArtist) -> String {
+    serde_json::json!({
+        "links": a.links.iter().map(|l| serde_json::json!({ "url": l.url, "name": l.name })).collect::<Vec<_>>(),
+        "images": a.images.iter().map(|i| serde_json::json!({ "coverType": i.cover_type, "url": i.url })).collect::<Vec<_>>(),
+        "rating": a.rating.map(|r| serde_json::json!({ "votes": r.votes, "value": r.value })),
+    })
+    .to_string()
+}
+
 fn today() -> String {
     time::OffsetDateTime::now_utc().date().to_string()
 }
@@ -211,7 +222,7 @@ fn new_album(g: &MbReleaseGroup, monitored: bool) -> NewAlbum {
 }
 
 #[async_trait]
-impl<F: Fetcher + 'static> MusicCatalogue for MusicSync<F> {
+impl<M: MusicMeta + 'static> MusicCatalogue for MusicSync<M> {
     async fn search_artists(&self, term: &str) -> Result<Vec<MbArtist>, CatalogueError> {
         Ok(self.mb.search_artists(term, 10).await?)
     }
@@ -254,7 +265,7 @@ impl<F: Fetcher + 'static> MusicCatalogue for MusicSync<F> {
                     disambiguation: mb.disambiguation.clone(),
                     artist_type: mb.artist_type.clone(),
                     ended: mb.ended,
-                    overview: None,
+                    overview: mb.overview.clone(),
                     genres: mb.genres.clone(),
                     aliases: mb.aliases.clone(),
                     path: req.path,
@@ -265,6 +276,10 @@ impl<F: Fetcher + 'static> MusicCatalogue for MusicSync<F> {
                     added_at: None,
                 },
             )
+            .await?;
+        self.db
+            .music()
+            .set_extras(artist.content_id, artist_extras(&mb))
             .await?;
         let dates: Vec<Option<String>> = groups
             .iter()
@@ -305,6 +320,10 @@ impl<F: Fetcher + 'static> MusicCatalogue for MusicSync<F> {
         known.artist_type = mb.artist_type.clone();
         known.ended = mb.ended;
         known.genres = mb.genres.clone();
+        if mb.overview.is_some() {
+            known.overview = mb.overview.clone();
+        }
+        music.set_extras(artist, artist_extras(&mb)).await?;
         music
             .update_artist(&known, Some(mb.aliases.clone()))
             .await?;

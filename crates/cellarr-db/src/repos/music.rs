@@ -152,7 +152,8 @@ pub struct MusicRepo {
 
 const ARTIST_COLS: &str = "a.id, a.content_id, a.mbid, a.name, a.sort_name, a.disambiguation, \
      a.artist_type, a.ended, a.overview, a.genres, a.path, a.quality_profile_id, \
-     a.metadata_profile_id, a.monitor_new_albums, a.added_at, a.refreshed_at, c.monitored";
+     a.metadata_profile_id, a.monitor_new_albums, a.added_at, a.refreshed_at, c.monitored, \
+     (SELECT x.body FROM music_extras x WHERE x.content_id = a.content_id) AS extras";
 
 const ALBUM_COLS: &str = "al.id, al.content_id, al.artist_content_id, al.mbid, al.title, \
      al.disambiguation, al.album_type, al.secondary_types, al.release_date, al.release_mbid, \
@@ -262,6 +263,7 @@ impl MusicRepo {
                     monitor_new_albums: new.monitor_new_albums,
                     added_at,
                     refreshed_at: None,
+                    extras: None,
                 })
             })
         })
@@ -1395,6 +1397,57 @@ impl MusicRepo {
             .collect()
     }
 
+    // --- extras ---------------------------------------------------------------
+
+    /// Replace the rich-metadata document of an artist or album.
+    ///
+    /// # Errors
+    /// Returns a [`DbError`] on write failure.
+    pub async fn set_extras(&self, node: ContentId, body: String) -> Result<()> {
+        self.writer
+            .submit(move |conn| {
+                Box::pin(async move {
+                    sqlx::query(pq(
+                        "INSERT INTO music_extras (content_id, body) VALUES (?1, ?2) \
+                         ON CONFLICT(content_id) DO UPDATE SET body = excluded.body",
+                    ))
+                    .bind(node.to_string())
+                    .bind(body)
+                    .execute(&mut *conn)
+                    .await?;
+                    Ok(())
+                })
+            })
+            .await
+    }
+
+    /// The rich-metadata documents of the given nodes (those that have one).
+    ///
+    /// # Errors
+    /// Returns a [`DbError`] on query failure.
+    pub async fn extras_of(&self, nodes: &[ContentId]) -> Result<HashMap<ContentId, String>> {
+        let mut out = HashMap::with_capacity(nodes.len());
+        for chunk in nodes.chunks(400) {
+            let marks = (1..=chunk.len())
+                .map(|i| format!("?{i}"))
+                .collect::<Vec<_>>()
+                .join(",");
+            let sql = format!("SELECT content_id, body FROM music_extras WHERE content_id IN ({marks})");
+            let mut q = sqlx::query(pq(&sql));
+            for id in chunk {
+                q = q.bind(id.to_string());
+            }
+            for row in q.fetch_all(&self.pool).await? {
+                let id: String = row.try_get("content_id")?;
+                out.insert(
+                    ContentId::from_uuid(parse_uuid("content_id", &id)?),
+                    row.try_get("body")?,
+                );
+            }
+        }
+        Ok(out)
+    }
+
     // --- history --------------------------------------------------------------
 
     /// A page of history for music content, newest first, with the total.
@@ -1982,6 +2035,7 @@ fn row_to_artist(row: DbRow) -> Result<Artist> {
         monitor_new_albums: row.try_get::<i64, _>("monitor_new_albums")? != 0,
         added_at: row.try_get("added_at")?,
         refreshed_at: row.try_get("refreshed_at")?,
+        extras: row.try_get("extras")?,
     })
 }
 

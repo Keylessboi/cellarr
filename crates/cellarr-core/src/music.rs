@@ -119,6 +119,10 @@ pub struct Artist {
     pub added_at: String,
     /// When the album list was last refreshed from the metadata source.
     pub refreshed_at: Option<String>,
+    /// Rich metadata (links, artwork, rating) as a JSON document, when a source
+    /// supplied it.
+    #[serde(default)]
+    pub extras: Option<String>,
 }
 
 /// An album's identity record (a MusicBrainz release group).

@@ -53,7 +53,7 @@ async fn an_artist_is_looked_up_added_and_listed_with_statistics() {
 
     let hits = l.get("/artist/lookup?term=radiohead").await;
     assert_eq!(hits[0]["foreignArtistId"], RADIOHEAD);
-    assert_eq!(hits[0]["id"], 0, "not in the library yet");
+    assert!(hits[0].get("id").is_none(), "not in the library yet: Lidarr omits the id");
 
     let added = l.add_radiohead(profile).await;
     assert_eq!(added["id"], 1);

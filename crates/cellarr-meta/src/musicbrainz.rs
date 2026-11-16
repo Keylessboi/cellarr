@@ -31,9 +31,44 @@ pub const DEFAULT_BASE_URL: &str = "https://musicbrainz.org/ws/2";
 /// limited (429) is retried before the error is reported.
 const BUSY_RETRIES: u32 = 4;
 
-/// An artist as a search hit or a lookup result.
+/// A picture of an artist or album (poster, cover, disc, ...).
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MbImage {
+    /// `Poster`, `Fanart`, `Logo`, `Cover`, `Disc`, ….
+    pub cover_type: String,
+    /// Where the image can be fetched.
+    pub url: String,
+}
+
+/// An external link (`discogs`, `wikidata`, ...).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MbLink {
+    /// The site's name.
+    pub name: String,
+    /// The page.
+    pub url: String,
+}
+
+/// A community rating.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MbRating {
+    /// How many votes.
+    pub votes: u32,
+    /// The mean, 0–10.
+    pub value: f64,
+}
+
+/// An artist as a search hit or a lookup result.
+#[derive(Debug, Clone, PartialEq)]
 pub struct MbArtist {
+    /// A biography, when the source has one.
+    pub overview: Option<String>,
+    /// Pictures.
+    pub images: Vec<MbImage>,
+    /// External links.
+    pub links: Vec<MbLink>,
+    /// Community rating.
+    pub rating: Option<MbRating>,
     /// MusicBrainz artist id.
     pub mbid: String,
     /// Display name.
@@ -55,8 +90,21 @@ pub struct MbArtist {
 }
 
 /// A release group: the abstract album.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MbReleaseGroup {
+    /// Pressings the source returned with the group (a search hit from a source
+    /// that embeds them); empty otherwise.
+    pub releases: Vec<MbRelease>,
+    /// A description, when the source has one.
+    pub overview: Option<String>,
+    /// Covers.
+    pub images: Vec<MbImage>,
+    /// External links.
+    pub links: Vec<MbLink>,
+    /// Genre names.
+    pub genres: Vec<String>,
+    /// Community rating.
+    pub rating: Option<MbRating>,
     /// MusicBrainz release-group id.
     pub mbid: String,
     /// Title.
@@ -120,6 +168,115 @@ pub struct MbTrack {
     pub length_ms: Option<u32>,
     /// MusicBrainz recording id.
     pub recording_mbid: Option<String>,
+}
+
+/// Where music metadata comes from: the five questions the catalogue asks.
+///
+/// MusicBrainz, Lidarr's metadata server, and a fallback chain of the two all
+/// answer in the same types, so the catalogue never knows which one it has.
+#[async_trait::async_trait]
+pub trait MusicMeta: Send + Sync {
+    /// Search artists by name, best match first.
+    async fn search_artists(&self, query: &str, limit: u32) -> Result<Vec<MbArtist>, MetaError>;
+    /// One artist.
+    async fn artist(&self, mbid: &str) -> Result<MbArtist, MetaError>;
+    /// An artist's release groups, narrowed to `primary_types` when non-empty.
+    async fn release_groups(
+        &self,
+        artist_mbid: &str,
+        primary_types: &[String],
+    ) -> Result<Vec<MbReleaseGroup>, MetaError>;
+    /// Search release groups by title, optionally within one artist.
+    async fn search_release_groups(
+        &self,
+        title: &str,
+        artist: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<MbReleaseGroup>, MetaError>;
+    /// The pressings of a release group, with track lists.
+    async fn releases(&self, release_group_mbid: &str) -> Result<Vec<MbRelease>, MetaError>;
+}
+
+#[async_trait::async_trait]
+impl<F: Fetcher + 'static> MusicMeta for MusicBrainzSource<F> {
+    async fn search_artists(&self, query: &str, limit: u32) -> Result<Vec<MbArtist>, MetaError> {
+        MusicBrainzSource::search_artists(self, query, limit).await
+    }
+    async fn artist(&self, mbid: &str) -> Result<MbArtist, MetaError> {
+        MusicBrainzSource::artist(self, mbid).await
+    }
+    async fn release_groups(
+        &self,
+        artist_mbid: &str,
+        primary_types: &[String],
+    ) -> Result<Vec<MbReleaseGroup>, MetaError> {
+        MusicBrainzSource::release_groups(self, artist_mbid, primary_types).await
+    }
+    async fn search_release_groups(
+        &self,
+        title: &str,
+        artist: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<MbReleaseGroup>, MetaError> {
+        MusicBrainzSource::search_release_groups(self, title, artist, limit).await
+    }
+    async fn releases(&self, release_group_mbid: &str) -> Result<Vec<MbRelease>, MetaError> {
+        MusicBrainzSource::releases(self, release_group_mbid).await
+    }
+}
+
+/// Try `primary`; when it fails for any reason, ask `fallback`. Keeps the
+/// daemon useful when one metadata service is down or unreachable.
+pub struct FallbackMeta<A, B> {
+    primary: A,
+    fallback: B,
+}
+
+impl<A, B> FallbackMeta<A, B> {
+    /// Chain two sources.
+    pub fn new(primary: A, fallback: B) -> Self {
+        Self { primary, fallback }
+    }
+}
+
+macro_rules! try_both {
+    ($self:ident, $m:ident ( $($a:expr),* )) => {
+        match $self.primary.$m($($a),*).await {
+            Ok(v) => Ok(v),
+            Err(e) => {
+                tracing::warn!(error = %e, call = stringify!($m), "primary music metadata failed; using the fallback");
+                $self.fallback.$m($($a),*).await
+            }
+        }
+    };
+}
+
+#[async_trait::async_trait]
+impl<A: MusicMeta, B: MusicMeta> MusicMeta for FallbackMeta<A, B> {
+    async fn search_artists(&self, query: &str, limit: u32) -> Result<Vec<MbArtist>, MetaError> {
+        try_both!(self, search_artists(query, limit))
+    }
+    async fn artist(&self, mbid: &str) -> Result<MbArtist, MetaError> {
+        try_both!(self, artist(mbid))
+    }
+    async fn release_groups(
+        &self,
+        artist_mbid: &str,
+        primary_types: &[String],
+    ) -> Result<Vec<MbReleaseGroup>, MetaError> {
+        try_both!(self, release_groups(artist_mbid, primary_types))
+    }
+    async fn search_release_groups(
+        &self,
+        title: &str,
+        artist: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<MbReleaseGroup>, MetaError> {
+        try_both!(self, search_release_groups(title, artist, limit))
+    }
+    async fn releases(&self, release_group_mbid: &str) -> Result<Vec<MbRelease>, MetaError> {
+        try_both!(self, releases(release_group_mbid))
+    }
 }
 
 /// The MusicBrainz web-service client.
@@ -459,6 +616,10 @@ impl From<RawArtist> for MbArtist {
         aliases.sort();
         aliases.dedup();
         MbArtist {
+            overview: None,
+            images: Vec::new(),
+            links: Vec::new(),
+            rating: None,
             mbid: raw.id,
             sort_name: non_empty(raw.sort_name).filter(|s| *s != raw.name),
             name: raw.name,
@@ -515,6 +676,12 @@ struct RawCreditedArtist {
 impl From<RawReleaseGroup> for MbReleaseGroup {
     fn from(raw: RawReleaseGroup) -> Self {
         MbReleaseGroup {
+            releases: Vec::new(),
+            overview: None,
+            images: Vec::new(),
+            links: Vec::new(),
+            genres: Vec::new(),
+            rating: None,
             mbid: raw.id,
             title: raw.title,
             primary_type: non_empty(raw.primary_type).unwrap_or_else(|| "Other".to_string()),

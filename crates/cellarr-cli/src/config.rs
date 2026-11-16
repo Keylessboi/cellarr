@@ -152,6 +152,13 @@ pub struct ApiConfig {
 pub struct MusicConfig {
     /// A MusicBrainz mirror's web-service root, instead of the public service.
     pub musicbrainz_url: Option<String>,
+    /// Where artist and album metadata comes from: `lidarr` (Lidarr's metadata
+    /// service, with artwork, biographies and links; MusicBrainz is the fallback
+    /// when it is unreachable) or `musicbrainz` (MusicBrainz only, nothing
+    /// sent to a third party). Unset means `lidarr`.
+    pub metadata_source: Option<String>,
+    /// Root of an alternative Lidarr-compatible metadata service.
+    pub lidarr_metadata_url: Option<String>,
     /// The interface the Lidarr-compatible listener binds. Defaults to the main
     /// API's bind address.
     pub lidarr_bind: Option<IpAddr>,
