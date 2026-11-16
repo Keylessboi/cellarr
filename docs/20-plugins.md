@@ -9,7 +9,7 @@ download client.
 |---|---|---|
 | What | Indexers and download clients compiled to WASM against `crates/cellarr-plugins/wit/plugins.wit` | Lidarr's own .NET plugins (`Lidarr.Plugin.*.dll`), unmodified |
 | Runs in | cellarr's process, sandboxed | A stock Lidarr run beside cellarr (the sidecar) |
-| Cost | A few MB per plugin, only while called | A whole Lidarr: roughly 150–250 MB |
+| Cost | A few MB per plugin, only while called | A whole Lidarr: about 300 MB resident when idle (measured, Lidarr 3.1, empty library) |
 | Required | No (feature `plugins`, on by default; `--no-default-features` drops it) | No (off until configured) |
 
 ## WASM plugins
