@@ -1,0 +1,114 @@
+#!/usr/bin/env python3
+"""Regenerate the pinned Lidarr API contract from Lidarr's published OpenAPI document.
+
+    scripts/lidarr-contract                       # fetch Lidarr's develop branch
+    scripts/lidarr-contract --ref v3.1.2.4928     # a tag or commit
+    scripts/lidarr-contract --file openapi.json   # a local copy
+    scripts/lidarr-contract --check               # exit 1 if the pinned file is out of date
+
+The contract is what cellarr's Lidarr-compatible API is tested against
+(crates/cellarr-api/tests/lidarr_contract.rs): every path and method Lidarr serves, and every
+field of the resources clients read, with its JSON type. It records *interface facts only* --
+names, methods and types -- not Lidarr's descriptions or code. Regenerate it when Lidarr
+releases, run `cargo test -p cellarr-api --test lidarr_contract`, and the failures are the work
+list: an endpoint or field that appeared, moved or changed type.
+
+Standard library only, so it runs anywhere with Python 3.
+"""
+import argparse
+import json
+import sys
+import urllib.request
+
+URL = "https://raw.githubusercontent.com/Lidarr/Lidarr/{ref}/src/Lidarr.Api.V1/openapi.json"
+OUT = "crates/cellarr-api/tests/contracts/lidarr-v1.json"
+
+# The resources clients read field by field. Everything else is covered by the path list.
+RESOURCES = [
+    "AlbumResource", "AlbumStatisticsResource", "ArtistResource", "ArtistStatisticsResource",
+    "BlocklistResource", "CommandResource", "HealthResource", "HistoryResource",
+    "MetadataProfileResource", "QualityDefinitionResource", "QualityProfileResource",
+    "QueueResource", "ReleaseResource", "RootFolderResource", "SystemResource", "TagResource",
+    "TrackFileResource", "TrackResource",
+]
+
+
+def json_type(prop, schemas):
+    """The JSON type of a property: integer, number, string, boolean, array, object."""
+    if "$ref" in prop:
+        target = schemas[prop["$ref"].rsplit("/", 1)[-1]]
+        # Enums are serialized as strings in Lidarr's API.
+        return "string" if "enum" in target else (target.get("type") or "object")
+    return prop.get("type", "object")
+
+
+def is_nested_resource(prop, schemas):
+    """A property that is another resource (an artist inside an album, a file inside a track).
+
+    Lidarr includes these only when the request asks (`includeArtist`, ...) and otherwise omits
+    or nulls them, so a response without one is not a contract violation.
+    """
+    if "$ref" not in prop:
+        return False
+    target = schemas[prop["$ref"].rsplit("/", 1)[-1]]
+    return "enum" not in target and target.get("type", "object") == "object"
+
+
+def build(doc):
+    schemas = doc["components"]["schemas"]
+    paths = {
+        path: sorted(m.upper() for m in methods if m in ("get", "post", "put", "delete", "head"))
+        for path, methods in sorted(doc["paths"].items())
+    }
+    resources = {}
+    for name in RESOURCES:
+        schema = schemas.get(name)
+        if schema is None:
+            sys.exit(f"the OpenAPI document has no {name}; update RESOURCES in {sys.argv[0]}")
+        resources[name] = {
+            field: {
+                "type": json_type(prop, schemas),
+                "nullable": bool(prop.get("nullable")),
+                # Present only when asked for; see is_nested_resource.
+                "optional": is_nested_resource(prop, schemas),
+            }
+            for field, prop in sorted(schema.get("properties", {}).items())
+        }
+    return {
+        "source": {
+            "document": "Lidarr.Api.V1/openapi.json",
+            "title": doc.get("info", {}).get("title"),
+            "note": "Interface facts only (paths, methods, field names and JSON types).",
+        },
+        "paths": paths,
+        "resources": resources,
+    }
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
+    ap.add_argument("--ref", default="develop", help="Lidarr git ref to read (default: develop)")
+    ap.add_argument("--file", help="read a local openapi.json instead of fetching")
+    ap.add_argument("--check", action="store_true", help="fail if the pinned contract differs")
+    ap.add_argument("--out", default=OUT)
+    args = ap.parse_args()
+
+    if args.file:
+        doc = json.load(open(args.file))
+    else:
+        with urllib.request.urlopen(URL.format(ref=args.ref), timeout=60) as r:
+            doc = json.load(r)
+    text = json.dumps(build(doc), indent=2, sort_keys=False) + "\n"
+
+    if args.check:
+        current = open(args.out).read()
+        if current != text:
+            sys.exit(f"{args.out} is out of date with Lidarr {args.ref}; rerun without --check")
+        print("contract is current")
+        return
+    open(args.out, "w").write(text)
+    print(f"wrote {args.out}: {len(json.loads(text)['paths'])} paths")
+
+
+if __name__ == "__main__":
+    main()

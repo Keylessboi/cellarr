@@ -1,0 +1,2030 @@
+{
+  "source": {
+    "document": "Lidarr.Api.V1/openapi.json",
+    "title": "Lidarr",
+    "note": "Interface facts only (paths, methods, field names and JSON types)."
+  },
+  "paths": {
+    "/": [
+      "GET"
+    ],
+    "/api": [
+      "GET"
+    ],
+    "/api/v1/album": [
+      "GET",
+      "POST"
+    ],
+    "/api/v1/album/lookup": [
+      "GET"
+    ],
+    "/api/v1/album/monitor": [
+      "PUT"
+    ],
+    "/api/v1/album/{id}": [
+      "DELETE",
+      "GET",
+      "PUT"
+    ],
+    "/api/v1/albumstudio": [
+      "POST"
+    ],
+    "/api/v1/artist": [
+      "GET",
+      "POST"
+    ],
+    "/api/v1/artist/editor": [
+      "DELETE",
+      "PUT"
+    ],
+    "/api/v1/artist/lookup": [
+      "GET"
+    ],
+    "/api/v1/artist/{id}": [
+      "DELETE",
+      "GET",
+      "PUT"
+    ],
+    "/api/v1/autotagging": [
+      "GET",
+      "POST"
+    ],
+    "/api/v1/autotagging/schema": [
+      "GET"
+    ],
+    "/api/v1/autotagging/{id}": [
+      "DELETE",
+      "GET",
+      "PUT"
+    ],
+    "/api/v1/blocklist": [
+      "GET"
+    ],
+    "/api/v1/blocklist/bulk": [
+      "DELETE"
+    ],
+    "/api/v1/blocklist/{id}": [
+      "DELETE"
+    ],
+    "/api/v1/calendar": [
+      "GET"
+    ],
+    "/api/v1/calendar/{id}": [
+      "GET"
+    ],
+    "/api/v1/command": [
+      "GET",
+      "POST"
+    ],
+    "/api/v1/command/{id}": [
+      "DELETE",
+      "GET"
+    ],
+    "/api/v1/config/downloadclient": [
+      "GET"
+    ],
+    "/api/v1/config/downloadclient/{id}": [
+      "GET",
+      "PUT"
+    ],
+    "/api/v1/config/host": [
+      "GET"
+    ],
+    "/api/v1/config/host/{id}": [
+      "GET",
+      "PUT"
+    ],
+    "/api/v1/config/indexer": [
+      "GET"
+    ],
+    "/api/v1/config/indexer/{id}": [
+      "GET",
+      "PUT"
+    ],
+    "/api/v1/config/mediamanagement": [
+      "GET"
+    ],
+    "/api/v1/config/mediamanagement/{id}": [
+      "GET",
+      "PUT"
+    ],
+    "/api/v1/config/metadataprovider": [
+      "GET"
+    ],
+    "/api/v1/config/metadataprovider/{id}": [
+      "GET",
+      "PUT"
+    ],
+    "/api/v1/config/naming": [
+      "GET"
+    ],
+    "/api/v1/config/naming/examples": [
+      "GET"
+    ],
+    "/api/v1/config/naming/{id}": [
+      "GET",
+      "PUT"
+    ],
+    "/api/v1/config/ui": [
+      "GET"
+    ],
+    "/api/v1/config/ui/{id}": [
+      "GET",
+      "PUT"
+    ],
+    "/api/v1/customfilter": [
+      "GET",
+      "POST"
+    ],
+    "/api/v1/customfilter/{id}": [
+      "DELETE",
+      "GET",
+      "PUT"
+    ],
+    "/api/v1/customformat": [
+      "GET",
+      "POST"
+    ],
+    "/api/v1/customformat/bulk": [
+      "DELETE",
+      "PUT"
+    ],
+    "/api/v1/customformat/schema": [
+      "GET"
+    ],
+    "/api/v1/customformat/{id}": [
+      "DELETE",
+      "GET",
+      "PUT"
+    ],
+    "/api/v1/delayprofile": [
+      "GET",
+      "POST"
+    ],
+    "/api/v1/delayprofile/reorder/{id}": [
+      "PUT"
+    ],
+    "/api/v1/delayprofile/{id}": [
+      "DELETE",
+      "GET",
+      "PUT"
+    ],
+    "/api/v1/diskspace": [
+      "GET"
+    ],
+    "/api/v1/downloadclient": [
+      "GET",
+      "POST"
+    ],
+    "/api/v1/downloadclient/action/{name}": [
+      "POST"
+    ],
+    "/api/v1/downloadclient/bulk": [
+      "DELETE",
+      "PUT"
+    ],
+    "/api/v1/downloadclient/schema": [
+      "GET"
+    ],
+    "/api/v1/downloadclient/test": [
+      "POST"
+    ],
+    "/api/v1/downloadclient/testall": [
+      "POST"
+    ],
+    "/api/v1/downloadclient/{id}": [
+      "DELETE",
+      "GET",
+      "PUT"
+    ],
+    "/api/v1/filesystem": [
+      "GET"
+    ],
+    "/api/v1/filesystem/mediafiles": [
+      "GET"
+    ],
+    "/api/v1/filesystem/type": [
+      "GET"
+    ],
+    "/api/v1/health": [
+      "GET"
+    ],
+    "/api/v1/history": [
+      "GET"
+    ],
+    "/api/v1/history/artist": [
+      "GET"
+    ],
+    "/api/v1/history/failed/{id}": [
+      "POST"
+    ],
+    "/api/v1/history/since": [
+      "GET"
+    ],
+    "/api/v1/importlist": [
+      "GET",
+      "POST"
+    ],
+    "/api/v1/importlist/action/{name}": [
+      "POST"
+    ],
+    "/api/v1/importlist/bulk": [
+      "DELETE",
+      "PUT"
+    ],
+    "/api/v1/importlist/schema": [
+      "GET"
+    ],
+    "/api/v1/importlist/test": [
+      "POST"
+    ],
+    "/api/v1/importlist/testall": [
+      "POST"
+    ],
+    "/api/v1/importlist/{id}": [
+      "DELETE",
+      "GET",
+      "PUT"
+    ],
+    "/api/v1/importlistexclusion": [
+      "GET",
+      "POST"
+    ],
+    "/api/v1/importlistexclusion/{id}": [
+      "DELETE",
+      "GET",
+      "PUT"
+    ],
+    "/api/v1/indexer": [
+      "GET",
+      "POST"
+    ],
+    "/api/v1/indexer/action/{name}": [
+      "POST"
+    ],
+    "/api/v1/indexer/bulk": [
+      "DELETE",
+      "PUT"
+    ],
+    "/api/v1/indexer/schema": [
+      "GET"
+    ],
+    "/api/v1/indexer/test": [
+      "POST"
+    ],
+    "/api/v1/indexer/testall": [
+      "POST"
+    ],
+    "/api/v1/indexer/{id}": [
+      "DELETE",
+      "GET",
+      "PUT"
+    ],
+    "/api/v1/indexerflag": [
+      "GET"
+    ],
+    "/api/v1/language": [
+      "GET"
+    ],
+    "/api/v1/language/{id}": [
+      "GET"
+    ],
+    "/api/v1/localization": [
+      "GET"
+    ],
+    "/api/v1/log": [
+      "GET"
+    ],
+    "/api/v1/log/file": [
+      "GET"
+    ],
+    "/api/v1/log/file/update": [
+      "GET"
+    ],
+    "/api/v1/log/file/update/{filename}": [
+      "GET"
+    ],
+    "/api/v1/log/file/{filename}": [
+      "GET"
+    ],
+    "/api/v1/manualimport": [
+      "GET",
+      "POST"
+    ],
+    "/api/v1/mediacover/album/{albumId}/{filename}": [
+      "GET"
+    ],
+    "/api/v1/mediacover/artist/{artistId}/{filename}": [
+      "GET"
+    ],
+    "/api/v1/metadata": [
+      "GET",
+      "POST"
+    ],
+    "/api/v1/metadata/action/{name}": [
+      "POST"
+    ],
+    "/api/v1/metadata/schema": [
+      "GET"
+    ],
+    "/api/v1/metadata/test": [
+      "POST"
+    ],
+    "/api/v1/metadata/testall": [
+      "POST"
+    ],
+    "/api/v1/metadata/{id}": [
+      "DELETE",
+      "GET",
+      "PUT"
+    ],
+    "/api/v1/metadataprofile": [
+      "GET",
+      "POST"
+    ],
+    "/api/v1/metadataprofile/schema": [
+      "GET"
+    ],
+    "/api/v1/metadataprofile/{id}": [
+      "DELETE",
+      "GET",
+      "PUT"
+    ],
+    "/api/v1/notification": [
+      "GET",
+      "POST"
+    ],
+    "/api/v1/notification/action/{name}": [
+      "POST"
+    ],
+    "/api/v1/notification/schema": [
+      "GET"
+    ],
+    "/api/v1/notification/test": [
+      "POST"
+    ],
+    "/api/v1/notification/testall": [
+      "POST"
+    ],
+    "/api/v1/notification/{id}": [
+      "DELETE",
+      "GET",
+      "PUT"
+    ],
+    "/api/v1/parse": [
+      "GET"
+    ],
+    "/api/v1/qualitydefinition": [
+      "GET"
+    ],
+    "/api/v1/qualitydefinition/update": [
+      "PUT"
+    ],
+    "/api/v1/qualitydefinition/{id}": [
+      "GET",
+      "PUT"
+    ],
+    "/api/v1/qualityprofile": [
+      "GET",
+      "POST"
+    ],
+    "/api/v1/qualityprofile/schema": [
+      "GET"
+    ],
+    "/api/v1/qualityprofile/{id}": [
+      "DELETE",
+      "GET",
+      "PUT"
+    ],
+    "/api/v1/queue": [
+      "GET"
+    ],
+    "/api/v1/queue/bulk": [
+      "DELETE"
+    ],
+    "/api/v1/queue/details": [
+      "GET"
+    ],
+    "/api/v1/queue/grab/bulk": [
+      "POST"
+    ],
+    "/api/v1/queue/grab/{id}": [
+      "POST"
+    ],
+    "/api/v1/queue/status": [
+      "GET"
+    ],
+    "/api/v1/queue/{id}": [
+      "DELETE"
+    ],
+    "/api/v1/release": [
+      "GET",
+      "POST"
+    ],
+    "/api/v1/release/push": [
+      "POST"
+    ],
+    "/api/v1/releaseprofile": [
+      "GET",
+      "POST"
+    ],
+    "/api/v1/releaseprofile/{id}": [
+      "DELETE",
+      "GET",
+      "PUT"
+    ],
+    "/api/v1/remotepathmapping": [
+      "GET",
+      "POST"
+    ],
+    "/api/v1/remotepathmapping/{id}": [
+      "DELETE",
+      "GET",
+      "PUT"
+    ],
+    "/api/v1/rename": [
+      "GET"
+    ],
+    "/api/v1/retag": [
+      "GET"
+    ],
+    "/api/v1/rootfolder": [
+      "GET",
+      "POST"
+    ],
+    "/api/v1/rootfolder/{id}": [
+      "DELETE",
+      "GET",
+      "PUT"
+    ],
+    "/api/v1/search": [
+      "GET"
+    ],
+    "/api/v1/system/backup": [
+      "GET"
+    ],
+    "/api/v1/system/backup/restore/upload": [
+      "POST"
+    ],
+    "/api/v1/system/backup/restore/{id}": [
+      "POST"
+    ],
+    "/api/v1/system/backup/{id}": [
+      "DELETE"
+    ],
+    "/api/v1/system/restart": [
+      "POST"
+    ],
+    "/api/v1/system/routes": [
+      "GET"
+    ],
+    "/api/v1/system/routes/duplicate": [
+      "GET"
+    ],
+    "/api/v1/system/shutdown": [
+      "POST"
+    ],
+    "/api/v1/system/status": [
+      "GET"
+    ],
+    "/api/v1/system/task": [
+      "GET"
+    ],
+    "/api/v1/system/task/{id}": [
+      "GET"
+    ],
+    "/api/v1/tag": [
+      "GET",
+      "POST"
+    ],
+    "/api/v1/tag/detail": [
+      "GET"
+    ],
+    "/api/v1/tag/detail/{id}": [
+      "GET"
+    ],
+    "/api/v1/tag/{id}": [
+      "DELETE",
+      "GET",
+      "PUT"
+    ],
+    "/api/v1/track": [
+      "GET"
+    ],
+    "/api/v1/track/{id}": [
+      "GET"
+    ],
+    "/api/v1/trackfile": [
+      "GET"
+    ],
+    "/api/v1/trackfile/bulk": [
+      "DELETE"
+    ],
+    "/api/v1/trackfile/editor": [
+      "PUT"
+    ],
+    "/api/v1/trackfile/{id}": [
+      "DELETE",
+      "GET",
+      "PUT"
+    ],
+    "/api/v1/update": [
+      "GET"
+    ],
+    "/api/v1/wanted/cutoff": [
+      "GET"
+    ],
+    "/api/v1/wanted/cutoff/{id}": [
+      "GET"
+    ],
+    "/api/v1/wanted/missing": [
+      "GET"
+    ],
+    "/api/v1/wanted/missing/{id}": [
+      "GET"
+    ],
+    "/content/{path}": [
+      "GET"
+    ],
+    "/feed/v1/calendar/lidarr.ics": [
+      "GET"
+    ],
+    "/login": [
+      "GET",
+      "POST"
+    ],
+    "/logout": [
+      "GET"
+    ],
+    "/ping": [
+      "GET",
+      "HEAD"
+    ],
+    "/{path}": [
+      "GET"
+    ]
+  },
+  "resources": {
+    "AlbumResource": {
+      "addOptions": {
+        "type": "object",
+        "nullable": false,
+        "optional": true
+      },
+      "albumType": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "anyReleaseOk": {
+        "type": "boolean",
+        "nullable": false,
+        "optional": false
+      },
+      "artist": {
+        "type": "object",
+        "nullable": false,
+        "optional": true
+      },
+      "artistId": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "disambiguation": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "duration": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "foreignAlbumId": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "genres": {
+        "type": "array",
+        "nullable": true,
+        "optional": false
+      },
+      "id": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "images": {
+        "type": "array",
+        "nullable": true,
+        "optional": false
+      },
+      "lastSearchTime": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "links": {
+        "type": "array",
+        "nullable": true,
+        "optional": false
+      },
+      "media": {
+        "type": "array",
+        "nullable": true,
+        "optional": false
+      },
+      "mediumCount": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "monitored": {
+        "type": "boolean",
+        "nullable": false,
+        "optional": false
+      },
+      "overview": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "profileId": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "ratings": {
+        "type": "object",
+        "nullable": false,
+        "optional": true
+      },
+      "releaseDate": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "releases": {
+        "type": "array",
+        "nullable": true,
+        "optional": false
+      },
+      "remoteCover": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "secondaryTypes": {
+        "type": "array",
+        "nullable": true,
+        "optional": false
+      },
+      "statistics": {
+        "type": "object",
+        "nullable": false,
+        "optional": true
+      },
+      "title": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      }
+    },
+    "AlbumStatisticsResource": {
+      "percentOfTracks": {
+        "type": "number",
+        "nullable": false,
+        "optional": false
+      },
+      "sizeOnDisk": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "totalTrackCount": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "trackCount": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "trackFileCount": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      }
+    },
+    "ArtistResource": {
+      "addOptions": {
+        "type": "object",
+        "nullable": false,
+        "optional": true
+      },
+      "added": {
+        "type": "string",
+        "nullable": false,
+        "optional": false
+      },
+      "allMusicId": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "artistName": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "artistType": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "cleanName": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "disambiguation": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "discogsId": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "ended": {
+        "type": "boolean",
+        "nullable": false,
+        "optional": false
+      },
+      "folder": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "foreignArtistId": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "genres": {
+        "type": "array",
+        "nullable": true,
+        "optional": false
+      },
+      "id": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "images": {
+        "type": "array",
+        "nullable": true,
+        "optional": false
+      },
+      "lastAlbum": {
+        "type": "object",
+        "nullable": false,
+        "optional": true
+      },
+      "links": {
+        "type": "array",
+        "nullable": true,
+        "optional": false
+      },
+      "mbId": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "members": {
+        "type": "array",
+        "nullable": true,
+        "optional": false
+      },
+      "metadataProfileId": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "monitorNewItems": {
+        "type": "string",
+        "nullable": false,
+        "optional": false
+      },
+      "monitored": {
+        "type": "boolean",
+        "nullable": false,
+        "optional": false
+      },
+      "nextAlbum": {
+        "type": "object",
+        "nullable": false,
+        "optional": true
+      },
+      "overview": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "path": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "qualityProfileId": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "ratings": {
+        "type": "object",
+        "nullable": false,
+        "optional": true
+      },
+      "remotePoster": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "rootFolderPath": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "sortName": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "statistics": {
+        "type": "object",
+        "nullable": false,
+        "optional": true
+      },
+      "status": {
+        "type": "string",
+        "nullable": false,
+        "optional": false
+      },
+      "tadbId": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "tags": {
+        "type": "array",
+        "nullable": true,
+        "optional": false
+      }
+    },
+    "ArtistStatisticsResource": {
+      "albumCount": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "percentOfTracks": {
+        "type": "number",
+        "nullable": false,
+        "optional": false
+      },
+      "sizeOnDisk": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "totalTrackCount": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "trackCount": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "trackFileCount": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      }
+    },
+    "BlocklistResource": {
+      "albumIds": {
+        "type": "array",
+        "nullable": true,
+        "optional": false
+      },
+      "artist": {
+        "type": "object",
+        "nullable": false,
+        "optional": true
+      },
+      "artistId": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "customFormats": {
+        "type": "array",
+        "nullable": true,
+        "optional": false
+      },
+      "date": {
+        "type": "string",
+        "nullable": false,
+        "optional": false
+      },
+      "id": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "indexer": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "message": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "protocol": {
+        "type": "string",
+        "nullable": false,
+        "optional": false
+      },
+      "quality": {
+        "type": "object",
+        "nullable": false,
+        "optional": true
+      },
+      "sourceTitle": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      }
+    },
+    "CommandResource": {
+      "body": {
+        "type": "object",
+        "nullable": false,
+        "optional": true
+      },
+      "clientUserAgent": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "commandName": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "duration": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "ended": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "exception": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "id": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "lastExecutionTime": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "message": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "name": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "priority": {
+        "type": "string",
+        "nullable": false,
+        "optional": false
+      },
+      "queued": {
+        "type": "string",
+        "nullable": false,
+        "optional": false
+      },
+      "result": {
+        "type": "string",
+        "nullable": false,
+        "optional": false
+      },
+      "sendUpdatesToClient": {
+        "type": "boolean",
+        "nullable": false,
+        "optional": false
+      },
+      "started": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "stateChangeTime": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "status": {
+        "type": "string",
+        "nullable": false,
+        "optional": false
+      },
+      "trigger": {
+        "type": "string",
+        "nullable": false,
+        "optional": false
+      },
+      "updateScheduledTask": {
+        "type": "boolean",
+        "nullable": false,
+        "optional": false
+      }
+    },
+    "HealthResource": {
+      "id": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "message": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "source": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "type": {
+        "type": "string",
+        "nullable": false,
+        "optional": false
+      },
+      "wikiUrl": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      }
+    },
+    "HistoryResource": {
+      "album": {
+        "type": "object",
+        "nullable": false,
+        "optional": true
+      },
+      "albumId": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "artist": {
+        "type": "object",
+        "nullable": false,
+        "optional": true
+      },
+      "artistId": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "customFormatScore": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "customFormats": {
+        "type": "array",
+        "nullable": true,
+        "optional": false
+      },
+      "data": {
+        "type": "object",
+        "nullable": true,
+        "optional": false
+      },
+      "date": {
+        "type": "string",
+        "nullable": false,
+        "optional": false
+      },
+      "downloadId": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "eventType": {
+        "type": "string",
+        "nullable": false,
+        "optional": false
+      },
+      "id": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "quality": {
+        "type": "object",
+        "nullable": false,
+        "optional": true
+      },
+      "qualityCutoffNotMet": {
+        "type": "boolean",
+        "nullable": false,
+        "optional": false
+      },
+      "sourceTitle": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "track": {
+        "type": "object",
+        "nullable": false,
+        "optional": true
+      },
+      "trackId": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      }
+    },
+    "MetadataProfileResource": {
+      "id": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "name": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "primaryAlbumTypes": {
+        "type": "array",
+        "nullable": true,
+        "optional": false
+      },
+      "releaseStatuses": {
+        "type": "array",
+        "nullable": true,
+        "optional": false
+      },
+      "secondaryAlbumTypes": {
+        "type": "array",
+        "nullable": true,
+        "optional": false
+      }
+    },
+    "QualityDefinitionResource": {
+      "id": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "maxSize": {
+        "type": "number",
+        "nullable": true,
+        "optional": false
+      },
+      "minSize": {
+        "type": "number",
+        "nullable": true,
+        "optional": false
+      },
+      "preferredSize": {
+        "type": "number",
+        "nullable": true,
+        "optional": false
+      },
+      "quality": {
+        "type": "object",
+        "nullable": false,
+        "optional": true
+      },
+      "title": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "weight": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      }
+    },
+    "QualityProfileResource": {
+      "cutoff": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "cutoffFormatScore": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "formatItems": {
+        "type": "array",
+        "nullable": true,
+        "optional": false
+      },
+      "id": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "items": {
+        "type": "array",
+        "nullable": true,
+        "optional": false
+      },
+      "minFormatScore": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "name": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "upgradeAllowed": {
+        "type": "boolean",
+        "nullable": false,
+        "optional": false
+      }
+    },
+    "QueueResource": {
+      "added": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "album": {
+        "type": "object",
+        "nullable": false,
+        "optional": true
+      },
+      "albumId": {
+        "type": "integer",
+        "nullable": true,
+        "optional": false
+      },
+      "artist": {
+        "type": "object",
+        "nullable": false,
+        "optional": true
+      },
+      "artistId": {
+        "type": "integer",
+        "nullable": true,
+        "optional": false
+      },
+      "customFormatScore": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "customFormats": {
+        "type": "array",
+        "nullable": true,
+        "optional": false
+      },
+      "downloadClient": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "downloadClientHasPostImportCategory": {
+        "type": "boolean",
+        "nullable": false,
+        "optional": false
+      },
+      "downloadForced": {
+        "type": "boolean",
+        "nullable": false,
+        "optional": false
+      },
+      "downloadId": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "errorMessage": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "estimatedCompletionTime": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "id": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "indexer": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "outputPath": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "protocol": {
+        "type": "string",
+        "nullable": false,
+        "optional": false
+      },
+      "quality": {
+        "type": "object",
+        "nullable": false,
+        "optional": true
+      },
+      "size": {
+        "type": "number",
+        "nullable": false,
+        "optional": false
+      },
+      "sizeleft": {
+        "type": "number",
+        "nullable": false,
+        "optional": false
+      },
+      "status": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "statusMessages": {
+        "type": "array",
+        "nullable": true,
+        "optional": false
+      },
+      "timeleft": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "title": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "trackFileCount": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "trackHasFileCount": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "trackedDownloadState": {
+        "type": "string",
+        "nullable": false,
+        "optional": false
+      },
+      "trackedDownloadStatus": {
+        "type": "string",
+        "nullable": false,
+        "optional": false
+      }
+    },
+    "ReleaseResource": {
+      "age": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "ageHours": {
+        "type": "number",
+        "nullable": false,
+        "optional": false
+      },
+      "ageMinutes": {
+        "type": "number",
+        "nullable": false,
+        "optional": false
+      },
+      "airDate": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "albumId": {
+        "type": "integer",
+        "nullable": true,
+        "optional": false
+      },
+      "albumTitle": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "approved": {
+        "type": "boolean",
+        "nullable": false,
+        "optional": false
+      },
+      "artistId": {
+        "type": "integer",
+        "nullable": true,
+        "optional": false
+      },
+      "artistName": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "commentUrl": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "customFormatScore": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "customFormats": {
+        "type": "array",
+        "nullable": true,
+        "optional": false
+      },
+      "discography": {
+        "type": "boolean",
+        "nullable": false,
+        "optional": false
+      },
+      "downloadAllowed": {
+        "type": "boolean",
+        "nullable": false,
+        "optional": false
+      },
+      "downloadClient": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "downloadClientId": {
+        "type": "integer",
+        "nullable": true,
+        "optional": false
+      },
+      "downloadUrl": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "guid": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "id": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "indexer": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "indexerFlags": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "indexerId": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "infoHash": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "infoUrl": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "leechers": {
+        "type": "integer",
+        "nullable": true,
+        "optional": false
+      },
+      "magnetUrl": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "protocol": {
+        "type": "string",
+        "nullable": false,
+        "optional": false
+      },
+      "publishDate": {
+        "type": "string",
+        "nullable": false,
+        "optional": false
+      },
+      "quality": {
+        "type": "object",
+        "nullable": false,
+        "optional": true
+      },
+      "qualityWeight": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "rejected": {
+        "type": "boolean",
+        "nullable": false,
+        "optional": false
+      },
+      "rejections": {
+        "type": "array",
+        "nullable": true,
+        "optional": false
+      },
+      "releaseGroup": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "releaseHash": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "releaseWeight": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "sceneSource": {
+        "type": "boolean",
+        "nullable": false,
+        "optional": false
+      },
+      "seeders": {
+        "type": "integer",
+        "nullable": true,
+        "optional": false
+      },
+      "size": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "subGroup": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "temporarilyRejected": {
+        "type": "boolean",
+        "nullable": false,
+        "optional": false
+      },
+      "title": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      }
+    },
+    "RootFolderResource": {
+      "accessible": {
+        "type": "boolean",
+        "nullable": false,
+        "optional": false
+      },
+      "defaultMetadataProfileId": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "defaultMonitorOption": {
+        "type": "string",
+        "nullable": false,
+        "optional": false
+      },
+      "defaultNewItemMonitorOption": {
+        "type": "string",
+        "nullable": false,
+        "optional": false
+      },
+      "defaultQualityProfileId": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "defaultTags": {
+        "type": "array",
+        "nullable": true,
+        "optional": false
+      },
+      "freeSpace": {
+        "type": "integer",
+        "nullable": true,
+        "optional": false
+      },
+      "id": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "name": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "path": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "totalSpace": {
+        "type": "integer",
+        "nullable": true,
+        "optional": false
+      }
+    },
+    "SystemResource": {
+      "appData": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "appName": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "authentication": {
+        "type": "string",
+        "nullable": false,
+        "optional": false
+      },
+      "branch": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "buildTime": {
+        "type": "string",
+        "nullable": false,
+        "optional": false
+      },
+      "databaseType": {
+        "type": "string",
+        "nullable": false,
+        "optional": false
+      },
+      "databaseVersion": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "instanceName": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "isAdmin": {
+        "type": "boolean",
+        "nullable": false,
+        "optional": false
+      },
+      "isDebug": {
+        "type": "boolean",
+        "nullable": false,
+        "optional": false
+      },
+      "isDocker": {
+        "type": "boolean",
+        "nullable": false,
+        "optional": false
+      },
+      "isLinux": {
+        "type": "boolean",
+        "nullable": false,
+        "optional": false
+      },
+      "isNetCore": {
+        "type": "boolean",
+        "nullable": false,
+        "optional": false
+      },
+      "isOsx": {
+        "type": "boolean",
+        "nullable": false,
+        "optional": false
+      },
+      "isProduction": {
+        "type": "boolean",
+        "nullable": false,
+        "optional": false
+      },
+      "isUserInteractive": {
+        "type": "boolean",
+        "nullable": false,
+        "optional": false
+      },
+      "isWindows": {
+        "type": "boolean",
+        "nullable": false,
+        "optional": false
+      },
+      "migrationVersion": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "mode": {
+        "type": "string",
+        "nullable": false,
+        "optional": false
+      },
+      "osName": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "osVersion": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "packageAuthor": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "packageUpdateMechanism": {
+        "type": "string",
+        "nullable": false,
+        "optional": false
+      },
+      "packageUpdateMechanismMessage": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "packageVersion": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "runtimeName": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "runtimeVersion": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "startTime": {
+        "type": "string",
+        "nullable": false,
+        "optional": false
+      },
+      "startupPath": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "urlBase": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "version": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      }
+    },
+    "TagResource": {
+      "id": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "label": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      }
+    },
+    "TrackFileResource": {
+      "albumId": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "artistId": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "audioTags": {
+        "type": "object",
+        "nullable": false,
+        "optional": true
+      },
+      "customFormatScore": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "customFormats": {
+        "type": "array",
+        "nullable": true,
+        "optional": false
+      },
+      "dateAdded": {
+        "type": "string",
+        "nullable": false,
+        "optional": false
+      },
+      "id": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "indexerFlags": {
+        "type": "integer",
+        "nullable": true,
+        "optional": false
+      },
+      "mediaInfo": {
+        "type": "object",
+        "nullable": false,
+        "optional": true
+      },
+      "path": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "quality": {
+        "type": "object",
+        "nullable": false,
+        "optional": true
+      },
+      "qualityCutoffNotMet": {
+        "type": "boolean",
+        "nullable": false,
+        "optional": false
+      },
+      "qualityWeight": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "releaseGroup": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "sceneName": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "size": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      }
+    },
+    "TrackResource": {
+      "absoluteTrackNumber": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "albumId": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "artist": {
+        "type": "object",
+        "nullable": false,
+        "optional": true
+      },
+      "artistId": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "duration": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "explicit": {
+        "type": "boolean",
+        "nullable": false,
+        "optional": false
+      },
+      "foreignRecordingId": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "foreignTrackId": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "hasFile": {
+        "type": "boolean",
+        "nullable": false,
+        "optional": false
+      },
+      "id": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "mediumNumber": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "ratings": {
+        "type": "object",
+        "nullable": false,
+        "optional": true
+      },
+      "title": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      },
+      "trackFile": {
+        "type": "object",
+        "nullable": false,
+        "optional": true
+      },
+      "trackFileId": {
+        "type": "integer",
+        "nullable": false,
+        "optional": false
+      },
+      "trackNumber": {
+        "type": "string",
+        "nullable": true,
+        "optional": false
+      }
+    }
+  }
+}

@@ -82,11 +82,48 @@ async fn album_or_404(state: &AppState, id: i64) -> ApiResult<Album> {
 async fn artist_resource(state: &AppState, a: &Artist) -> ApiResult<Value> {
     let stats = state.db.music().artist_stats().await?;
     let seqs = profile_seqs(state, a.quality_profile_id.into_iter().collect()).await?;
-    Ok(resources::artist(
+    let mut v = resources::artist(
         a,
         Some(stats.get(&a.content_id).copied().unwrap_or_default()),
         a.quality_profile_id.and_then(|p| seqs.get(&p).copied()),
-    ))
+    );
+    attach_neighbours(state, std::slice::from_mut(&mut v), &[a]).await?;
+    Ok(v)
+}
+
+/// Fill each artist resource's `lastAlbum` (the newest released) and `nextAlbum`
+/// (the soonest to come), which dashboards and the artist list show.
+async fn attach_neighbours(state: &AppState, resources: &mut [Value], artists: &[&Artist]) -> ApiResult<()> {
+    let today = time::OffsetDateTime::now_utc().date().to_string();
+    let bounds = state.db.music().artist_album_bounds(&today).await?;
+    let wanted: Vec<ContentId> = artists
+        .iter()
+        .filter_map(|a| bounds.get(&a.content_id))
+        .flat_map(|(last, next)| last.iter().chain(next.iter()).copied())
+        .collect();
+    if wanted.is_empty() {
+        return Ok(());
+    }
+    let albums: HashMap<ContentId, Album> = state
+        .db
+        .music()
+        .albums_by_content(&wanted)
+        .await?
+        .into_iter()
+        .map(|a| (a.content_id, a))
+        .collect();
+    for (resource, artist) in resources.iter_mut().zip(artists) {
+        let Some((last, next)) = bounds.get(&artist.content_id) else {
+            continue;
+        };
+        let render = |c: &Option<ContentId>| {
+            c.and_then(|c| albums.get(&c))
+                .map(|al| resources::album(al, artist.id, None, None, None, &[]))
+        };
+        resource["lastAlbum"] = render(last).unwrap_or(Value::Null);
+        resource["nextAlbum"] = render(next).unwrap_or(Value::Null);
+    }
+    Ok(())
 }
 
 /// Render albums with their artists and statistics.
@@ -135,18 +172,19 @@ pub(crate) async fn list_artists(
     }
     let stats = music.artist_stats().await?;
     let seqs = profile_seqs(state, artists.iter().filter_map(|a| a.quality_profile_id).collect()).await?;
-    Ok(Json(
-        artists
-            .iter()
-            .map(|a| {
-                resources::artist(
-                    a,
-                    Some(stats.get(&a.content_id).copied().unwrap_or_default()),
-                    a.quality_profile_id.and_then(|p| seqs.get(&p).copied()),
-                )
-            })
-            .collect(),
-    ))
+    let mut out: Vec<Value> = artists
+        .iter()
+        .map(|a| {
+            resources::artist(
+                a,
+                Some(stats.get(&a.content_id).copied().unwrap_or_default()),
+                a.quality_profile_id.and_then(|p| seqs.get(&p).copied()),
+            )
+        })
+        .collect();
+    let refs: Vec<&Artist> = artists.iter().collect();
+    attach_neighbours(state, &mut out, &refs).await?;
+    Ok(Json(out))
 }
 
 pub(crate) async fn get_artist(
@@ -1298,4 +1336,117 @@ pub(crate) async fn indexer_flags(State(_fs): State<FaceState>) -> Json<Vec<Valu
         json!({ "id": 2, "name": "G_Halfleech", "nameLower": "g_halfleech" }),
         json!({ "id": 4, "name": "G_DoubleUpload", "nameLower": "g_doubleupload" }),
     ])
+}
+
+pub(crate) async fn system_status(
+    State(fs): State<FaceState>,
+    Query(q): Params,
+) -> ApiResult<Json<Value>> {
+    let _ = &q;
+    let Json(mut v) = shim::system_status(State(fs), Query(shim::StatusQuery::default())).await?;
+    if let Some(o) = v.as_object_mut() {
+        o.entry("packageUpdateMechanismMessage").or_insert(Value::Null);
+    }
+    Ok(Json(v))
+}
+
+/// A configuration singleton's PUT: accepted and echoed. cellarr keeps these
+/// settings elsewhere (its own configuration), so a client's write to Lidarr's copy
+/// has nothing to change; echoing keeps clients that save the page happy.
+pub(crate) async fn echo_put(Json(body): Json<Value>) -> Json<Value> {
+    Json(body)
+}
+
+pub(crate) async fn echo_list(Json(body): Json<Value>) -> Json<Value> {
+    Json(body)
+}
+
+pub(crate) async fn root_folder(
+    State(fs): State<FaceState>,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<Value>> {
+    let Json(all) = root_folders(State(fs)).await?;
+    all.into_iter()
+        .find(|r| r["id"].as_i64() == Some(id))
+        .map(Json)
+        .ok_or_else(|| ApiError::NotFound(format!("root folder {id} not found")))
+}
+
+pub(crate) async fn root_folder_update(
+    State(fs): State<FaceState>,
+    Path(id): Path<i64>,
+    Json(body): Json<Value>,
+) -> ApiResult<Json<Value>> {
+    let Json(current) = root_folder(State(fs), Path(id)).await?;
+    Ok(Json(shim::merge(current, body)))
+}
+
+pub(crate) async fn remote_path_mapping(
+    State(fs): State<FaceState>,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<Value>> {
+    let Json(all) = shim::list_remote_path_mappings(State(fs)).await?;
+    all.into_iter()
+        .find(|r| r["id"].as_i64() == Some(id))
+        .map(Json)
+        .ok_or_else(|| ApiError::NotFound(format!("remote path mapping {id} not found")))
+}
+
+pub(crate) async fn download_client(
+    State(fs): State<FaceState>,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<Value>> {
+    let Json(all) = shim::list_download_clients(State(fs)).await?;
+    all.into_iter()
+        .find(|r| r["id"].as_i64() == Some(id))
+        .map(Json)
+        .ok_or_else(|| ApiError::NotFound(format!("download client {id} not found")))
+}
+
+pub(crate) async fn quality_definition(
+    State(fs): State<FaceState>,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<Value>> {
+    let Json(all) = quality_definitions(State(fs)).await;
+    all.into_iter()
+        .find(|r| r["id"].as_i64() == Some(id))
+        .map(Json)
+        .ok_or_else(|| ApiError::NotFound(format!("quality definition {id} not found")))
+}
+
+pub(crate) async fn language(State(_fs): State<FaceState>, Path(id): Path<i64>) -> ApiResult<Json<Value>> {
+    if id == 1 {
+        Ok(Json(json!({ "id": 1, "name": "English", "nameLower": "english" })))
+    } else {
+        Err(ApiError::NotFound(format!("language {id} not found")))
+    }
+}
+
+/// `GET /config/naming/examples`: the formats' output for a sample track, so a
+/// client previews what an import would name a file.
+pub(crate) async fn naming_examples(State(_fs): State<FaceState>) -> Json<Value> {
+    let render = |format: &str, medium: bool| -> String {
+        let mut tokens = vec![
+            ("Artist Folder".to_string(), "Artist Name".to_string()),
+            ("Artist Name".to_string(), "Artist Name".to_string()),
+            ("Album Title".to_string(), "Album Title".to_string()),
+            ("Release Year".to_string(), "2020".to_string()),
+            ("Track".to_string(), "01".to_string()),
+            ("Track Title".to_string(), "Track Title".to_string()),
+            ("Extension".to_string(), "flac".to_string()),
+        ];
+        if medium {
+            tokens.push(("Medium".to_string(), "01".to_string()));
+        }
+        cellarr_fs::render_name(format, &cellarr_core::NamingTokens { tokens }).unwrap_or_default()
+    };
+    let single = "{Artist Folder}/{Album Title} ({Release Year})/{Track} - {Track Title}.{Extension}";
+    let multi = "{Artist Folder}/{Album Title} ({Release Year})/CD{Medium}/{Track} - {Track Title}.{Extension}";
+    Json(json!({
+        "singleTrackExample": render(single, false),
+        "multiTrackExample": render(single, false),
+        "singleMediumTrackExample": render(multi, true),
+        "multiMediumTrackExample": render(multi, true),
+        "artistFolderExample": "Artist Name",
+    }))
 }

@@ -510,7 +510,7 @@ pub(crate) async fn ping() -> Json<Value> {
 
 // --- system/status ---------------------------------------------------------
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 pub(crate) struct StatusQuery {
     #[serde(rename = "libraryId")]
     library_id: Option<String>,
@@ -6115,15 +6115,15 @@ pub(crate) async fn list_commands(State(fs): State<FaceState>) -> ApiResult<Json
 #[derive(Debug, Deserialize)]
 pub(crate) struct ReleaseQuery {
     #[serde(rename = "contentId")]
-    content_id: Option<String>,
+    pub(crate) content_id: Option<String>,
     #[serde(rename = "movieId")]
-    movie_id: Option<String>,
+    pub(crate) movie_id: Option<String>,
     #[serde(rename = "seriesId")]
-    series_id: Option<String>,
+    pub(crate) series_id: Option<String>,
     /// Search a whole season rather than one episode — the originals' season
     /// search. Combined with `seriesId`, it addresses that series' season unit.
     #[serde(rename = "seasonNumber")]
-    season_number: Option<i64>,
+    pub(crate) season_number: Option<i64>,
 }
 
 /// v3 `GET /api/v3/release` — the **interactive (manual) release search**.
@@ -6258,13 +6258,13 @@ pub(crate) struct GrabReleaseBody {
     /// shape so a missing guid is a structured 400 from the handler rather than an
     /// opaque deserialization 422.
     #[serde(default)]
-    guid: Option<String>,
+    pub(crate) guid: Option<String>,
     #[serde(rename = "contentId", default)]
-    content_id: Option<String>,
+    pub(crate) content_id: Option<String>,
     #[serde(rename = "movieId", default)]
-    movie_id: Option<String>,
+    pub(crate) movie_id: Option<String>,
     #[serde(rename = "seriesId", default)]
-    series_id: Option<String>,
+    pub(crate) series_id: Option<String>,
 }
 
 /// v3 `POST /api/v3/release` — the **interactive grab**.

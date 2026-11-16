@@ -1232,6 +1232,39 @@ impl MusicRepo {
         .await
     }
 
+    /// For every artist: its most recent album released on or before `today`, and
+    /// its next one after it. Dates compare as text, which
+    /// orders `yyyy`, `yyyy-mm` and `yyyy-mm-dd` correctly against each other.
+    ///
+    /// # Errors
+    /// Returns a [`DbError`] on query failure.
+    pub async fn artist_album_bounds(
+        &self,
+        today: &str,
+    ) -> Result<HashMap<ContentId, (Option<ContentId>, Option<ContentId>)>> {
+        let rows = sqlx::query(&pq(
+            "SELECT artist_content_id AS k, content_id, release_date FROM album_meta
+             WHERE release_date IS NOT NULL AND release_date <> ''
+             ORDER BY artist_content_id, release_date ASC, id ASC",
+        ))
+        .fetch_all(&self.pool)
+        .await?;
+        let mut out: HashMap<ContentId, (Option<ContentId>, Option<ContentId>)> = HashMap::new();
+        for r in rows {
+            let artist = key_of(&r)?;
+            let id = content_id(&r, "content_id")?;
+            let date: String = r.try_get("release_date")?;
+            let entry = out.entry(artist).or_default();
+            if date.as_str() <= today {
+                // Ascending, so the last one seen wins.
+                entry.0 = Some(id);
+            } else if entry.1.is_none() {
+                entry.1 = Some(id);
+            }
+        }
+        Ok(out)
+    }
+
     // --- quality-profile integer ids ------------------------------------------
 
     /// The integer id of a quality profile, assigned on first use.

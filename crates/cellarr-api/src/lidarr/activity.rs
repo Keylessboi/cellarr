@@ -122,6 +122,8 @@ async fn queue_records(fs: &FaceState, embed: bool) -> ApiResult<Vec<Value>> {
         r["added"] = json!(time::OffsetDateTime::now_utc()
             .format(&time::format_description::well_known::Rfc3339)
             .unwrap_or_default());
+        r["trackFileCount"] = json!(0);
+        r["trackHasFileCount"] = json!(0);
         r["downloadClientHasPostImportCategory"] = json!(false);
         r["downloadForced"] = json!(false);
         r["outputPath"] = Value::Null;
@@ -198,7 +200,7 @@ pub(crate) async fn queue_remove(
     Path(id): Path<String>,
     Query(q): Params,
 ) -> ApiResult<Json<Value>> {
-    shim::delete_queue_item(State(fs), Path(id), Query(removal(&q))).await?;
+    let _ = shim::delete_queue_item(State(fs), Path(id), Query(removal(&q))).await?;
     Ok(Json(json!({})))
 }
 
@@ -213,7 +215,7 @@ pub(crate) async fn queue_remove_bulk(
         .map(|a| a.iter().filter_map(Value::as_i64).collect())
         .unwrap_or_default();
     for id in ids {
-        shim::delete_queue_item(State(fs.clone()), Path(id.to_string()), Query(removal(&q))).await?;
+        let _ = shim::delete_queue_item(State(fs.clone()), Path(id.to_string()), Query(removal(&q))).await?;
     }
     Ok(Json(json!({})))
 }
@@ -597,4 +599,20 @@ pub(crate) async fn parse(
         "artist": embedded.first().and_then(|a| a.get("artist")).cloned(),
         "albums": embedded,
     })))
+}
+
+/// One album, by id, the way the calendar and the wanted lists address it.
+pub(crate) async fn album_by_id(
+    State(fs): State<FaceState>,
+    Path(id): Path<i64>,
+    Query(q): Params,
+) -> ApiResult<Json<Value>> {
+    let state = app(&fs);
+    let album = state
+        .db
+        .music()
+        .album(id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound(format!("album {id} not found")))?;
+    Ok(Json(album_page(state, &[album], flag(&q, "includeArtist")).await?.remove(0)))
 }

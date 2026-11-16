@@ -33,6 +33,7 @@ pub mod activity;
 pub mod command;
 pub mod handlers;
 pub mod quality;
+pub mod release;
 pub mod resources;
 
 use axum::http::{HeaderValue, Request};
@@ -60,7 +61,7 @@ pub fn router(state: AppState) -> Router {
 
     let routes = Router::new()
         // --- system, shared with the other faces ------------------------------
-        .route("/system/status", get(shim::system_status))
+        .route("/system/status", get(handlers::system_status))
         .route("/system/task", get(shim::system_tasks))
         .route("/system/task/{id}", get(shim::system_task))
         .route("/health", get(shim::health))
@@ -176,6 +177,7 @@ pub fn router(state: AppState) -> Router {
         .route("/config/downloadclient", get(handlers::config_downloadclient))
         .route("/config/metadataprovider", get(handlers::config_metadataprovider))
         .route("/config/naming", get(handlers::config_naming))
+        .route("/config/naming/examples", get(handlers::naming_examples))
         .route("/language", get(handlers::languages))
         .route("/indexerflag", get(handlers::indexer_flags))
         // --- the music library ------------------------------------------------
@@ -248,6 +250,24 @@ pub fn router(state: AppState) -> Router {
         .route("/blocklist/bulk", delete(shim::delete_blocklist_bulk))
         .route("/blocklist/{id}", delete(shim::delete_blocklist_item))
         .route("/parse", get(activity::parse))
+        .route("/release", get(release::search).post(release::grab))
+        // --- resources addressed by id: singletons and single reads ----------
+        .route("/rootfolder/{id}", get(handlers::root_folder).put(handlers::root_folder_update))
+        .route("/remotepathmapping/{id}", get(handlers::remote_path_mapping))
+        .route("/downloadclient/{id}", get(handlers::download_client))
+        .route("/qualitydefinition/{id}", get(handlers::quality_definition).put(handlers::echo_put))
+        .route("/qualitydefinition/update", put(handlers::echo_list))
+        .route("/language/{id}", get(handlers::language))
+        .route("/calendar/{id}", get(activity::album_by_id))
+        .route("/wanted/missing/{id}", get(activity::album_by_id))
+        .route("/wanted/cutoff/{id}", get(activity::album_by_id))
+        .route("/config/host/{id}", get(handlers::config_host).put(handlers::echo_put))
+        .route("/config/ui/{id}", get(handlers::config_ui).put(handlers::echo_put))
+        .route("/config/indexer/{id}", get(handlers::config_indexer).put(handlers::echo_put))
+        .route("/config/downloadclient/{id}", get(handlers::config_downloadclient).put(handlers::echo_put))
+        .route("/config/metadataprovider/{id}", get(handlers::config_metadataprovider).put(handlers::echo_put))
+        .route("/config/naming/{id}", get(handlers::config_naming).put(handlers::echo_put))
+        .route("/config/mediamanagement/{id}", get(shim::get_media_management).put(shim::update_media_management))
         // --- commands ---------------------------------------------------------
         .route("/command", get(command::list).post(command::create))
         .route("/command/{id}", get(command::get).delete(command::cancel))

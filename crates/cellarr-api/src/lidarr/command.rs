@@ -257,6 +257,9 @@ fn resource(
         "stateChangeTime": when,
         "sendUpdatesToClient": true,
         "updateScheduledTask": true,
+        "clientUserAgent": null,
+        "exception": null,
+        "lastExecutionTime": null,
     })
 }
 

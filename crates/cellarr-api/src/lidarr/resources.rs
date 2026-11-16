@@ -97,6 +97,14 @@ pub fn artist(a: &Artist, stats: Option<MusicStats>, profile_seq: Option<i64>) -
         "nextAlbum": null,
         "lastAlbum": null,
         "images": [],
+        "members": [],
+        "remotePoster": null,
+        "addOptions": {
+            "monitor": "none",
+            "albumsToMonitor": [],
+            "monitored": false,
+            "searchForMissingAlbums": false,
+        },
         "path": a.path,
         "qualityProfileId": profile_seq.unwrap_or(0),
         "metadataProfileId": a.metadata_profile_id,
@@ -185,6 +193,9 @@ pub fn album(
         "added": al.added_at,
         "grabbed": false,
         "cleanTitle": clean_name(&al.title),
+        "lastSearchTime": null,
+        "remoteCover": null,
+        "addOptions": { "addType": "automatic", "searchForNewAlbum": false },
     });
     if let Some(a) = artist {
         v["artist"] = a;
