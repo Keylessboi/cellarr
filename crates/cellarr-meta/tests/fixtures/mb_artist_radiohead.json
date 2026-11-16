@@ -1,0 +1,85 @@
+{
+ "id": "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+ "name": "Radiohead",
+ "sort-name": "Radiohead",
+ "disambiguation": "",
+ "type": "Group",
+ "country": "GB",
+ "life-span": {
+  "ended": false,
+  "end": null,
+  "begin": "1991"
+ },
+ "aliases": [
+  {
+   "name": "Radio Head",
+   "sort-name": "Radio Head",
+   "locale": null,
+   "type": "Search hint"
+  },
+  {
+   "name": "Radiohead",
+   "sort-name": "Radiohead",
+   "locale": "en",
+   "type": "Artist name"
+  },
+  {
+   "name": "Radiohead & Thom Yorke",
+   "sort-name": "Radiohead & Thom Yorke",
+   "locale": null,
+   "type": "Search hint"
+  },
+  {
+   "name": "r/head",
+   "sort-name": "r/head",
+   "locale": null,
+   "type": "Search hint"
+  },
+  {
+   "name": "レディオヘッド",
+   "sort-name": "れでぃおへっど",
+   "locale": "ja",
+   "type": "Artist name"
+  },
+  {
+   "name": "电台司令",
+   "sort-name": "电台司令",
+   "locale": "zh",
+   "type": "Artist name"
+  }
+ ],
+ "genres": [
+  {
+   "name": "alternative rock",
+   "count": 43
+  },
+  {
+   "name": "ambient pop",
+   "count": 1
+  },
+  {
+   "name": "art pop",
+   "count": 3
+  },
+  {
+   "name": "art rock",
+   "count": 30
+  },
+  {
+   "name": "britpop",
+   "count": 2
+  },
+  {
+   "name": "chamber pop",
+   "count": 1
+  },
+  {
+   "name": "crossover prog",
+   "count": 1
+  },
+  {
+   "name": "electronic",
+   "count": 14
+  }
+ ]
+}

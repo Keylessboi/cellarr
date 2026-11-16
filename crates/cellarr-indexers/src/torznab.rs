@@ -109,6 +109,12 @@ impl NabIndexer {
                 .any(|(k, _)| keys.iter().any(|wanted| k == wanted))
         };
 
+        // artist/album -> music. Checked first: a music search carries no
+        // numbering and none of the video ids, so nothing below could claim it,
+        // but an indexer that advertises `music` should get the typed query.
+        if has_id(&["artist", "album"]) && caps.has_mode("music") {
+            return Ok("music");
+        }
         // tv ids/numbering -> tvsearch; movie ids -> movie.
         if (has_id(&["tvdbid", "rid", "tvmazeid"]) || !terms.numbering.is_empty())
             && caps.has_mode("tvsearch")
@@ -134,7 +140,15 @@ impl NabIndexer {
 
         // `q` is the free-text query. Join queries with spaces, most-specific
         // first; callers can also issue multiple searches if they prefer.
-        if let Some(q) = terms.queries.first() {
+        // A typed music query names the artist and album in their own params;
+        // repeating them as free text makes an indexer AND the two and return
+        // less (or nothing), so `q` is left out when either typed param is sent.
+        let typed_music = mode_name == "music"
+            && terms
+                .ids
+                .iter()
+                .any(|(k, _)| (k == "artist" || k == "album") && allowed(k));
+        if let Some(q) = terms.queries.first().filter(|_| !typed_music) {
             if allowed("q") && !q.is_empty() {
                 params.push(("q".to_string(), q.clone()));
             }

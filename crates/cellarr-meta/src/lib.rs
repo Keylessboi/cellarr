@@ -44,6 +44,7 @@ pub mod cache;
 pub mod config;
 pub mod error;
 pub mod http;
+pub mod musicbrainz;
 pub mod normalized;
 pub mod ratelimit;
 pub mod scene;
@@ -53,6 +54,9 @@ pub mod tmdb;
 pub use config::{TheTvdbConfig, TmdbConfig};
 pub use error::{MetaError, Result};
 pub use http::{Fetcher, HttpResponse, RecordedFetcher, ReqwestFetcher};
+pub use musicbrainz::{
+    pick_release, MbArtist, MbMedium, MbRelease, MbReleaseGroup, MbTrack, MusicBrainzSource,
+};
 pub use normalized::{ChildNode, Image, Metadata, SearchResult};
 pub use scene::{parse_anime_list_entry, parse_xem, SceneMap, SceneRule};
 pub use thetvdb::TheTvdbSource;

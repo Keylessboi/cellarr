@@ -33,6 +33,7 @@ pub mod error;
 pub mod identify;
 pub mod meta;
 pub mod module;
+pub mod music;
 pub mod registry;
 pub mod resolve;
 
@@ -44,6 +45,9 @@ pub use identify::{
 };
 pub use meta::{MetadataLookup, MovieMeta, SeriesMeta};
 pub use module::{ModuleError, MovieModule, TvModule, AMBIGUOUS_CONFIDENCE};
+pub use music::{
+    AlbumCandidate, AlbumIdentity, MusicLookup, MusicModule, MusicModuleError, TrackIdentity,
+};
 pub use registry::{BoxError, DynMediaModule, MediaRegistry};
 pub use resolve::{
     ArtworkKind, DynMetadataResolver, MetadataResolver, ResolveBoxError, ResolvedMetadata,

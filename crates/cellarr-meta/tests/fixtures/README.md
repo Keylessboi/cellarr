@@ -18,3 +18,17 @@ normalizer reads.
 
 If a source changes its shape, the opt-in live drift suite (future) is what
 catches it; these fixtures pin the *normalization contract*, not upstream truth.
+
+## MusicBrainz fixtures (recorded, trimmed)
+
+Unlike the fixtures above, the `mb_*.json` files are **recorded** from the public
+MusicBrainz web service (its data is CC0) and trimmed to the fields the client
+reads and to a handful of rows, so they stay reviewable.
+
+| File | Request | Used to assert |
+|------|---------|----------------|
+| `mb_artist_search_radiohead.json` | `GET /ws/2/artist?query=artist:"radiohead"` | search → `MbArtist`, best match first |
+| `mb_artist_radiohead.json` | `GET /ws/2/artist/{mbid}?inc=aliases+genres` | lookup → aliases and genres |
+| `mb_release_groups_radiohead.json` | `GET /ws/2/release-group?artist={mbid}` | browse → primary/secondary types, dates |
+| `mb_release_group_search_ok_computer.json` | `GET /ws/2/release-group?query=…` | album search → credited artist |
+| `mb_releases_ok_computer.json` | `GET /ws/2/release?release-group={mbid}&inc=recordings+media` | pressings → track lists; the representative pressing |
