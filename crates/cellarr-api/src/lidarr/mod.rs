@@ -84,6 +84,7 @@ pub fn router(state: AppState) -> Router {
         .route("/release/push", post(handlers::push_release))
         .route("/tag/detail", get(handlers::tag_details))
         .route("/plugin", get(handlers::list_plugins))
+        .route("/system/plugins", get(handlers::system_plugins))
         .route("/log/file", get(shim::list_log_files))
         .route("/log/file/{name}", get(shim::read_log_file))
         .route("/update", get(shim::list_updates))

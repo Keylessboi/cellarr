@@ -222,6 +222,28 @@ async fn jobs_for(state: &AppState, name: &str, body: &Value) -> ApiResult<Optio
         // Recognized housekeeping that has nothing to do here.
         "checkhealth" | "messaging" | "cleanupmediacovers" | "applicationupdate"
         | "housekeeping" => Ok(None),
+        // Native Lidarr plugins live in the sidecar; installing one is its job.
+        "installplugin" | "uninstallplugin" => {
+            let sidecar = cellarr_plugins::sidecar::global().ok_or_else(|| {
+                ApiError::BadRequest(
+                    "native Lidarr plugins need the plugin sidecar (plugins.dotnet_sidecar_url)"
+                        .into(),
+                )
+            })?;
+            let url = body
+                .get("githubUrl")
+                .and_then(Value::as_str)
+                .ok_or_else(|| ApiError::BadRequest("githubUrl is required".into()))?;
+            let result = if lower == "installplugin" {
+                sidecar.install(url).await
+            } else {
+                sidecar
+                    .forward_command(&json!({ "name": "UninstallPlugin", "githubUrl": url }))
+                    .await
+            };
+            result.map_err(|e| ApiError::Command(e.to_string()))?;
+            Ok(None)
+        }
         _ => Err(ApiError::BadRequest(format!("unknown command: {name}"))),
     }
 }

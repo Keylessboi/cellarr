@@ -41,6 +41,10 @@ pub struct AlbumIdentity {
     pub year: Option<u16>,
     /// How many discs the album's track list spans (0 when tracks are unknown).
     pub disc_count: u32,
+    /// The artist's MusicBrainz id, when known.
+    pub artist_mbid: Option<String>,
+    /// The album's MusicBrainz release-group id, when known.
+    pub album_mbid: Option<String>,
 }
 
 /// A track within its album.
@@ -139,10 +143,21 @@ where
             // Free text for indexers without a typed music search.
             queries: vec![format!("{} {}", album.artist_name, album.album_title)],
             // The typed music search takes the two names in their own params.
-            ids: vec![
-                ("artist".to_string(), album.artist_name),
-                ("album".to_string(), album.album_title),
-            ],
+            ids: {
+                let mut ids = vec![
+                    ("artist".to_string(), album.artist_name),
+                    ("album".to_string(), album.album_title),
+                ];
+                // Exact identity for an indexer that can use it (an indexer only
+                // sends the parameters its capabilities list).
+                if let Some(m) = album.artist_mbid {
+                    ids.push(("artist_mbid".to_string(), m));
+                }
+                if let Some(m) = album.album_mbid {
+                    ids.push(("album_mbid".to_string(), m));
+                }
+                ids
+            },
             numbering: Vec::new(),
             categories: vec![AUDIO_CATEGORY],
         })
@@ -360,6 +375,8 @@ mod tests {
                         (
                             album_ref(),
                             AlbumIdentity {
+                                artist_mbid: None,
+                                album_mbid: None,
                                 artist_name: (*artist).to_string(),
                                 artist_folder: (*artist).to_string(),
                                 album_title: (*title).to_string(),
@@ -396,6 +413,8 @@ mod tests {
         async fn track(&self, _track: ContentId) -> Result<Option<TrackIdentity>, Infallible> {
             Ok(self.albums.first().map(|(_, a)| TrackIdentity {
                 album: AlbumIdentity {
+                    artist_mbid: None,
+                    album_mbid: None,
                     disc_count: 2,
                     ..a.clone()
                 },

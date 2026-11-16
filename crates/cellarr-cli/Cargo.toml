@@ -59,7 +59,7 @@ tracing-opentelemetry = { version = "0.29", features = ["metrics"], optional = t
 # WASM plugins (indexers and download clients). On by default; build with
 # `--no-default-features` for the leanest binary.
 default = ["plugins"]
-plugins = ["cellarr-plugins/wasm", "cellarr-jobs/plugins"]
+plugins = ["cellarr-plugins/wasm", "cellarr-plugins/sidecar", "cellarr-jobs/plugins"]
 otlp = [
     "dep:opentelemetry",
     "dep:opentelemetry_sdk",

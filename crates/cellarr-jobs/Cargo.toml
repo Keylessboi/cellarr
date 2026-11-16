@@ -7,7 +7,7 @@ rust-version.workspace = true
 publish = false
 
 [features]
-plugins = ["dep:cellarr-plugins", "cellarr-plugins/wasm"]
+plugins = ["dep:cellarr-plugins", "cellarr-plugins/wasm", "cellarr-plugins/sidecar"]
 
 [dependencies]
 cellarr-plugins = { workspace = true, optional = true }

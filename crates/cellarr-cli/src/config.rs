@@ -182,8 +182,16 @@ pub struct MusicConfig {
 pub struct PluginsConfig {
     /// Where WASM plugins are loaded from. `None` means `<data_dir>/plugins`.
     pub dir: Option<PathBuf>,
-    /// Base URL of the native-plugin sidecar, when one is running.
+    /// Base URL of the native-plugin sidecar (a stock Lidarr with plugins), when
+    /// one is running.
     pub dotnet_sidecar_url: Option<String>,
+    /// The sidecar's API key.
+    pub dotnet_sidecar_key: Option<String>,
+    /// A folder the sidecar uses as its (never written) root folder. `None` means
+    /// `<data_dir>/sidecar-root`; it must be the same path as the sidecar sees it.
+    pub dotnet_sidecar_root: Option<PathBuf>,
+    /// Also offer the sidecar's built-in implementations (as `<Name>ViaLidarr`).
+    pub dotnet_sidecar_expose_builtins: bool,
 }
 
 /// Logging settings.

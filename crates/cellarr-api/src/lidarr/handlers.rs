@@ -2024,6 +2024,36 @@ pub(crate) async fn indexer_schema() -> Json<Value> {
     ))
 }
 
+/// `GET /system/plugins`: installed plugins in Lidarr's shape. Native ones come
+/// from the sidecar; WASM ones are listed with their version.
+pub(crate) async fn system_plugins() -> Json<Vec<Value>> {
+    let mut out: Vec<Value> = Vec::new();
+    if let Some(sidecar) = cellarr_plugins::sidecar::global() {
+        if let Ok(Value::Array(list)) = sidecar.installed().await {
+            out.extend(list);
+        }
+    }
+    let next = out.len();
+    out.extend(
+        cellarr_plugins::catalog::entries()
+            .iter()
+            .filter(|e| e.runtime == "wasm")
+            .enumerate()
+            .map(|(i, e)| {
+                json!({
+                    "id": next + i + 1,
+                    "name": e.name,
+                    "owner": "cellarr",
+                    "githubUrl": "",
+                    "installedVersion": e.version,
+                    "availableVersion": e.version,
+                    "updateAvailable": false,
+                })
+            }),
+    );
+    Json(out)
+}
+
 /// `GET /plugin`: the loaded plugins, WASM and native.
 pub(crate) async fn list_plugins() -> Json<Vec<Value>> {
     Json(

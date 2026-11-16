@@ -35,6 +35,8 @@ impl DbMusicLookup {
             .max()
             .unwrap_or(0);
         Ok(Some(AlbumIdentity {
+            artist_mbid: Some(artist.mbid.clone()),
+            album_mbid: Some(album.mbid.clone()),
             artist_folder: folder_name(&artist.path, &artist.name),
             artist_name: artist.name,
             album_title: album.title.clone(),

@@ -57,6 +57,9 @@ pub enum ConfiguredDownloadClient {
     /// A WASM plugin download client.
     #[cfg(feature = "plugins")]
     Plugin(cellarr_plugins::PluginDownloadClient),
+    /// A native Lidarr plugin download client, hosted by the sidecar.
+    #[cfg(feature = "plugins")]
+    Sidecar(cellarr_plugins::sidecar::SidecarDownloadClient),
     /// Transmission (torrent, RPC).
     Transmission(TransmissionClient),
     /// Deluge (torrent, JSON-RPC WebUI).
@@ -132,6 +135,26 @@ impl ConfiguredDownloadClient {
                     category,
                     config.protocol,
                 )))
+            }
+            #[cfg(feature = "plugins")]
+            other
+                if cellarr_plugins::sidecar::global().is_some()
+                    && cellarr_plugins::catalog::find(other).is_some_and(|e| {
+                        e.runtime == "dotnet"
+                            && e.kind == cellarr_plugins::catalog::EntryKind::DownloadClient
+                    }) =>
+            {
+                let entry = cellarr_plugins::catalog::find(other).expect("checked above");
+                let sidecar = cellarr_plugins::sidecar::global().expect("checked above");
+                Ok(Self::Sidecar(
+                    cellarr_plugins::sidecar::SidecarDownloadClient::new(
+                        sidecar,
+                        entry.name,
+                        config.settings.clone(),
+                        format!("cellarr:{}", config.id),
+                        name,
+                    ),
+                ))
             }
             #[cfg(feature = "plugins")]
             other
@@ -218,6 +241,8 @@ impl DownloadClient for ConfiguredDownloadClient {
             Self::Blackhole(c) => <BlackholeClient as DownloadClient>::name(c),
             #[cfg(feature = "plugins")]
             Self::Plugin(c) => DownloadClient::name(c),
+            #[cfg(feature = "plugins")]
+            Self::Sidecar(c) => DownloadClient::name(c),
         }
     }
 
@@ -238,6 +263,10 @@ impl DownloadClient for ConfiguredDownloadClient {
             Self::Plugin(c) => DownloadClient::add(c, grab)
                 .await
                 .map_err(|e| DownloadError::Api(format!("plugin: {e}"))),
+            #[cfg(feature = "plugins")]
+            Self::Sidecar(c) => DownloadClient::add(c, grab)
+                .await
+                .map_err(|e| DownloadError::Api(format!("lidarr sidecar: {e}"))),
         }
     }
 
@@ -254,6 +283,10 @@ impl DownloadClient for ConfiguredDownloadClient {
             Self::Plugin(c) => DownloadClient::status(c, download_id)
                 .await
                 .map_err(|e| DownloadError::Api(format!("plugin: {e}"))),
+            #[cfg(feature = "plugins")]
+            Self::Sidecar(c) => DownloadClient::status(c, download_id)
+                .await
+                .map_err(|e| DownloadError::Api(format!("lidarr sidecar: {e}"))),
         }
     }
 
@@ -270,6 +303,10 @@ impl DownloadClient for ConfiguredDownloadClient {
             Self::Plugin(c) => DownloadClient::remove(c, download_id, delete_data)
                 .await
                 .map_err(|e| DownloadError::Api(format!("plugin: {e}"))),
+            #[cfg(feature = "plugins")]
+            Self::Sidecar(c) => DownloadClient::remove(c, download_id, delete_data)
+                .await
+                .map_err(|e| DownloadError::Api(format!("lidarr sidecar: {e}"))),
         }
     }
 }

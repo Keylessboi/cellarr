@@ -83,6 +83,7 @@ async fn torznab(
     let rss = format!(
         r#"<?xml version="1.0"?><rss version="2.0" xmlns:torznab="http://torznab.com/schemas/2015/feed"><channel><title>stub</title>
 <item><title>Radiohead - Kid A (2000) [FLAC]</title><guid isPermaLink="false">stub-kid-a</guid>
+<pubDate>Mon, 16 Nov 2026 10:00:00 +0000</pubDate>
 <link>magnet:?xt=urn:btih:{HASH}</link>
 <enclosure url="magnet:?xt=urn:btih:{HASH}&amp;dn=Kid+A" length="300000000" type="application/x-bittorrent"/>
 <torznab:attr name="category" value="3040"/><torznab:attr name="size" value="300000000"/>
@@ -110,6 +111,7 @@ async fn qb_info(State(s): State<Stub>) -> impl IntoResponse {
     json_body(
         json!([{
             "hash": HASH, "name": "Radiohead - Kid A (2000) [FLAC]", "state": "pausedUP",
+            "size": 300000000, "eta": 8640000,
             "progress": 1.0, "ratio": 2.0, "seeding_time": 100000, "num_seeds": 5, "num_leechs": 0,
             "category": "lidarr", "content_path": content.to_string_lossy(),
             "save_path": s.download_dir.to_string_lossy(),
@@ -142,6 +144,34 @@ async fn start_stub(download_dir: PathBuf) -> (String, Stub) {
         .route("/api/v2/torrents/add", post(qb_add))
         .route("/api/v2/torrents/info", get(qb_info))
         .route("/api/v2/torrents/delete", post(qb_delete))
+        .route("/api/v2/app/webapiVersion", get(|| async { "2.9.3" }))
+        .route(
+            "/api/v2/app/preferences",
+            get(|| async {
+                json_body(
+                    json!({"max_ratio_enabled": false, "max_seeding_time_enabled": false,
+                    "queueing_enabled": false, "dht": true})
+                    .to_string(),
+                )
+            }),
+        )
+        .route(
+            "/api/v2/torrents/categories",
+            get(|| async {
+                json_body(json!({"lidarr": {"name": "lidarr", "savePath": ""}}).to_string())
+            }),
+        )
+        .route(
+            "/api/v2/torrents/properties",
+            get(|| async {
+                json_body(json!({"seeding_time": 100000, "save_path": "/"}).to_string())
+            }),
+        )
+        .route(
+            "/api/v2/torrents/files",
+            get(|| async { json_body("[]".to_string()) }),
+        )
+        .fallback(|| async { "Ok." })
         .with_state(stub.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
@@ -238,14 +268,86 @@ struct Fixture {
     album_id: i64,
     stop: tokio::sync::oneshot::Sender<()>,
     serve: tokio::task::JoinHandle<anyhow::Result<()>>,
+    _sidecar: Option<LidarrProcess>,
     _tmp: tempfile::TempDir,
 }
 
 async fn fixture_for(album_tag: &str) -> Fixture {
-    fixture_with(album_tag, false).await
+    fixture_with(album_tag, Mode::Builtin).await
 }
 
-async fn fixture_with(album_tag: &str, use_plugins: bool) -> Fixture {
+/// Which implementations the daemon is configured with.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    /// cellarr's own Torznab and qBittorrent.
+    Builtin,
+    /// The example WASM plugins.
+    Wasm,
+    /// A real Lidarr as the native-plugin sidecar, using its Torznab and
+    /// qBittorrent implementations (exposed as `*ViaLidarr`).
+    Sidecar,
+}
+
+/// A real Lidarr process, killed when dropped.
+struct LidarrProcess(std::process::Child);
+
+impl Drop for LidarrProcess {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+/// Where the sidecar's console output goes: `$LIDARR_SIDECAR_LOG`, or nowhere.
+fn sidecar_log(suffix: &str) -> std::process::Stdio {
+    std::env::var("LIDARR_SIDECAR_LOG")
+        .ok()
+        .and_then(|p| std::fs::File::create(format!("{p}{suffix}")).ok())
+        .map_or_else(std::process::Stdio::null, std::process::Stdio::from)
+}
+
+const SIDECAR_KEY: &str = "sidecarkey0123456789abcdef012345";
+
+/// Start the Lidarr at `$LIDARR_SIDECAR_BIN` on a free port in `data`.
+async fn start_lidarr(bin: &Path, data: &Path) -> (String, LidarrProcess) {
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    std::fs::create_dir_all(data).unwrap();
+    std::fs::write(
+        data.join("config.xml"),
+        format!(
+            "<Config><Port>{port}</Port><BindAddress>127.0.0.1</BindAddress><ApiKey>{SIDECAR_KEY}</ApiKey>\
+             <AuthenticationMethod>External</AuthenticationMethod><AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired>\
+             <LogLevel>info</LogLevel><UpdateMechanism>BuiltIn</UpdateMechanism></Config>"
+        ),
+    )
+    .unwrap();
+    let child = std::process::Command::new(bin.join("Lidarr"))
+        .args(["-nobrowser", &format!("-data={}", data.display())])
+        .current_dir(bin)
+        .env("DOTNET_SYSTEM_GLOBALIZATION_INVARIANT", "1")
+        .stdout(sidecar_log(""))
+        .stderr(sidecar_log(".err"))
+        .spawn()
+        .expect("Lidarr starts");
+    let url = format!("http://127.0.0.1:{port}");
+    let proc = LidarrProcess(child);
+    let http = reqwest::Client::new();
+    eventually("the sidecar Lidarr to answer", 120, || async {
+        http.get(format!("{url}/api/v1/system/status"))
+            .header("X-Api-Key", SIDECAR_KEY)
+            .send()
+            .await
+            .is_ok_and(|r| r.status().is_success())
+    })
+    .await;
+    (url, proc)
+}
+
+async fn fixture_with(album_tag: &str, mode: Mode) -> Fixture {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_test_writer()
@@ -265,7 +367,17 @@ async fn fixture_with(album_tag: &str, use_plugins: bool) -> Fixture {
     config.music.lidarr_metadata_url = Some(format!("{stub_url}/meta"));
     // MusicBrainz is the fallback; point it at the stub too so nothing leaves the box.
     config.music.musicbrainz_url = Some(format!("{stub_url}/mb"));
-    if use_plugins {
+    let mut sidecar = None;
+    if mode == Mode::Sidecar {
+        let bin = PathBuf::from(std::env::var("LIDARR_SIDECAR_BIN").expect("LIDARR_SIDECAR_BIN"));
+        let (url, proc) = start_lidarr(&bin, &tmp.path().join("sidecar")).await;
+        sidecar = Some(proc);
+        config.plugins.dotnet_sidecar_url = Some(url);
+        config.plugins.dotnet_sidecar_key = Some(SIDECAR_KEY.into());
+        config.plugins.dotnet_sidecar_root = Some(tmp.path().join("sidecar-root"));
+        config.plugins.dotnet_sidecar_expose_builtins = true;
+    }
+    if mode == Mode::Wasm {
         let dir = tmp.path().join("plugins");
         std::fs::create_dir_all(&dir).unwrap();
         let fixtures =
@@ -298,6 +410,20 @@ async fn fixture_with(album_tag: &str, use_plugins: bool) -> Fixture {
     })
     .await;
 
+    if mode == Mode::Sidecar {
+        eventually(
+            "the sidecar's implementations to be discovered",
+            90,
+            || async {
+                api.get("/plugin").await.as_array().is_some_and(|a| {
+                    a.iter().any(|p| p["name"] == "TorznabViaLidarr")
+                        && a.iter().any(|p| p["name"] == "QBittorrentViaLidarr")
+                })
+            },
+        )
+        .await;
+    }
+
     // --- configure, in Lidarr's field names -------------------------------------
     let root = api
         .post_ok(
@@ -317,7 +443,11 @@ async fn fixture_with(album_tag: &str, use_plugins: bool) -> Fixture {
         "/downloadclient",
         json!({
             "name": "qbit",
-            "implementation": if use_plugins { "QBittorrentPlugin" } else { "QBittorrent" },
+            "implementation": match mode {
+                Mode::Builtin => "QBittorrent",
+                Mode::Wasm => "QBittorrentPlugin",
+                Mode::Sidecar => "QBittorrentViaLidarr",
+            },
             "configContract": "QBittorrentSettings",
             "protocol": "torrent", "enable": true, "priority": 1, "tags": [],
             "fields": [
@@ -333,7 +463,11 @@ async fn fixture_with(album_tag: &str, use_plugins: bool) -> Fixture {
         "/indexer",
         json!({
             "name": "stub-torznab",
-            "implementation": if use_plugins { "TorznabPlugin" } else { "Torznab" },
+            "implementation": match mode {
+                Mode::Builtin => "Torznab",
+                Mode::Wasm => "TorznabPlugin",
+                Mode::Sidecar => "TorznabViaLidarr",
+            },
             "configContract": "TorznabSettings",
             "enableRss": true, "enableAutomaticSearch": true, "enableInteractiveSearch": true,
             "priority": 25, "protocol": "torrent", "tags": [],
@@ -392,7 +526,10 @@ async fn fixture_with(album_tag: &str, use_plugins: bool) -> Fixture {
     // A grab is finished by the download check (Lidarr runs it every minute); ask
     // for it now rather than wait out the clock, once the grab has happened.
     assert!(
-        within(30, || async { !stub.added.lock().unwrap().is_empty() }).await,
+        within(if mode == Mode::Sidecar { 240 } else { 30 }, || async {
+            !stub.added.lock().unwrap().is_empty()
+        })
+        .await,
         "the grab reached the download client"
     );
     api.post_ok("/command", json!({"name": "CheckForFinishedDownload"}))
@@ -404,6 +541,7 @@ async fn fixture_with(album_tag: &str, use_plugins: bool) -> Fixture {
         album_id,
         stop,
         serve,
+        _sidecar: sidecar,
         _tmp: tmp,
     }
 }
@@ -418,6 +556,7 @@ async fn an_album_is_found_grabbed_downloaded_and_imported_through_the_lidarr_ap
         stop,
         serve,
         _tmp,
+        ..
     } = fixture_for("Kid A").await;
     let imported = within(60, || async {
         let files = api.get(&format!("/trackfile?albumId={album_id}")).await;
@@ -524,6 +663,7 @@ async fn a_download_tagged_as_another_album_is_never_filed_into_the_library() {
         stop,
         serve,
         _tmp,
+        ..
     } = fixture_for("A Completely Different Album").await;
 
     // Give the download check time to run and settle; then nothing may have been filed.
@@ -557,7 +697,8 @@ async fn the_same_flow_works_with_a_plugin_indexer_and_a_plugin_download_client(
         stop,
         serve,
         _tmp,
-    } = fixture_with("Kid A", true).await;
+        ..
+    } = fixture_with("Kid A", Mode::Wasm).await;
 
     // The plugins are listed, and offered in the schemas beside the built-ins.
     let plugins = api.get("/plugin").await;
@@ -598,6 +739,69 @@ async fn the_same_flow_works_with_a_plugin_indexer_and_a_plugin_download_client(
         "the plugin client made the grab"
     );
     assert!(stub.added.lock().unwrap()[0].contains("category=lidarr"));
+    assert_eq!(
+        walk(&library)
+            .iter()
+            .filter(|p| p.extension().is_some_and(|e| e == "flac"))
+            .count(),
+        3
+    );
+
+    stop.send(()).unwrap();
+    serve.await.unwrap().expect("clean shutdown");
+}
+
+#[tokio::test]
+async fn the_same_flow_works_through_a_real_lidarr_sidecar() {
+    if std::env::var("LIDARR_SIDECAR_BIN").is_err() {
+        eprintln!("skipped: set LIDARR_SIDECAR_BIN to a Lidarr install to run the sidecar test");
+        return;
+    }
+    let Fixture {
+        api,
+        stub,
+        library,
+        album_id,
+        stop,
+        serve,
+        // Bound, not `..`: an unbound field is dropped here, which would stop
+        // the sidecar and delete the temp dir mid-test.
+        _sidecar,
+        _tmp,
+    } = fixture_with("Kid A", Mode::Sidecar).await;
+
+    // The search went through the sidecar's Torznab to the stub, and the grab
+    // through the sidecar's qBittorrent.
+    let imported = within(120, || async {
+        let _ = api
+            .send(
+                reqwest::Method::POST,
+                "/command",
+                &json!({"name": "CheckForFinishedDownload"}),
+            )
+            .await;
+        let files = api.get(&format!("/trackfile?albumId={album_id}")).await;
+        files.as_array().is_some_and(|f| f.len() == 3)
+    })
+    .await;
+    if !imported {
+        let sidecar_queue = match &_sidecar {
+            Some(_) => {
+                let url = std::env::var("LIDARR_SIDECAR_URL_SEEN").unwrap_or_default();
+                url
+            }
+            None => String::new(),
+        };
+        panic!(
+            "not imported. adds: {:?}\ncellarr queue: {}\n{sidecar_queue}",
+            stub.added.lock().unwrap(),
+            api.get("/queue?page=1&pageSize=50").await
+        );
+    }
+    assert!(
+        !stub.searches.lock().unwrap().is_empty(),
+        "the sidecar searched the indexer"
+    );
     assert_eq!(
         walk(&library)
             .iter()

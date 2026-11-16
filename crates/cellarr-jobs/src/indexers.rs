@@ -252,6 +252,20 @@ impl DbIndexerSet {
         }
         // A loaded plugin implements this kind: it takes its own settings.
         #[cfg(feature = "plugins")]
+        if let (Some(entry), Some(sidecar)) = (
+            cellarr_plugins::catalog::find(&config.kind)
+                .filter(|e| e.runtime == "dotnet" && e.kind == cellarr_plugins::catalog::EntryKind::Indexer),
+            cellarr_plugins::sidecar::global(),
+        ) {
+            return Ok(NabAdapter::Sidecar(cellarr_plugins::sidecar::SidecarIndexer::new(
+                sidecar,
+                entry.name,
+                config.settings.clone(),
+                config.id,
+                config.name.clone(),
+            )));
+        }
+        #[cfg(feature = "plugins")]
         if let Some(plugin) = cellarr_plugins::registry::global().get(&config.kind) {
             if plugin.kind() == cellarr_plugins::PluginKind::Indexer {
                 return Ok(NabAdapter::Plugin(cellarr_plugins::PluginIndexer::new(
@@ -386,6 +400,9 @@ pub enum NabAdapter {
     /// A WASM plugin indexer.
     #[cfg(feature = "plugins")]
     Plugin(cellarr_plugins::PluginIndexer),
+    /// A native Lidarr plugin indexer, hosted by the sidecar.
+    #[cfg(feature = "plugins")]
+    Sidecar(cellarr_plugins::sidecar::SidecarIndexer),
 }
 
 #[cfg(feature = "plugins")]
@@ -401,6 +418,8 @@ impl NabAdapter {
             NabAdapter::Cardigann(a) => a.search(terms).await,
             #[cfg(feature = "plugins")]
             NabAdapter::Plugin(a) => a.search(terms).await.map_err(plugin_err),
+            #[cfg(feature = "plugins")]
+            NabAdapter::Sidecar(a) => a.search(terms).await.map_err(plugin_err),
         }
     }
 
@@ -411,6 +430,8 @@ impl NabAdapter {
             NabAdapter::Cardigann(a) => a.latest().await,
             #[cfg(feature = "plugins")]
             NabAdapter::Plugin(a) => a.latest().await.map_err(plugin_err),
+            #[cfg(feature = "plugins")]
+            NabAdapter::Sidecar(a) => a.latest().await.map_err(plugin_err),
         }
     }
 
@@ -421,6 +442,8 @@ impl NabAdapter {
             NabAdapter::Cardigann(a) => a.resolve(release).await,
             #[cfg(feature = "plugins")]
             NabAdapter::Plugin(_) => Ok(release),
+            #[cfg(feature = "plugins")]
+            NabAdapter::Sidecar(_) => Ok(release),
         }
     }
 }

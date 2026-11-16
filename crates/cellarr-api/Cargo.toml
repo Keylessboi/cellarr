@@ -7,7 +7,7 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
-cellarr-plugins.workspace = true
+cellarr-plugins = { workspace = true, features = ["sidecar"] }
 cellarr-core.workspace = true
 cellarr-db.workspace = true
 cellarr-decide.workspace = true

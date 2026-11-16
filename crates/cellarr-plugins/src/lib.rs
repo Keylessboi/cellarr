@@ -32,6 +32,8 @@ pub mod adapters;
 pub mod host;
 #[cfg(feature = "wasm")]
 pub mod registry;
+#[cfg(feature = "sidecar")]
+pub mod sidecar;
 
 #[cfg(feature = "wasm")]
 pub use adapters::{PluginDownloadClient, PluginIndexer};

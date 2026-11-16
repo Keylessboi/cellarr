@@ -229,6 +229,30 @@ impl Daemon {
                 .unwrap_or_else(|| config.data_dir.join("plugins"));
             let (loaded, failed) = cellarr_plugins::registry::load_and_install(&dir);
             info!(dir = %dir.display(), loaded, failed = failed.len(), "plugins loaded");
+
+            // Native Lidarr plugins, through an opt-in Lidarr sidecar.
+            if let Some(url) = config.plugins.dotnet_sidecar_url.clone() {
+                let root = config
+                    .plugins
+                    .dotnet_sidecar_root
+                    .clone()
+                    .unwrap_or_else(|| config.data_dir.join("sidecar-root"));
+                let _ = std::fs::create_dir_all(&root);
+                let sidecar = std::sync::Arc::new(cellarr_plugins::sidecar::Sidecar::new(
+                    cellarr_plugins::sidecar::SidecarConfig {
+                        url,
+                        api_key: config
+                            .plugins
+                            .dotnet_sidecar_key
+                            .clone()
+                            .unwrap_or_default(),
+                        root_folder: root.to_string_lossy().to_string(),
+                        expose_builtins: config.plugins.dotnet_sidecar_expose_builtins,
+                    },
+                ));
+                cellarr_plugins::sidecar::install(Some(std::sync::Arc::clone(&sidecar)));
+                cellarr_plugins::sidecar::spawn_discovery(sidecar);
+            }
         }
 
         // The MusicBrainz-backed music catalogue, shared by the pipeline handler
