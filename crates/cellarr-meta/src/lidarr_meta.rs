@@ -99,9 +99,9 @@ struct RawImage {
 #[derive(Deserialize)]
 struct RawRating {
     #[serde(default, rename = "Count")]
-    count: u32,
+    count: Option<u32>,
     #[serde(default, rename = "Value")]
-    value: f64,
+    value: Option<f64>,
 }
 
 #[derive(Deserialize)]
@@ -244,9 +244,9 @@ fn images(raw: Vec<RawImage>) -> Vec<MbImage> {
 }
 
 fn rating(raw: Option<RawRating>) -> Option<MbRating> {
-    raw.filter(|r| r.count > 0).map(|r| MbRating {
-        votes: r.count,
-        value: r.value,
+    raw.and_then(|r| match (r.count, r.value) {
+        (Some(votes), Some(value)) if votes > 0 => Some(MbRating { votes, value }),
+        _ => None,
     })
 }
 

@@ -17,6 +17,7 @@ use serde_json::{json, Value};
 use super::quality::{
     allowed_ranks, cutoff_id_for_rank, lidarr_quality_id, profile_items, rank_for_cutoff_id,
 };
+use super::validation::Failures;
 use super::{app, catalogue_error, resources};
 use crate::error::{ApiError, ApiResult};
 use crate::shim::{self, FaceState};
@@ -423,10 +424,86 @@ async fn add_artist_from(state: &AppState, body: &Value) -> ApiResult<Artist> {
 pub(crate) async fn add_artist(
     State(fs): State<FaceState>,
     Json(body): Json<Value>,
-) -> ApiResult<Json<Value>> {
+) -> Result<Json<Value>, axum::response::Response> {
+    use axum::response::IntoResponse;
     let state = app(&fs);
-    let artist = add_artist_from(state, &body).await?;
-    Ok(Json(artist_resource(state, &artist).await?))
+    validate_new_artist(state, &body)
+        .await
+        .map_err(IntoResponse::into_response)?;
+    let artist = add_artist_from(state, &body)
+        .await
+        .map_err(IntoResponse::into_response)?;
+    artist_resource(state, &artist)
+        .await
+        .map(Json)
+        .map_err(IntoResponse::into_response)
+}
+
+/// The checks Lidarr runs before it adds an artist, reported the way it reports
+/// them: every finding at once, as an array.
+async fn validate_new_artist(state: &AppState, body: &Value) -> Result<(), Failures> {
+    let int = |k: &str| body.get(k).and_then(Value::as_i64).unwrap_or(0);
+    let mut f = Failures::new();
+    f.positive("QualityProfileId", int("qualityProfileId"));
+    f.positive("MetadataProfileId", int("metadataProfileId"));
+    if int("qualityProfileId") > 0 {
+        let known = state
+            .db
+            .music()
+            .profile_by_seq(int("qualityProfileId"))
+            .await
+            .ok()
+            .flatten()
+            .is_some();
+        if !known {
+            f.add(
+                "QualityProfileId",
+                "Quality Profile does not exist",
+                "QualityProfileExistsValidator",
+                Some(json!(int("qualityProfileId"))),
+            );
+        }
+    }
+    if int("metadataProfileId") > 0
+        && state
+            .db
+            .music()
+            .metadata_profile(int("metadataProfileId"))
+            .await
+            .ok()
+            .flatten()
+            .is_none()
+    {
+        f.add(
+            "MetadataProfileId",
+            "Metadata Profile does not exist",
+            "MetadataProfileExistsValidator",
+            Some(json!(int("metadataProfileId"))),
+        );
+    }
+    let mbid = body
+        .get("foreignArtistId")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    f.not_empty("ForeignArtistId", mbid);
+    if !mbid.is_empty()
+        && state
+            .db
+            .music()
+            .artist_by_mbid(mbid)
+            .await
+            .ok()
+            .flatten()
+            .is_some()
+    {
+        f.add(
+            "ForeignArtistId",
+            "This artist has already been added.",
+            "ArtistExistsValidator",
+            Some(json!(mbid)),
+        );
+    }
+    f.check()
 }
 
 pub(crate) async fn update_artist(
@@ -1573,10 +1650,59 @@ fn decorate_root(mut v: Value) -> Value {
 
 pub(crate) async fn create_root_folder(
     State(fs): State<FaceState>,
-    body: Json<shim::RootFolderBody>,
-) -> ApiResult<Json<Value>> {
-    let Json(v) = shim::create_root_folder(State(fs), body).await?;
+    Json(raw): Json<Value>,
+) -> Result<Json<Value>, axum::response::Response> {
+    use axum::response::IntoResponse;
+    let mut f = Failures::new();
+    let path = raw.get("path").and_then(Value::as_str).unwrap_or_default();
+    if path.trim().is_empty() {
+        f.add("Path", "Invalid Path: '{path}'", "PathValidator", None);
+    } else if !std::path::Path::new(path).is_dir() {
+        f.add(
+            "Path",
+            &format!("Path '{path}' does not exist"),
+            "PathExistsValidator",
+            Some(json!(path)),
+        );
+    }
+    f.positive(
+        "DefaultMetadataProfileId",
+        raw.get("defaultMetadataProfileId")
+            .and_then(Value::as_i64)
+            .unwrap_or(0),
+    );
+    f.positive(
+        "DefaultQualityProfileId",
+        raw.get("defaultQualityProfileId")
+            .and_then(Value::as_i64)
+            .unwrap_or(0),
+    );
+    f.check().map_err(IntoResponse::into_response)?;
+    let body: shim::RootFolderBody =
+        serde_json::from_value(raw).map_err(|e| ApiError::BadRequest(e.to_string()).into_response())?;
+    let Json(v) = shim::create_root_folder(State(fs), Json(body))
+        .await
+        .map_err(IntoResponse::into_response)?;
     Ok(Json(decorate_root(v)))
+}
+
+pub(crate) async fn create_tag(
+    State(fs): State<FaceState>,
+    Json(raw): Json<Value>,
+) -> Result<Json<Value>, axum::response::Response> {
+    use axum::response::IntoResponse;
+    let label = raw.get("label").and_then(Value::as_str).unwrap_or_default();
+    let mut f = Failures::new();
+    f.not_empty("Label", label);
+    f.check().map_err(IntoResponse::into_response)?;
+    let tag = fs
+        .state
+        .db
+        .tags()
+        .create(label.trim())
+        .await
+        .map_err(|e| ApiError::from(e).into_response())?;
+    Ok(Json(shim::v3_tag(&tag)))
 }
 
 pub(crate) async fn root_folders(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {

@@ -36,6 +36,7 @@ pub mod handlers;
 pub mod quality;
 pub mod release;
 pub mod resources;
+pub mod validation;
 
 use axum::http::{HeaderValue, Request};
 use axum::middleware::{self, Next};
@@ -86,7 +87,7 @@ pub fn router(state: AppState) -> Router {
             get(handlers::root_folders).post(handlers::create_root_folder),
         )
         .route("/rootfolder/{id}", delete(shim::delete_root_folder))
-        .route("/tag", get(shim::list_tags).post(shim::create_tag))
+        .route("/tag", get(shim::list_tags).post(handlers::create_tag))
         .route(
             "/tag/{id}",
             get(shim::get_tag)
@@ -414,6 +415,27 @@ async fn compat(req: Request<axum::body::Body>, next: Next) -> Response {
         .and_then(|v| v.to_str().ok())
         .is_some_and(|v| v.contains("json"));
     if !is_json {
+        // A body that would not parse (axum answers in plain text) is reported the
+        // way ASP.NET does: an RFC 9110 problem document naming the path.
+        if matches!(parts.status.as_u16(), 400 | 415 | 422) {
+            if let Ok(bytes) = axum::body::to_bytes(body, 64 * 1024).await {
+                let text = String::from_utf8_lossy(&bytes).to_string();
+                parts.headers.remove(header::CONTENT_LENGTH);
+                parts.status = StatusCode::BAD_REQUEST;
+                parts.headers.insert(
+                    header::CONTENT_TYPE,
+                    header::HeaderValue::from_static("application/problem+json"),
+                );
+                let doc = json!({
+                    "type": "https://tools.ietf.org/html/rfc9110#section-15.5.1",
+                    "title": "One or more validation errors occurred.",
+                    "status": 400,
+                    "errors": { "$": [text] },
+                });
+                return Response::from_parts(parts, axum::body::Body::from(doc.to_string()));
+            }
+            return Response::from_parts(parts, axum::body::Body::empty());
+        }
         return Response::from_parts(parts, body);
     }
     let Ok(bytes) = axum::body::to_bytes(body, 512 * 1024 * 1024).await else {
@@ -438,6 +460,16 @@ async fn compat(req: Request<axum::body::Body>, next: Next) -> Response {
             && CREATED.contains(&path.as_str())
         {
             parts.status = StatusCode::CREATED;
+        }
+        // Lidarr answers an artist edit, the bulk editor and the bulk album
+        // monitor with 202 Accepted.
+        let accepted = path == "/artist/editor"
+            || path == "/album/monitor"
+            || path
+                .strip_prefix("/artist/")
+                .is_some_and(|id| !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()));
+        if method == Method::PUT && parts.status == StatusCode::OK && accepted {
+            parts.status = StatusCode::ACCEPTED;
         }
     }
     parts.headers.remove(header::CONTENT_LENGTH);
