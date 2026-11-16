@@ -69,6 +69,8 @@ otlp = [
 postgres = ["cellarr-db/postgres"]
 
 [dev-dependencies]
+axum = { workspace = true }
+cellarr-fs = { workspace = true }
 tokio = { workspace = true }
 tempfile = "3"
 reqwest = { workspace = true }

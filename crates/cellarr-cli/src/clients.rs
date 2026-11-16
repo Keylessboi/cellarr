@@ -88,7 +88,7 @@ impl ConfiguredDownloadClient {
         match kind.as_str() {
             "qbittorrent" | "qbit" => {
                 let settings: QbittorrentSettings =
-                    parse_settings(config).map_err(&misconfigured)?;
+                    parse_settings(&with_qbittorrent_url(config)).map_err(&misconfigured)?;
                 Ok(Self::Qbittorrent(QbittorrentClient::new(
                     name, settings, category,
                 )))
@@ -139,6 +139,44 @@ impl ConfiguredDownloadClient {
 
 /// Deserialize a client's open-ended `settings` JSON into its typed struct,
 /// rendering a readable reason on failure.
+/// The settings of a qBittorrent client with `base_url` filled in.
+///
+/// The *arr apps (Lidarr included) describe a qBittorrent client as
+/// `host`/`port`/`useSsl`/`urlBase`, and that is how a config written through the
+/// compatible API is stored. The adapter wants one URL; derive it here so the stored
+/// form stays exactly what the app's own client would read back.
+fn with_qbittorrent_url(config: &DownloadClientConfig) -> DownloadClientConfig {
+    let mut config = config.clone();
+    if let Some(o) = config.settings.as_object_mut() {
+        if !o.contains_key("base_url") {
+            if let Some(host) = o
+                .get("host")
+                .and_then(|v| v.as_str())
+                .filter(|h| !h.is_empty())
+            {
+                let scheme = if o.get("useSsl").and_then(|v| v.as_bool()).unwrap_or(false) {
+                    "https"
+                } else {
+                    "http"
+                };
+                let port = o.get("port").and_then(|v| v.as_u64()).unwrap_or(8080);
+                let base = o
+                    .get("urlBase")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .trim_matches('/');
+                let url = if base.is_empty() {
+                    format!("{scheme}://{host}:{port}")
+                } else {
+                    format!("{scheme}://{host}:{port}/{base}")
+                };
+                o.insert("base_url".into(), serde_json::Value::String(url));
+            }
+        }
+    }
+    config
+}
+
 fn parse_settings<T: serde::de::DeserializeOwned>(
     config: &DownloadClientConfig,
 ) -> Result<T, String> {

@@ -231,32 +231,31 @@ impl Daemon {
                 "musicbrainz",
             )),
         };
-        let music: std::sync::Arc<dyn cellarr_jobs::music_sync::MusicCatalogue> =
-            if config
-                .music
-                .metadata_source
-                .as_deref()
-                .is_some_and(|s| s.eq_ignore_ascii_case("musicbrainz"))
-            {
-                std::sync::Arc::new(cellarr_jobs::music_sync::MusicSync::new(
-                    db.clone(),
-                    musicbrainz,
-                ))
-            } else {
-                let lidarr_meta = match config.music.lidarr_metadata_url.as_deref() {
-                    Some(url) => cellarr_meta::LidarrMetaSource::with_base_url(
-                        cellarr_meta::ReqwestFetcher::new("lidarr-metadata"),
-                        url,
-                    ),
-                    None => cellarr_meta::LidarrMetaSource::new(
-                        cellarr_meta::ReqwestFetcher::new("lidarr-metadata"),
-                    ),
-                };
-                std::sync::Arc::new(cellarr_jobs::music_sync::MusicSync::new(
-                    db.clone(),
-                    cellarr_meta::FallbackMeta::new(lidarr_meta, musicbrainz),
-                ))
+        let music: std::sync::Arc<dyn cellarr_jobs::music_sync::MusicCatalogue> = if config
+            .music
+            .metadata_source
+            .as_deref()
+            .is_some_and(|s| s.eq_ignore_ascii_case("musicbrainz"))
+        {
+            std::sync::Arc::new(cellarr_jobs::music_sync::MusicSync::new(
+                db.clone(),
+                musicbrainz,
+            ))
+        } else {
+            let lidarr_meta = match config.music.lidarr_metadata_url.as_deref() {
+                Some(url) => cellarr_meta::LidarrMetaSource::with_base_url(
+                    cellarr_meta::ReqwestFetcher::new("lidarr-metadata"),
+                    url,
+                ),
+                None => cellarr_meta::LidarrMetaSource::new(cellarr_meta::ReqwestFetcher::new(
+                    "lidarr-metadata",
+                )),
             };
+            std::sync::Arc::new(cellarr_jobs::music_sync::MusicSync::new(
+                db.clone(),
+                cellarr_meta::FallbackMeta::new(lidarr_meta, musicbrainz),
+            ))
+        };
         let handler_music = std::sync::Arc::clone(&music);
 
         let state = AppState::new_with_handler(db, auth, move |events| {
@@ -576,7 +575,8 @@ async fn register_recurring(state: &AppState) -> Result<()> {
         .add_cron(JobKind::PruneDecisionLog, "@daily", RetryPolicy::default())
         .await
         .context("registering PruneDecisionLog")?;
-    // Reconcile in-flight grabs against the download client every few minutes:
+    // Reconcile in-flight grabs against the download client every minute (the cadence
+    // Lidarr checks for finished downloads at, so an import is never minutes late):
     // mark redundant grabs (content already imported by another grab) terminal and
     // clean genuinely-dead downloads (failed / gone from the client). Without it a
     // grab whose run ended early lingers forever as "downloading"/"importing" and a
@@ -585,7 +585,7 @@ async fn register_recurring(state: &AppState) -> Result<()> {
     scheduler
         .add_cron(
             JobKind::ReconcileDownloads,
-            "*/5 * * * *",
+            "*/1 * * * *",
             RetryPolicy::default(),
         )
         .await
