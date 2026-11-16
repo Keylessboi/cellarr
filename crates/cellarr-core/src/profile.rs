@@ -132,6 +132,64 @@ const DEFAULT_QUALITY_NAMES: &[&str] = &[
     "Raw-HD",
 ];
 
+/// The first rank of the music quality catalogue.
+///
+/// Video and music qualities share one [`QualityRanking`] so the decision
+/// engine, the profile model and the persistence layer stay media-agnostic, but
+/// they occupy disjoint rank ranges: everything below this is a video bucket,
+/// everything at or above it is an audio bucket. A profile only ever allows
+/// ranks from one side, and each compatibility face lists only its own side
+/// (see [`QualityRanking::for_media`]). `Unknown` (rank 0) belongs to both.
+pub const MUSIC_RANK_BASE: u32 = 100;
+
+/// The music quality catalogue, worst→best.
+///
+/// The names are the ones a music library manager's users already know from
+/// their quality profiles (lossy bitrates, the two common VBR presets, then the
+/// lossless containers), so a migrated profile maps onto this list by name.
+/// Ordering is by fidelity: fixed-bitrate MP3 ascending, the VBR presets slotted
+/// where their effective bitrate sits, the other lossy codecs, then lossless,
+/// with the 24-bit variants above their 16-bit ones.
+const MUSIC_QUALITY_NAMES: &[&str] = &[
+    "MP3-8",
+    "MP3-16",
+    "MP3-24",
+    "MP3-32",
+    "MP3-40",
+    "MP3-48",
+    "MP3-56",
+    "MP3-64",
+    "MP3-80",
+    "MP3-96",
+    "MP3-112",
+    "MP3-128",
+    "OGG Vorbis Q5",
+    "MP3-160",
+    "MP3-192",
+    "OGG Vorbis Q6",
+    "AAC-192",
+    "WMA",
+    "MP3-VBR-V2",
+    "MP3-224",
+    "OGG Vorbis Q7",
+    "MP3-256",
+    "OGG Vorbis Q8",
+    "AAC-256",
+    "MP3-VBR-V0",
+    "OGG Vorbis Q9",
+    "MP3-320",
+    "AAC-320",
+    "OGG Vorbis Q10",
+    "AAC-VBR",
+    "ALAC",
+    "FLAC",
+    "APE",
+    "WavPack",
+    "WAV",
+    "ALAC 24bit",
+    "FLAC 24bit",
+];
+
 /// An ordered quality catalogue: the names that exist and their ranks.
 ///
 /// Wraps the worst→best ordering so callers can resolve a parse to a [`Quality`]
@@ -146,21 +204,37 @@ pub struct QualityRanking {
 
 impl Default for QualityRanking {
     fn default() -> Self {
-        let qualities = DEFAULT_QUALITY_NAMES
+        let define = |name: &&str, rank: u32| QualityDefinition {
+            name: (*name).to_string(),
+            title: None,
+            rank,
+            min_size_per_min: None,
+            max_size_per_min: None,
+            preferred_size_per_min: None,
+        };
+        // Dense ascending ranks within each range; index order is worst→best.
+        let video = DEFAULT_QUALITY_NAMES
             .iter()
             .enumerate()
-            .map(|(idx, name)| QualityDefinition {
-                name: (*name).to_string(),
-                title: None,
-                // Dense ascending ranks; index order is worst→best.
-                rank: idx as u32,
-                min_size_per_min: None,
-                max_size_per_min: None,
-                preferred_size_per_min: None,
-            })
-            .collect();
-        Self { qualities }
+            .map(|(idx, name)| define(name, idx as u32));
+        let music = MUSIC_QUALITY_NAMES
+            .iter()
+            .enumerate()
+            .map(|(idx, name)| define(name, MUSIC_RANK_BASE + idx as u32));
+        Self {
+            qualities: video.chain(music).collect(),
+        }
     }
+}
+
+/// Whether a quality `rank` belongs to the catalogue a `media_type` grades with.
+///
+/// `Unknown` (rank 0) is shared; otherwise music owns the ranks from
+/// [`MUSIC_RANK_BASE`] up and every other media type the ranks below it.
+#[must_use]
+pub fn quality_rank_is_for(rank: u32, media_type: crate::media::MediaType) -> bool {
+    let is_music_rank = rank >= MUSIC_RANK_BASE;
+    rank == 0 || (is_music_rank == (media_type == crate::media::MediaType::Music))
 }
 
 impl QualityRanking {
@@ -171,6 +245,18 @@ impl QualityRanking {
             .iter()
             .find(|q| q.name.eq_ignore_ascii_case(name))
             .map(|q| Quality::new(q.name.clone(), q.rank))
+    }
+
+    /// The part of the catalogue a `media_type` grades with, worst→best.
+    ///
+    /// A compatibility face lists and edits only its own qualities: a video app
+    /// has no `FLAC` bucket and a music app no `Bluray-1080p`.
+    #[must_use]
+    pub fn for_media(&self, media_type: crate::media::MediaType) -> Vec<&QualityDefinition> {
+        self.qualities
+            .iter()
+            .filter(|q| quality_rank_is_for(q.rank, media_type))
+            .collect()
     }
 
     /// The sentinel "Unknown" quality (rank 0 in the default ranking), used when
@@ -261,6 +347,16 @@ pub enum SizeVerdict {
 /// needed to name a bucket.
 #[must_use]
 pub fn resolve_quality(parsed: &ParsedRelease, ranking: &QualityRanking) -> Quality {
+    // A music parse names its catalogue bucket directly: an audio release has no
+    // source/resolution pair to combine, so the parser resolves the codec and
+    // bitrate to the bucket name and it is only looked up here.
+    if let Some(music) = &parsed.music {
+        return music
+            .quality
+            .as_deref()
+            .and_then(|name| ranking.by_name(name))
+            .unwrap_or_else(|| ranking.unknown());
+    }
     let name = match (parsed.source, parsed.resolution) {
         // Pre-retail movie tiers and full-disc/raw buckets are each their own
         // bucket regardless of advertised resolution (they mirror Radarr's

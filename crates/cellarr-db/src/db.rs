@@ -22,8 +22,8 @@ use crate::dialect::DbPool;
 use crate::error::Result;
 use crate::repos::{
     AuthRepo, BlocklistRepo, CacheRepo, ConfigRepo, ContentRepo, DecisionLogRepo, GrabRepo,
-    HistoryRepo, ImportListRepo, ManagedConfigRepo, MediaFileRepo, PendingReleaseRepo, ProfileRepo,
-    SubtitleRepo, TagRepo,
+    HistoryRepo, ImportListRepo, ManagedConfigRepo, MediaFileRepo, MusicRepo, PendingReleaseRepo,
+    ProfileRepo, SubtitleRepo, TagRepo,
 };
 use crate::writer::{WriterHandle, WriterShutdown};
 
@@ -385,6 +385,12 @@ impl Database {
     #[must_use]
     pub fn media_files(&self) -> MediaFileRepo {
         MediaFileRepo::new(self.pool.clone(), self.writer.clone())
+    }
+
+    /// The music repository (artists, albums, tracks, track files).
+    #[must_use]
+    pub fn music(&self) -> MusicRepo {
+        MusicRepo::new(self.pool.clone(), self.writer.clone())
     }
 
     /// The subtitle repository.

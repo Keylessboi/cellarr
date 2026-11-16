@@ -75,7 +75,7 @@ impl ReleaseType {
             Some(Coordinates::Episode { .. }) => ReleaseType::SingleEpisode,
             Some(Coordinates::Daily { .. }) => ReleaseType::Daily,
             Some(Coordinates::Absolute { .. }) => ReleaseType::Absolute,
-            Some(Coordinates::Track { .. }) => ReleaseType::Track,
+            Some(Coordinates::Album | Coordinates::Track { .. }) => ReleaseType::Track,
             Some(Coordinates::Book { .. }) => ReleaseType::Book,
             // SeasonPack handled above; an empty parse has no type.
             Some(Coordinates::SeasonPack { .. }) | None => ReleaseType::Other,

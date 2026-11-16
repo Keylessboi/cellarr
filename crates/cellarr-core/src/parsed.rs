@@ -161,6 +161,28 @@ pub enum ProperRepack {
     Repack,
 }
 
+/// What a release title says when read as a music release.
+///
+/// Music titles are shaped `Artist - Album (Year) [Format]`, so the artist and
+/// album are separate facts (a video title has one). `quality` is the name of the
+/// catalogue bucket the advertised codec/bitrate resolves to (e.g. `FLAC`,
+/// `MP3-320`), or `None` when the title names no recognizable format.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MusicRelease {
+    /// The artist as written in the title.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artist: Option<String>,
+    /// The album (release) title as written.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub album: Option<String>,
+    /// The catalogue name of the advertised audio quality.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quality: Option<String>,
+    /// Whether the title advertises a whole discography rather than one album.
+    #[serde(default)]
+    pub discography: bool,
+}
+
 /// The structured facts extracted from a release title.
 ///
 /// Every optional field is `None` when the parser found no evidence for it.
@@ -207,6 +229,11 @@ pub struct ParsedRelease {
     /// hence a vector.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub coordinates: Vec<Coordinates>,
+    /// The music reading of the title, present only when the title was parsed as
+    /// an audio release. Its presence is what marks a parse as music: quality
+    /// resolution and matching read it instead of the video fields above.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub music: Option<MusicRelease>,
     /// Per-field confidence. Missing keys mean [`Confidence::NONE`].
     #[serde(default)]
     pub confidence: BTreeMap<ParsedField, Confidence>,
@@ -230,6 +257,7 @@ impl ParsedRelease {
             proper_repack: None,
             year: None,
             coordinates: Vec::new(),
+            music: None,
             confidence: BTreeMap::new(),
         }
     }

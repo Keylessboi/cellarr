@@ -33,6 +33,7 @@ pub mod ids;
 pub mod importlist;
 pub mod media;
 pub mod monitor;
+pub mod music;
 pub mod notification;
 pub mod parsed;
 pub mod pipeline;
@@ -71,17 +72,20 @@ pub use media::{
     ContentKind, ContentMetadata, ContentNode, ContentRef, Coordinates, Library, MediaFile,
     MediaType, SeriesType, Subtitle, MissingReason, MissingSummary,};
 pub use monitor::{EpisodeFacts, MonitorOption};
+pub use music::{normalize_name, Album, Artist, MetadataProfile, Track, TrackFile};
 pub use notification::{
     config_accepts, NotificationEvent, NotificationHealth, NotificationMessage,
     NotificationRelease, NotificationSender, NotificationSubject,
 };
 pub use parsed::{
-    Confidence, HdrFormat, ParsedField, ParsedRelease, ProperRepack, Resolution, Source, VideoCodec,
+    Confidence, HdrFormat, MusicRelease, ParsedField, ParsedRelease, ProperRepack, Resolution,
+    Source, VideoCodec,
 };
 pub use pipeline::{is_legal_transition, Stage, Transition, TransitionKind};
 pub use profile::{
-    condition_matches, custom_format_matches, resolve_quality, Condition, ConditionKind,
-    CustomFormat, Quality, QualityDefinition, QualityProfile, QualityRanking, SizeVerdict,
+    condition_matches, custom_format_matches, quality_rank_is_for, resolve_quality, Condition,
+    ConditionKind, CustomFormat, Quality, QualityDefinition, QualityProfile, QualityRanking,
+    SizeVerdict, MUSIC_RANK_BASE,
 };
 pub use release::{ContentMatch, ParsedCandidate, Protocol, Release, ReleaseType, DEFERRED_LINK};
 pub use releaseprofile::{plain_term_matches, regex_term, PreferredTerm, ReleaseProfile};

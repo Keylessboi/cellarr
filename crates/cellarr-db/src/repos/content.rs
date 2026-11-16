@@ -48,7 +48,7 @@ impl ContentRepo {
              FROM content c
              LEFT JOIN upgrade_search u ON u.content_id = c.id
              WHERE c.monitored = 1
-               AND c.kind IN ('movie', 'episode', 'track', 'book')
+               AND c.kind IN ('movie', 'episode', 'album', 'book')
                AND EXISTS (
                    SELECT 1 FROM content_file cf WHERE cf.content_id = c.id
                )
@@ -176,7 +176,7 @@ impl ContentRepo {
                  FROM content c
                  LEFT JOIN content s ON s.id = c.parent_id AND s.kind = 'season'
                  WHERE c.monitored = 1
-                   AND c.kind IN ('movie', 'episode', 'track', 'book')
+                   AND c.kind IN ('movie', 'episode', 'album', 'book')
                    AND NOT EXISTS (
                        SELECT 1 FROM content_file cf WHERE cf.content_id = c.id
                    )
@@ -1610,6 +1610,15 @@ impl ContentRepository for ContentRepo {
         // Mirrors `upgrade_candidates`. Portable
         // across SQLite and Postgres (`searched_at IS NULL` yields 1/0 / true-false;
         // DESC puts the never-searched first).
+        //
+        // MUSIC is acquired an album at a time, so the album is the unit and its
+        // tracks never are: an album is missing while it holds no file (a track's
+        // file is linked to its album as well as to the track). Two things keep an
+        // album out of the sweep that have no video counterpart: an unmonitored
+        // artist silences every album under it, and an album whose release date is
+        // still in the future cannot have been published yet.
+        let now = time::OffsetDateTime::now_utc();
+        let today = now.date().to_string();
         let rows = sqlx::query(&pq(
             "WITH wholly_missing AS (
                  SELECT s.id AS season_id
@@ -1627,7 +1636,7 @@ impl ContentRepository for ContentRepo {
              WHERE c.monitored = 1
                AND (
                      (
-                       c.kind IN ('movie', 'episode', 'track', 'book')
+                       c.kind IN ('movie', 'episode', 'album', 'book')
                        AND NOT EXISTS (
                            SELECT 1 FROM content_file cf WHERE cf.content_id = c.id
                        )
@@ -1635,13 +1644,27 @@ impl ContentRepository for ContentRepo {
                            c.kind = 'episode'
                            AND c.parent_id IN (SELECT season_id FROM wholly_missing)
                        )
+                       AND NOT (
+                           c.kind = 'album'
+                           AND (
+                               EXISTS (
+                                   SELECT 1 FROM content artist
+                                   WHERE artist.id = c.parent_id AND artist.monitored = 0
+                               )
+                               OR EXISTS (
+                                   SELECT 1 FROM album_meta al
+                                   WHERE al.content_id = c.id AND al.release_date > ?2
+                               )
+                           )
+                       )
                      )
                      OR c.id IN (SELECT season_id FROM wholly_missing)
                    )
                AND (m.next_due_at IS NULL OR m.next_due_at <= ?1)
              ORDER BY (m.searched_at IS NULL) DESC, m.searched_at ASC, RANDOM()",
         ))
-        .bind(crate::convert::format_time(time::OffsetDateTime::now_utc())?)
+        .bind(crate::convert::format_time(now)?)
+        .bind(today)
         .fetch_all(&self.pool)
         .await?;
         rows.into_iter()

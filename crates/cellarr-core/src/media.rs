@@ -154,6 +154,16 @@ pub enum Coordinates {
         /// The absolute episode number across the whole series.
         number: u32,
     },
+    /// A whole album.
+    ///
+    /// The music counterpart of [`Coordinates::SeasonPack`]: it is the coordinate
+    /// an **album unit** carries (the grabbable container under an artist, whose
+    /// children are the tracks) and what the parser produces for an album
+    /// release. Music is acquired an album at a time, so this is the coordinate
+    /// a music grab is addressed to; the files inside are placed onto the album's
+    /// [`Coordinates::Track`] children on import. An artist node carries it too,
+    /// as a container placeholder, and is told apart by its `kind`.
+    Album,
     /// A music track, addressed by disc and track number.
     Track {
         /// Disc number (1-based; single-disc albums use 1).
@@ -181,7 +191,7 @@ impl Coordinates {
             | Coordinates::Daily { .. }
             | Coordinates::SeasonPack { .. }
             | Coordinates::Absolute { .. } => MediaType::Tv,
-            Coordinates::Track { .. } => MediaType::Music,
+            Coordinates::Album | Coordinates::Track { .. } => MediaType::Music,
             Coordinates::Book { .. } => MediaType::Book,
         }
     }

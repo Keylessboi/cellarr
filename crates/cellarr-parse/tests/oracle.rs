@@ -181,7 +181,10 @@ fn from_cellarr(input: &str, ranking: &QualityRanking) -> Record {
             }
             Coordinates::Absolute { number } => r.absolute.push(i64::from(*number)),
             Coordinates::Daily { date } => r.daily_date = Some(date.clone()),
-            Coordinates::Movie | Coordinates::Track { .. } | Coordinates::Book { .. } => {}
+            Coordinates::Movie
+            | Coordinates::Album
+            | Coordinates::Track { .. }
+            | Coordinates::Book { .. } => {}
         }
     }
     r.episodes.sort_unstable();

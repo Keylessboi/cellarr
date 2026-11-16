@@ -24,6 +24,7 @@ mod edition;
 mod group;
 mod hdr;
 mod language;
+mod music;
 mod numbering;
 mod proper_repack;
 mod resolution;
@@ -60,6 +61,20 @@ pub fn parse_title(input: &str) -> ParsedRelease {
     out
 }
 
+/// Parse a release title the way its media type is written.
+///
+/// Music titles have their own grammar (two names, an audio quality, no episode
+/// numbering) and are read by [`parse_music_title`]; every other media type
+/// uses the video reader, [`parse_title`]. Callers that know which library a
+/// title is being considered for use this so the parse matches the content.
+#[must_use]
+pub fn parse_title_for(media_type: cellarr_core::MediaType, input: &str) -> ParsedRelease {
+    match media_type {
+        cellarr_core::MediaType::Music => parse_music_title(input),
+        _ => parse_title(input),
+    }
+}
+
 /// Parse many titles in parallel. Intended for search-time bursts.
 #[must_use]
 pub fn parse_batch(titles: &[&str]) -> Vec<ParsedRelease> {
@@ -83,6 +98,7 @@ pub fn field_meets(parsed: &ParsedRelease, field: ParsedField, threshold: f32) -
 // Re-export the per-extractor entry points so each is individually testable and
 // usable in isolation by callers that only want one slice of the parse.
 pub use audio::extract as extract_audio;
+pub use music::{parse_music_title, quality_of as music_quality_of};
 pub use codec::extract as extract_codec;
 pub use edition::extract as extract_edition;
 pub use group::extract as extract_group;
