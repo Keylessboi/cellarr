@@ -25,6 +25,7 @@ pub mod events;
 pub mod fs_health;
 pub mod health;
 pub mod import_list_sync;
+pub mod lidarr;
 pub mod logfile;
 pub mod manual_import;
 pub mod mediacover;
@@ -74,6 +75,7 @@ pub use webhook::ReqwestWebhookSender;
 pub fn build_router(state: AppState) -> Router {
     Router::new()
         .nest("/api/v1", native::router(state.clone()))
+        .nest("/lidarr/api/v1", lidarr::router(state.clone()))
         .nest("/api/v3", shim::router(state.clone(), shim::Face::Cellarr))
         .nest(
             "/sonarr/api/v3",
@@ -149,6 +151,24 @@ where
     F: std::future::Future<Output = ()> + Send + 'static,
 {
     axum::serve(listener, build_router(state).into_make_service())
+        .with_graceful_shutdown(shutdown)
+        .await
+}
+
+/// Serve the Lidarr face on its own listener — `/api/v1/*` and `/ping` at the
+/// root, where Lidarr's clients look for them — until `shutdown` resolves.
+///
+/// # Errors
+/// Returns any error from the underlying `axum::serve`.
+pub async fn serve_lidarr_with_shutdown<F>(
+    listener: tokio::net::TcpListener,
+    state: AppState,
+    shutdown: F,
+) -> std::io::Result<()>
+where
+    F: std::future::Future<Output = ()> + Send + 'static,
+{
+    axum::serve(listener, lidarr::listener_router(state).into_make_service())
         .with_graceful_shutdown(shutdown)
         .await
 }

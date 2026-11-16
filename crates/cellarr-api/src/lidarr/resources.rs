@@ -1,0 +1,400 @@
+//! The JSON shapes the Lidarr API speaks, built from cellarr's records.
+//!
+//! Every resource here is a plain function from cellarr data to a
+//! `serde_json::Value` with Lidarr's field names. They are deliberately free of
+//! I/O: a handler gathers what a resource needs (statistics, profile ids) in a
+//! fixed number of queries and passes it in, so listing a thousand artists never
+//! costs a thousand queries.
+
+use std::collections::HashMap;
+
+use cellarr_core::{Album, Artist, ContentId, MetadataProfile, Track, TrackFile};
+use cellarr_db::MusicStats;
+use serde_json::{json, Value};
+
+use super::quality::lidarr_quality_id;
+
+/// Where an album's cover art is served from when cellarr holds none locally.
+const COVER_ART_BASE: &str = "https://coverartarchive.org/release-group";
+
+/// The quality object a file or release carries.
+#[must_use]
+pub fn quality_object(name: &str) -> Value {
+    json!({
+        "quality": { "id": lidarr_quality_id(name), "name": name },
+        "revision": { "version": 1, "real": 0, "isRepack": false },
+    })
+}
+
+/// The statistics block of an artist or album.
+#[must_use]
+pub fn statistics(stats: MusicStats, artist: bool) -> Value {
+    let percent = if stats.track_count > 0 {
+        (stats.track_file_count as f64 / stats.track_count as f64) * 100.0
+    } else {
+        0.0
+    };
+    let mut v = json!({
+        "trackFileCount": stats.track_file_count,
+        "trackCount": stats.track_count,
+        "totalTrackCount": stats.track_count,
+        "sizeOnDisk": stats.size_on_disk,
+        "percentOfTracks": percent,
+    });
+    if artist {
+        v["albumCount"] = json!(stats.album_count);
+    }
+    v
+}
+
+/// The last path component, used as an artist's `folder`.
+#[must_use]
+pub fn folder_of(path: &str) -> String {
+    path.trim_end_matches(['/', '\\'])
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// The path above an artist's folder: the root folder it lives under.
+#[must_use]
+pub fn root_of(path: &str) -> String {
+    let trimmed = path.trim_end_matches(['/', '\\']);
+    match trimmed.rfind(['/', '\\']) {
+        Some(0) => "/".to_string(),
+        Some(i) => trimmed[..i].to_string(),
+        None => String::new(),
+    }
+}
+
+/// The lowercase, punctuation-free name Lidarr calls `cleanName`.
+#[must_use]
+pub fn clean_name(name: &str) -> String {
+    name.chars()
+        .filter(char::is_ascii_alphanumeric)
+        .collect::<String>()
+        .to_lowercase()
+}
+
+/// An artist resource.
+#[must_use]
+pub fn artist(a: &Artist, stats: Option<MusicStats>, profile_seq: Option<i64>) -> Value {
+    let mut v = json!({
+        "id": a.id,
+        "status": if a.ended { "ended" } else { "continuing" },
+        "ended": a.ended,
+        "artistName": a.name,
+        "foreignArtistId": a.mbid,
+        "mbId": a.mbid,
+        "tadbId": 0,
+        "discogsId": 0,
+        "allMusicId": "",
+        "overview": a.overview.clone().unwrap_or_default(),
+        "artistType": a.artist_type.clone().unwrap_or_default(),
+        "disambiguation": a.disambiguation.clone().unwrap_or_default(),
+        "links": [],
+        "nextAlbum": null,
+        "lastAlbum": null,
+        "images": [],
+        "path": a.path,
+        "qualityProfileId": profile_seq.unwrap_or(0),
+        "metadataProfileId": a.metadata_profile_id,
+        "monitored": a.monitored,
+        "monitorNewItems": if a.monitor_new_albums { "all" } else { "none" },
+        "rootFolderPath": root_of(&a.path),
+        "folder": folder_of(&a.path),
+        "genres": a.genres,
+        "cleanName": clean_name(&a.name),
+        "sortName": a.sort_name.clone().unwrap_or_else(|| a.name.to_lowercase()),
+        "tags": [],
+        "added": a.added_at,
+        "ratings": { "votes": 0, "value": 0.0 },
+    });
+    if let Some(stats) = stats {
+        v["statistics"] = statistics(stats, true);
+    }
+    v
+}
+
+/// A bare artist resource for embedding in an album or a track: no statistics.
+#[must_use]
+pub fn artist_ref(a: &Artist, profile_seq: Option<i64>) -> Value {
+    artist(a, None, profile_seq)
+}
+
+/// An album resource. `artist` is embedded when given.
+#[must_use]
+pub fn album(
+    al: &Album,
+    artist_id: i64,
+    artist: Option<Value>,
+    stats: Option<MusicStats>,
+    profile_seq: Option<i64>,
+    tracks: &[Track],
+) -> Value {
+    let discs = tracks.iter().map(|t| t.disc).max().unwrap_or(1);
+    let duration: u64 = tracks.iter().filter_map(|t| t.duration_ms).map(u64::from).sum();
+    let media: Vec<Value> = (1..=discs.max(1))
+        .map(|n| json!({ "mediumNumber": n, "mediumName": "", "mediumFormat": "CD" }))
+        .collect();
+    let releases = match &al.release_mbid {
+        Some(rel) => vec![json!({
+            "id": al.id,
+            "albumId": al.id,
+            "foreignReleaseId": rel,
+            "title": al.title,
+            "status": "Official",
+            "duration": duration,
+            "trackCount": tracks.len(),
+            "media": media,
+            "mediaCount": discs,
+            "disambiguation": "",
+            "country": [],
+            "label": [],
+            "format": "CD",
+            "monitored": true,
+        })],
+        None => Vec::new(),
+    };
+    let mut v = json!({
+        "id": al.id,
+        "title": al.title,
+        "disambiguation": al.disambiguation.clone().unwrap_or_default(),
+        "overview": "",
+        "artistId": artist_id,
+        "foreignAlbumId": al.mbid,
+        "monitored": al.monitored,
+        "anyReleaseOk": true,
+        "profileId": profile_seq.unwrap_or(0),
+        "duration": duration,
+        "albumType": al.album_type,
+        "secondaryTypes": al.secondary_types,
+        "mediumCount": discs,
+        "ratings": { "votes": 0, "value": 0.0 },
+        "releaseDate": release_date_iso(al.release_date.as_deref()),
+        "releases": releases,
+        "genres": [],
+        "media": media,
+        "images": [{
+            "coverType": "cover",
+            "url": format!("{COVER_ART_BASE}/{}/front-500", al.mbid),
+            "remoteUrl": format!("{COVER_ART_BASE}/{}/front-500", al.mbid),
+        }],
+        "links": [],
+        "added": al.added_at,
+        "grabbed": false,
+        "cleanTitle": clean_name(&al.title),
+    });
+    if let Some(a) = artist {
+        v["artist"] = a;
+    }
+    if let Some(stats) = stats {
+        v["statistics"] = statistics(stats, false);
+    }
+    v
+}
+
+/// A release date as the ISO timestamp Lidarr serializes. A partial date is
+/// completed to its first day, which is how a year-only release date compares in
+/// Lidarr too.
+#[must_use]
+pub fn release_date_iso(date: Option<&str>) -> Value {
+    let Some(d) = date.filter(|d| d.len() >= 4) else {
+        return Value::Null;
+    };
+    let full = match d.len() {
+        4 => format!("{d}-01-01"),
+        7 => format!("{d}-01"),
+        _ => d.chars().take(10).collect(),
+    };
+    json!(format!("{full}T00:00:00Z"))
+}
+
+/// A track resource.
+#[must_use]
+pub fn track(
+    t: &Track,
+    album_id: i64,
+    artist_id: i64,
+    file: Option<&TrackFile>,
+    artist: Option<Value>,
+) -> Value {
+    let mut v = json!({
+        "id": t.id,
+        "artistId": artist_id,
+        "foreignTrackId": t.mbid.clone().unwrap_or_default(),
+        "foreignRecordingId": t.mbid.clone().unwrap_or_default(),
+        "trackFileId": file.map_or(0, |f| f.id),
+        "albumId": album_id,
+        "explicit": false,
+        "absoluteTrackNumber": t.position,
+        "trackNumber": t.position.to_string(),
+        "title": t.title,
+        "duration": t.duration_ms.unwrap_or(0),
+        "mediumNumber": t.disc,
+        "hasFile": file.is_some(),
+        "ratings": { "votes": 0, "value": 0.0 },
+    });
+    if let Some(a) = artist {
+        v["artist"] = a;
+    }
+    v
+}
+
+/// A track-file resource.
+#[must_use]
+pub fn track_file(
+    f: &TrackFile,
+    artist_id: i64,
+    album_id: i64,
+    cutoff_rank: Option<u32>,
+) -> Value {
+    let info = f.file.media_info.clone().unwrap_or(Value::Null);
+    let get = |k: &str| info.get(k).cloned().unwrap_or(Value::Null);
+    json!({
+        "id": f.id,
+        "artistId": artist_id,
+        "albumId": album_id,
+        "path": f.file.path,
+        "size": f.file.size,
+        "dateAdded": f.added_at,
+        "sceneName": "",
+        "releaseGroup": "",
+        "quality": quality_object(&f.file.quality.name),
+        "qualityWeight": f.file.quality.rank,
+        "customFormats": [],
+        "customFormatScore": f.file.custom_format_score.unwrap_or(0),
+        "indexerFlags": 0,
+        "releaseType": "unknown",
+        "mediaInfo": {
+            "audioFormat": get("codec"),
+            "audioBitrate": info.get("bitrateKbps").and_then(Value::as_u64).map_or(Value::Null, |k| json!(format!("{k} kbps"))),
+            "audioChannels": 2,
+            "audioBits": get("bitDepth"),
+            "audioSampleRate": get("sampleRate"),
+        },
+        "qualityCutoffNotMet": cutoff_rank.is_some_and(|c| f.file.quality.rank < c),
+    })
+}
+
+/// A metadata profile resource.
+#[must_use]
+pub fn metadata_profile(p: &MetadataProfile) -> Value {
+    let item = |id: usize, name: &str, allowed: bool| json!({ "id": id, "name": name, "allowed": allowed });
+    let primary: Vec<Value> = cellarr_core::music::PRIMARY_ALBUM_TYPES
+        .iter()
+        .enumerate()
+        .map(|(i, n)| {
+            json!({ "albumType": { "id": i, "name": n }, "allowed": p.primary_types.iter().any(|t| t.eq_ignore_ascii_case(n)) })
+        })
+        .collect();
+    let secondary: Vec<Value> = cellarr_core::music::SECONDARY_ALBUM_TYPES
+        .iter()
+        .enumerate()
+        .map(|(i, n)| {
+            json!({ "albumType": { "id": i, "name": n }, "allowed": p.secondary_types.iter().any(|t| t.eq_ignore_ascii_case(n)) })
+        })
+        .collect();
+    let statuses: Vec<Value> = cellarr_core::music::RELEASE_STATUSES
+        .iter()
+        .enumerate()
+        .map(|(i, n)| {
+            json!({ "releaseStatus": { "id": i, "name": n }, "allowed": p.release_statuses.iter().any(|t| t.eq_ignore_ascii_case(n)) })
+        })
+        .collect();
+    let _ = item;
+    json!({
+        "id": p.id,
+        "name": p.name,
+        "primaryAlbumTypes": primary,
+        "secondaryAlbumTypes": secondary,
+        "releaseStatuses": statuses,
+    })
+}
+
+/// Read a metadata profile back from the resource a client PUTs or POSTs.
+#[must_use]
+pub fn metadata_profile_from(body: &Value, id: i64) -> MetadataProfile {
+    let allowed_names = |key: &str, inner: &str| -> Vec<String> {
+        body.get(key)
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter(|i| i.get("allowed").and_then(Value::as_bool).unwrap_or(false))
+                    .filter_map(|i| i.get(inner)?.get("name")?.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    MetadataProfile {
+        id,
+        name: body
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("Profile")
+            .to_string(),
+        primary_types: allowed_names("primaryAlbumTypes", "albumType"),
+        secondary_types: allowed_names("secondaryAlbumTypes", "albumType"),
+        release_statuses: allowed_names("releaseStatuses", "releaseStatus"),
+    }
+}
+
+/// An index of tracks' album/artist sequence ids, so a list of tracks or files
+/// is rendered without a query each.
+#[derive(Default)]
+pub struct IdIndex {
+    /// Album content id → (album seq id, artist content id).
+    pub albums: HashMap<ContentId, (i64, ContentId)>,
+    /// Artist content id → artist seq id.
+    pub artists: HashMap<ContentId, i64>,
+}
+
+impl IdIndex {
+    /// The `(album id, artist id)` a content id of an album belongs to.
+    #[must_use]
+    pub fn of_album(&self, album: ContentId) -> (i64, i64) {
+        self.albums.get(&album).map_or((0, 0), |(album_id, artist)| {
+            (*album_id, self.artists.get(artist).copied().unwrap_or(0))
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn partial_release_dates_complete_to_their_first_day() {
+        assert_eq!(release_date_iso(Some("1997")), json!("1997-01-01T00:00:00Z"));
+        assert_eq!(release_date_iso(Some("1997-05")), json!("1997-05-01T00:00:00Z"));
+        assert_eq!(release_date_iso(Some("1997-05-21")), json!("1997-05-21T00:00:00Z"));
+        assert_eq!(release_date_iso(None), Value::Null);
+        assert_eq!(release_date_iso(Some("")), Value::Null);
+    }
+
+    #[test]
+    fn an_artist_path_splits_into_root_and_folder() {
+        assert_eq!(root_of("/data/media/music/Radiohead"), "/data/media/music");
+        assert_eq!(folder_of("/data/media/music/Radiohead/"), "Radiohead");
+        assert_eq!(root_of("/Radiohead"), "/");
+        assert_eq!(root_of("Radiohead"), "");
+    }
+
+    #[test]
+    fn a_metadata_profile_round_trips_through_its_resource() {
+        let mut p = MetadataProfile::standard();
+        p.primary_types.push("EP".into());
+        p.secondary_types.push("Live".into());
+        let back = metadata_profile_from(&metadata_profile(&p), p.id);
+        assert_eq!(back, p);
+    }
+
+    #[test]
+    fn percent_of_tracks_is_zero_for_an_album_with_no_known_tracks() {
+        let v = statistics(MusicStats::default(), false);
+        assert_eq!(v["percentOfTracks"], json!(0.0));
+        assert!(v.get("albumCount").is_none());
+    }
+}

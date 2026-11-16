@@ -37,6 +37,8 @@ const BACKUP_RETENTION: usize = 7;
 /// the server, and trigger shutdown deterministically rather than racing a signal.
 pub struct Daemon {
     listener: TcpListener,
+    /// The Lidarr-compatible listener, when `music.lidarr_port` is set.
+    lidarr_listener: Option<TcpListener>,
     state: AppState,
     addr: SocketAddr,
 }
@@ -216,6 +218,26 @@ impl Daemon {
             "subtitle provider initialized"
         );
 
+        // The MusicBrainz-backed music catalogue, shared by the pipeline handler
+        // (background refresh/track fill) and the Lidarr face (add/lookup). One
+        // instance, so MusicBrainz's one-request-a-second limit is honoured across
+        // both. It needs no key and does nothing until music is used.
+        let musicbrainz = match config.music.musicbrainz_url.as_deref() {
+            Some(url) => cellarr_meta::MusicBrainzSource::with_base_url(
+                cellarr_meta::ReqwestFetcher::new("musicbrainz"),
+                url,
+            ),
+            None => cellarr_meta::MusicBrainzSource::new(cellarr_meta::ReqwestFetcher::new(
+                "musicbrainz",
+            )),
+        };
+        let music: std::sync::Arc<dyn cellarr_jobs::music_sync::MusicCatalogue> =
+            std::sync::Arc::new(cellarr_jobs::music_sync::MusicSync::new(
+                db.clone(),
+                musicbrainz,
+            ));
+        let handler_music = std::sync::Arc::clone(&music);
+
         let state = AppState::new_with_handler(db, auth, move |events| {
             let env = crate::pipeline::LivePipelineEnv::new(handler_db.clone());
             // Attach the scene-mapping provider so a fired job's Identify stage
@@ -230,13 +252,15 @@ impl Daemon {
             .with_resolver(handler_resolver)
             .with_auto_onboard(handler_metadata, auto_onboard, auto_onboard_limit)
             .with_max_active_downloads(max_active_downloads)
-            .with_upgrade_search(upgrade_search_limit);
+            .with_upgrade_search(upgrade_search_limit)
+            .with_music(handler_music);
             if let Some(provider) = handler_subtitles {
                 handler = handler.with_subtitles(provider, subtitle_languages);
             }
             std::sync::Arc::new(handler)
         })
         .with_metadata(metadata)
+        .with_music(music)
         .with_release_search(release_search);
         let release_grab = std::sync::Arc::new(
             crate::pipeline::LiveReleaseGrab::new(grab_db, grab_registry, state.events.clone())
@@ -318,8 +342,23 @@ impl Daemon {
             .context("reading bound listener address")?;
         info!(%addr, "API listener bound");
 
+        // 5. The Lidarr-compatible listener, when asked for.
+        let lidarr_listener = match config.music.lidarr_port {
+            Some(port) => {
+                let bind = config.music.lidarr_bind.unwrap_or(config.api.bind);
+                let addr = SocketAddr::new(bind, port);
+                let l = TcpListener::bind(addr)
+                    .await
+                    .with_context(|| format!("binding Lidarr-compatible listener on {addr}"))?;
+                info!(%addr, "Lidarr-compatible listener bound");
+                Some(l)
+            }
+            None => None,
+        };
+
         Ok(Self {
             listener,
+            lidarr_listener,
             state,
             addr,
         })
@@ -349,7 +388,10 @@ impl Daemon {
         F: std::future::Future<Output = ()> + Send + 'static,
     {
         let Daemon {
-            listener, state, ..
+            listener,
+            lidarr_listener,
+            state,
+            ..
         } = self;
 
         // Start the scheduler tick loop on its own task; a shutdown handle lets us
@@ -414,8 +456,28 @@ impl Daemon {
         // pool is shared, so closing it here closes it everywhere.
         let db = state.db.clone();
 
+        // The Lidarr-compatible listener runs beside the main one and stops with it.
+        let (lidarr_stop_tx, lidarr_stop_rx) = tokio::sync::oneshot::channel::<()>();
+        let lidarr_task = lidarr_listener.map(|l| {
+            let lidarr_state = state.clone();
+            tokio::spawn(async move {
+                let stop = async move {
+                    let _ = lidarr_stop_rx.await;
+                };
+                if let Err(e) =
+                    cellarr_api::serve_lidarr_with_shutdown(l, lidarr_state, stop).await
+                {
+                    warn!(error = %e, "Lidarr-compatible listener failed");
+                }
+            })
+        });
+
         // Serve with axum's graceful-shutdown hook driven by the caller's signal.
         let serve_result = cellarr_api::serve_with_shutdown(listener, state, shutdown).await;
+        let _ = lidarr_stop_tx.send(());
+        if let Some(task) = lidarr_task {
+            let _ = task.await;
+        }
 
         // --- Graceful shutdown ------------------------------------------------
         // Stop ticking new jobs; in-flight ones (run sequentially within a tick)
@@ -456,6 +518,12 @@ async fn register_recurring(state: &AppState) -> Result<()> {
         .add_cron(JobKind::MissingItemSearch, "@daily", RetryPolicy::default())
         .await
         .context("registering MissingItemSearch")?;
+    // The slow background music sync: refresh stale artists and fetch missing track
+    // lists a few at a time. Inert (a no-op success) when no music is configured.
+    scheduler
+        .add_cron(JobKind::FillTracks, "*/10 * * * *", RetryPolicy::default())
+        .await
+        .context("registering FillTracks")?;
     scheduler
         .add_cron(JobKind::DiskSpaceCheck, "@hourly", RetryPolicy::default())
         .await

@@ -38,6 +38,9 @@ pub fn build_media_registry(db: &Database) -> MediaRegistry {
         DbContentLookup::new(db.clone()),
         DbMetadataLookup::new(db.clone()),
     ));
+    registry.register(cellarr_media::MusicModule::new(
+        cellarr_jobs::music_lookup::DbMusicLookup::new(db.clone()),
+    ));
     registry
 }
 

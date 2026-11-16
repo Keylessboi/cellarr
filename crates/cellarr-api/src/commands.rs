@@ -94,6 +94,8 @@ pub fn command_name(kind: &JobKind) -> &'static str {
         JobKind::ManualSearch { .. } => "ManualSearch",
         JobKind::SubtitleScan => "SubtitleScan",
         JobKind::SubtitleSearch { .. } => "SubtitleSearch",
+        JobKind::RefreshArtist { .. } => "RefreshArtist",
+        JobKind::FillTracks => "FillTracks",
     }
 }
 

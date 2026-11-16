@@ -62,6 +62,9 @@ pub struct Config {
     /// Media-management file-handling settings (the recycle-bin path a delete
     /// moves removed media into instead of unlinking).
     pub media_management: MediaManagementConfig,
+    /// Music (MusicBrainz) and the Lidarr-compatible listener.
+    #[serde(default)]
+    pub music: MusicConfig,
     /// Optional path to a declarative **managed-config** file (config-as-code).
     /// When set, the daemon reconciles its DB from this file on boot (after
     /// migrations, before serving): tags/root folders/libraries/quality
@@ -135,6 +138,25 @@ pub struct ApiConfig {
     /// The API key required on mutating endpoints. `None` (the default) leaves
     /// auth disabled for a single-user local first run; setting it enforces auth.
     pub api_key: Option<String>,
+}
+
+/// Music settings.
+///
+/// MusicBrainz needs no key. `lidarr_port` is how cellarr replaces a Lidarr: set
+/// it (conventionally to Lidarr's own `8686`) and a second listener serves the
+/// Lidarr-compatible API at `/api/v1` on that port, so Prowlarr, Octo and any
+/// script pointed at the old Lidarr URL keep working unchanged. Unset (the
+/// default) the face is only reachable at `/lidarr/api/v1` on the main port.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MusicConfig {
+    /// A MusicBrainz mirror's web-service root, instead of the public service.
+    pub musicbrainz_url: Option<String>,
+    /// The interface the Lidarr-compatible listener binds. Defaults to the main
+    /// API's bind address.
+    pub lidarr_bind: Option<IpAddr>,
+    /// The port of the Lidarr-compatible listener; `None` disables it.
+    pub lidarr_port: Option<u16>,
 }
 
 /// Logging settings.
@@ -257,6 +279,7 @@ impl Default for Config {
             tmdb: TmdbConfig::default(),
             subtitles: SubtitlesConfig::default(),
             media_management: MediaManagementConfig::default(),
+            music: MusicConfig::default(),
             managed_config_path: None,
             max_active_downloads: None,
             upgrade_search_limit: None,

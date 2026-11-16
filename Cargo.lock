@@ -412,6 +412,7 @@ dependencies = [
  "cellarr-fs",
  "cellarr-indexers",
  "cellarr-jobs",
+ "cellarr-meta",
  "cellarr-parse",
  "futures",
  "reqwest",

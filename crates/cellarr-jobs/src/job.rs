@@ -59,6 +59,16 @@ pub enum JobKind {
         /// The content node (UUID string) to fetch subtitles for.
         content_id: String,
     },
+    /// Re-read one music artist's albums (and fetch tracks for albums that lack
+    /// them) from MusicBrainz.
+    RefreshArtist {
+        /// The artist's content node (UUID string).
+        content_id: String,
+    },
+    /// The slow background pass that fetches the track list of albums that have
+    /// none, a few at a time, so a large migrated library fills in without a
+    /// burst of requests.
+    FillTracks,
 }
 
 impl JobKind {
@@ -71,7 +81,9 @@ impl JobKind {
             JobKind::RssSync | JobKind::MissingItemSearch | JobKind::ManualSearch { .. } => {
                 "indexer"
             }
-            JobKind::MetadataRefresh => "metadata",
+            JobKind::MetadataRefresh | JobKind::RefreshArtist { .. } | JobKind::FillTracks => {
+                "metadata"
+            }
             // Pure database maintenance — its own bucket so it never competes with
             // acquisition or metadata work.
             JobKind::PruneDecisionLog => "database",
@@ -102,6 +114,8 @@ impl JobKind {
             JobKind::ManualSearch { content_id } => format!("manual_search:{content_id}"),
             JobKind::SubtitleScan => "subtitle_scan".into(),
             JobKind::SubtitleSearch { content_id } => format!("subtitle_search:{content_id}"),
+            JobKind::RefreshArtist { content_id } => format!("refresh_artist:{content_id}"),
+            JobKind::FillTracks => "fill_tracks".into(),
         }
     }
 }

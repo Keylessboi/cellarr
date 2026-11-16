@@ -1282,6 +1282,282 @@ impl MusicRepo {
         Ok(out)
     }
 
+    /// Albums that have no track list yet, monitored ones first.
+    ///
+    /// # Errors
+    /// Returns a [`DbError`] on query failure.
+    pub async fn albums_without_tracks(&self, limit: usize) -> Result<Vec<Album>> {
+        let sql = format!(
+            "SELECT {ALBUM_COLS} FROM album_meta al JOIN content c ON c.id = al.content_id
+             WHERE al.tracks_fetched_at IS NULL
+             ORDER BY c.monitored DESC, al.id ASC LIMIT ?1"
+        );
+        let rows = sqlx::query(&pq(&sql))
+            .bind(i64::try_from(limit).unwrap_or(i64::MAX))
+            .fetch_all(&self.pool)
+            .await?;
+        rows.into_iter().map(row_to_album).collect()
+    }
+
+    /// The artist an album belongs to, by the album's content id.
+    ///
+    /// # Errors
+    /// Returns a [`DbError`] on query failure.
+    pub async fn artist_of_album(&self, album: ContentId) -> Result<Option<Artist>> {
+        self.artist_where(
+            "a.content_id = (SELECT artist_content_id FROM album_meta WHERE content_id = ?1)",
+            ArtistKey::Text(album.to_string()),
+        )
+        .await
+    }
+
+    // --- quality-profile integer ids ------------------------------------------
+
+    /// The integer id of a quality profile, assigned on first use.
+    ///
+    /// # Errors
+    /// Returns a [`DbError`] on write failure.
+    pub async fn profile_seq(&self, profile: QualityProfileId) -> Result<i64> {
+        self.write(move |conn| {
+            Box::pin(async move {
+                let found = sqlx::query(&pq(
+                    "SELECT seq FROM quality_profile_seq WHERE profile_id = ?1",
+                ))
+                .bind(profile.to_string())
+                .fetch_optional(&mut *conn)
+                .await?;
+                if let Some(row) = found {
+                    return Ok(row.try_get::<i64, _>("seq")?);
+                }
+                let next = next_seq(conn, "quality_profile", None).await?;
+                sqlx::query(&pq(
+                    "INSERT INTO quality_profile_seq (profile_id, seq) VALUES (?1, ?2)",
+                ))
+                .bind(profile.to_string())
+                .bind(next)
+                .execute(&mut *conn)
+                .await?;
+                Ok(next)
+            })
+        })
+        .await
+    }
+
+    /// Give a profile a specific integer id (a migration preserving the source
+    /// install's ids). Fails if the integer or the profile is already assigned
+    /// differently.
+    ///
+    /// # Errors
+    /// Returns a [`DbError`] on write failure or conflict.
+    pub async fn claim_profile_seq(&self, profile: QualityProfileId, seq: i64) -> Result<()> {
+        self.write(move |conn| {
+            Box::pin(async move {
+                next_seq(conn, "quality_profile", Some(seq)).await?;
+                sqlx::query(&pq(
+                    "INSERT INTO quality_profile_seq (profile_id, seq) VALUES (?1, ?2)",
+                ))
+                .bind(profile.to_string())
+                .bind(seq)
+                .execute(&mut *conn)
+                .await?;
+                Ok(())
+            })
+        })
+        .await
+    }
+
+    /// The profile an integer id names.
+    ///
+    /// # Errors
+    /// Returns a [`DbError`] on query failure.
+    pub async fn profile_by_seq(&self, seq: i64) -> Result<Option<QualityProfileId>> {
+        let row = sqlx::query(&pq(
+            "SELECT profile_id FROM quality_profile_seq WHERE seq = ?1",
+        ))
+        .bind(seq)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.map(|r| {
+            let s: String = r.try_get("profile_id")?;
+            Ok(QualityProfileId::from_uuid(parse_uuid("profile_id", &s)?))
+        })
+        .transpose()
+    }
+
+    /// Every assigned `(profile, integer id)` pair.
+    ///
+    /// # Errors
+    /// Returns a [`DbError`] on query failure.
+    pub async fn profile_seqs(&self) -> Result<HashMap<QualityProfileId, i64>> {
+        let rows = sqlx::query(&pq("SELECT profile_id, seq FROM quality_profile_seq"))
+            .fetch_all(&self.pool)
+            .await?;
+        rows.into_iter()
+            .map(|r| {
+                let s: String = r.try_get("profile_id")?;
+                Ok((
+                    QualityProfileId::from_uuid(parse_uuid("profile_id", &s)?),
+                    r.try_get("seq")?,
+                ))
+            })
+            .collect()
+    }
+
+    // --- history --------------------------------------------------------------
+
+    /// A page of history for music content, newest first, with the total.
+    ///
+    /// `album` / `artist` narrow to one album or all of an artist's albums;
+    /// `kinds` keeps only events of those names (`grabbed`, `imported`, …); an
+    /// empty `kinds` keeps every event.
+    ///
+    /// # Errors
+    /// Returns a [`DbError`] on query/decode failure.
+    pub async fn history_page(
+        &self,
+        album: Option<ContentId>,
+        artist: Option<ContentId>,
+        kinds: &[&str],
+        since: Option<&str>,
+        offset: u64,
+        limit: u64,
+    ) -> Result<(u64, Vec<cellarr_core::HistoryRecord>)> {
+        let mut clauses = vec![
+            "h.content_id IN (SELECT content_id FROM album_meta)".to_string(),
+        ];
+        let mut binds: Vec<String> = Vec::new();
+        let mut next = |value: String, binds: &mut Vec<String>| {
+            binds.push(value);
+            binds.len()
+        };
+        if let Some(album) = album {
+            let n = next(album.to_string(), &mut binds);
+            clauses.push(format!("h.content_id = ?{n}"));
+        }
+        if let Some(artist) = artist {
+            let n = next(artist.to_string(), &mut binds);
+            clauses.push(format!(
+                "h.content_id IN (SELECT content_id FROM album_meta WHERE artist_content_id = ?{n})"
+            ));
+        }
+        if let Some(since) = since {
+            let n = next(since.to_string(), &mut binds);
+            clauses.push(format!("h.at > ?{n}"));
+        }
+        if !kinds.is_empty() {
+            let mut ors = Vec::new();
+            for kind in kinds {
+                let n = next(format!("{{\"event\":\"{kind}\"%"), &mut binds);
+                ors.push(format!("h.event LIKE ?{n}"));
+            }
+            clauses.push(format!("({})", ors.join(" OR ")));
+        }
+        let predicate = clauses.join(" AND ");
+
+        let count_sql = format!("SELECT count(*) AS n FROM history h WHERE {predicate}");
+        let count_sql = pq(&count_sql);
+        let mut q = sqlx::query(&count_sql);
+        for b in &binds {
+            q = q.bind(b);
+        }
+        let total: i64 = q.fetch_one(&self.pool).await?.try_get("n")?;
+
+        let n_limit = binds.len() + 1;
+        let page_sql = format!(
+            "SELECT h.at, h.content_id, h.run_id, h.event FROM history h WHERE {predicate}
+             ORDER BY h.at DESC, h.id DESC LIMIT ?{n_limit} OFFSET ?{}",
+            n_limit + 1
+        );
+        let page_sql = pq(&page_sql);
+        let mut q = sqlx::query(&page_sql);
+        for b in &binds {
+            q = q.bind(b);
+        }
+        let rows = q
+            .bind(i64::try_from(limit).unwrap_or(i64::MAX))
+            .bind(i64::try_from(offset).unwrap_or(i64::MAX))
+            .fetch_all(&self.pool)
+            .await?;
+        let records = rows
+            .into_iter()
+            .map(|row| {
+                let at: String = row.try_get("at")?;
+                let content: String = row.try_get("content_id")?;
+                let run: String = row.try_get("run_id")?;
+                let event: String = row.try_get("event")?;
+                Ok(cellarr_core::HistoryRecord {
+                    at: crate::convert::parse_time("at", &at)?,
+                    content_id: ContentId::from_uuid(parse_uuid("content_id", &content)?),
+                    run_id: cellarr_core::PipelineRunId::from_uuid(parse_uuid("run_id", &run)?),
+                    event: serde_json::from_str(&event)?,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok((u64::try_from(total).unwrap_or(0), records))
+    }
+
+    // --- quality ---------------------------------------------------------------
+
+    /// For every album that has files: the weakest quality rank among them, with
+    /// its artist's quality profile. An album is only as good as its worst track,
+    /// which is what "cutoff not met" asks about.
+    ///
+    /// # Errors
+    /// Returns a [`DbError`] on query failure.
+    pub async fn album_min_quality(&self) -> Result<Vec<(ContentId, u32, Option<QualityProfileId>)>> {
+        let rows = sqlx::query(&pq(
+            "SELECT tf.album_content_id AS album, min(mf.quality_rank) AS rank,
+                    ar.quality_profile_id AS profile
+             FROM track_file tf
+             JOIN media_file mf ON mf.id = tf.media_file_id
+             JOIN artist_meta ar ON ar.content_id = tf.artist_content_id
+             GROUP BY tf.album_content_id, ar.quality_profile_id",
+        ))
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter()
+            .map(|r| {
+                let album: String = r.try_get("album")?;
+                let rank: Option<i64> = r.try_get("rank")?;
+                let profile: Option<String> = r.try_get("profile")?;
+                Ok((
+                    ContentId::from_uuid(parse_uuid("album", &album)?),
+                    u32::try_from(rank.unwrap_or(0)).unwrap_or(0),
+                    profile
+                        .map(|p| parse_uuid("profile", &p).map(QualityProfileId::from_uuid))
+                        .transpose()?,
+                ))
+            })
+            .collect()
+    }
+
+    /// Albums by content id, in one query.
+    ///
+    /// # Errors
+    /// Returns a [`DbError`] on query failure.
+    pub async fn albums_by_content(&self, ids: &[ContentId]) -> Result<Vec<Album>> {
+        let mut out = Vec::with_capacity(ids.len());
+        for chunk in ids.chunks(400) {
+            let placeholders = (1..=chunk.len())
+                .map(|i| format!("?{i}"))
+                .collect::<Vec<_>>()
+                .join(",");
+            let sql = format!(
+                "SELECT {ALBUM_COLS} FROM album_meta al JOIN content c ON c.id = al.content_id
+                 WHERE al.content_id IN ({placeholders}) ORDER BY al.id ASC"
+            );
+            let sql = pq(&sql);
+            let mut q = sqlx::query(&sql);
+            for id in chunk {
+                q = q.bind(id.to_string());
+            }
+            for row in q.fetch_all(&self.pool).await? {
+                out.push(row_to_album(row)?);
+            }
+        }
+        Ok(out)
+    }
+
     // --- metadata profiles ---------------------------------------------------
 
     /// Every metadata profile. A database that has none yet reports the

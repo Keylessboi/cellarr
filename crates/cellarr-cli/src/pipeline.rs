@@ -156,6 +156,9 @@ pub struct LivePipelineHandler<E: PipelineEnv> {
     subtitles: Option<Arc<dyn cellarr_subtitles::SubtitleProvider>>,
     /// Wanted subtitle languages (ISO-639-1). Empty → nothing to fetch.
     subtitle_languages: Vec<String>,
+    /// The music catalogue (MusicBrainz sync), driving `RefreshArtist` and the
+    /// background track fill. `None` leaves those jobs inert.
+    music: Option<Arc<dyn cellarr_jobs::music_sync::MusicCatalogue>>,
 }
 
 impl<E: PipelineEnv> LivePipelineHandler<E> {
@@ -177,6 +180,90 @@ impl<E: PipelineEnv> LivePipelineHandler<E> {
             upgrade_search_limit: None,
             subtitles: None,
             subtitle_languages: Vec::new(),
+            music: None,
+        }
+    }
+
+    /// Attach the music catalogue.
+    #[must_use]
+    pub fn with_music(mut self, music: Arc<dyn cellarr_jobs::music_sync::MusicCatalogue>) -> Self {
+        self.music = Some(music);
+        self
+    }
+
+    /// `RefreshArtist`: re-read one artist's albums from MusicBrainz.
+    async fn refresh_artist(&self, content_id: &str) -> JobResult {
+        use cellarr_jobs::music_sync::CatalogueError;
+        let Some(music) = self.music.as_ref() else {
+            return JobResult::Success;
+        };
+        let Ok(uuid) = content_id.parse::<uuid::Uuid>() else {
+            return JobResult::Permanent {
+                detail: format!("refresh artist: bad id {content_id}"),
+            };
+        };
+        match music.refresh_artist(cellarr_core::ContentId::from_uuid(uuid)).await {
+            Ok(report) => {
+                if !report.new_albums.is_empty() {
+                    tracing::info!(
+                        artist = content_id,
+                        new_albums = report.new_albums.len(),
+                        "artist refreshed; new albums found"
+                    );
+                }
+                JobResult::Success
+            }
+            Err(CatalogueError::NotFound(detail)) => JobResult::Permanent { detail },
+            Err(e) => JobResult::Retryable { detail: e.to_string() },
+        }
+    }
+
+    /// `FillTracks`: the slow background music sync. Re-reads the artists that
+    /// have gone longest without a refresh, then fetches the track list of albums
+    /// that have none, a few of each per run. MusicBrainz allows one request a
+    /// second, so a large library fills in over hours rather than in a burst, and
+    /// nothing here is needed for the library to work in the meantime.
+    async fn fill_music(&self) -> JobResult {
+        const ARTISTS_PER_RUN: usize = 3;
+        const ALBUMS_PER_RUN: usize = 12;
+        const REFRESH_AFTER_HOURS: i64 = 24;
+        let Some(music) = self.music.as_ref() else {
+            return JobResult::Success;
+        };
+        let repo = self.db.music();
+        let cutoff = time::OffsetDateTime::now_utc() - time::Duration::hours(REFRESH_AFTER_HOURS);
+        let Ok(cutoff) = cutoff.format(&time::format_description::well_known::Rfc3339) else {
+            return JobResult::Success;
+        };
+        match repo.artists_due_for_refresh(&cutoff, ARTISTS_PER_RUN).await {
+            Ok(due) => {
+                for artist in due {
+                    if let Err(e) = music.refresh_artist(artist.content_id).await {
+                        // A failure is logged and the artist stays due; the next
+                        // run tries again, and one bad artist never blocks the rest.
+                        tracing::warn!(artist = artist.id, error = %e, "artist refresh failed");
+                        // Back off for the whole run if MusicBrainz is struggling.
+                        if matches!(e, cellarr_jobs::music_sync::CatalogueError::Metadata(_)) {
+                            return JobResult::Retryable { detail: e.to_string() };
+                        }
+                    }
+                }
+            }
+            Err(e) => return JobResult::Retryable { detail: e.to_string() },
+        }
+        match repo.albums_without_tracks(ALBUMS_PER_RUN).await {
+            Ok(albums) => {
+                for album in albums {
+                    if let Err(e) = music.ensure_tracks(album.content_id).await {
+                        tracing::warn!(album = album.id, error = %e, "track fetch failed");
+                        if matches!(e, cellarr_jobs::music_sync::CatalogueError::Metadata(_)) {
+                            return JobResult::Retryable { detail: e.to_string() };
+                        }
+                    }
+                }
+                JobResult::Success
+            }
+            Err(e) => JobResult::Retryable { detail: e.to_string() },
         }
     }
 
@@ -1994,6 +2081,8 @@ impl<E: PipelineEnv> JobHandler for LivePipelineHandler<E> {
                     Err(detail) => JobResult::Permanent { detail },
                 }
             }
+            JobKind::RefreshArtist { content_id } => self.refresh_artist(content_id).await,
+            JobKind::FillTracks => self.fill_music().await,
             // Not pipeline work: a benign success so the scheduler keeps its cadence.
             JobKind::DiskSpaceCheck => JobResult::Success,
         }
@@ -2014,6 +2103,8 @@ fn command_label(kind: &JobKind) -> &'static str {
         JobKind::ManualSearch { .. } => "ManualSearch",
         JobKind::SubtitleScan => "SubtitleScan",
         JobKind::SubtitleSearch { .. } => "SubtitleSearch",
+        JobKind::RefreshArtist { .. } => "RefreshArtist",
+        JobKind::FillTracks => "FillTracks",
     }
 }
 
@@ -2356,16 +2447,42 @@ impl LivePipelineEnv {
         let Some(library) = library else {
             return Ok(None);
         };
-        let Some(library_root) = library.root_folders.first().cloned() else {
+        // A music album is graded by its artist's own quality profile and lands under
+        // the root folder its artist lives in; every other node uses the library's
+        // first root and default profile.
+        let artist = if content.media_type == MediaType::Music {
+            self.db
+                .music()
+                .artist_of_album(content.id)
+                .await
+                .map_err(|e| format!("loading artist failed: {e}"))?
+        } else {
+            None
+        };
+        let library_root = artist
+            .as_ref()
+            .and_then(|a| {
+                library
+                    .root_folders
+                    .iter()
+                    .find(|r| !r.is_empty() && a.path.starts_with(r.as_str()))
+                    .cloned()
+            })
+            .or_else(|| library.root_folders.first().cloned());
+        let Some(library_root) = library_root else {
             // A library with no root folder cannot import; surfaced as not-ready
             // rather than picking an arbitrary path.
             return Ok(None);
         };
+        let profile_id = artist
+            .as_ref()
+            .and_then(|a| a.quality_profile_id)
+            .unwrap_or(library.default_quality_profile);
 
         let profile = self
             .db
             .profiles()
-            .get_profile(library.default_quality_profile)
+            .get_profile(profile_id)
             .await
             .map_err(|e| format!("loading quality profile failed: {e}"))?;
         let Some(profile) = profile else {

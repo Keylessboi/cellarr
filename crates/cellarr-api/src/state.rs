@@ -135,6 +135,10 @@ pub struct AppState {
     /// leaves the `/api/v3/log/file` surface reporting no log files; the daemon
     /// injects the reader bound to the rolling appender's directory.
     pub log_files: Option<Arc<crate::logfile::LogFiles>>,
+    /// The music catalogue (MusicBrainz sync), when music is configured.
+    pub music: Option<Arc<dyn cellarr_jobs::music_sync::MusicCatalogue>>,
+    /// The Lidarr-face command log: integer-id commands over scheduler jobs.
+    pub lidarr_commands: Arc<crate::lidarr::CommandLog>,
 }
 
 impl AppState {
@@ -193,6 +197,8 @@ impl AppState {
             recycle_bin_path: None,
             backup: None,
             log_files: None,
+            music: None,
+            lidarr_commands: Arc::new(crate::lidarr::CommandLog::default()),
         }
     }
 
@@ -200,6 +206,16 @@ impl AppState {
     /// v3 lookup/list resources resolve real titles and external ids. Builder
     /// form so the base [`AppState::new`] stays zero-config (offline) and tests
     /// can opt a mock in.
+    /// Attach the music catalogue the Lidarr face adds artists through.
+    #[must_use]
+    pub fn with_music(
+        mut self,
+        music: Arc<dyn cellarr_jobs::music_sync::MusicCatalogue>,
+    ) -> Self {
+        self.music = Some(music);
+        self
+    }
+
     #[must_use]
     pub fn with_metadata(mut self, metadata: Arc<dyn MetadataLookup>) -> Self {
         self.metadata = Some(metadata);

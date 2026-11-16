@@ -511,7 +511,7 @@ pub(crate) async fn ping() -> Json<Value> {
 // --- system/status ---------------------------------------------------------
 
 #[derive(Debug, Deserialize)]
-struct StatusQuery {
+pub(crate) struct StatusQuery {
     #[serde(rename = "libraryId")]
     library_id: Option<String>,
 }
@@ -749,7 +749,7 @@ pub(crate) async fn list_backups(State(fs): State<FaceState>) -> ApiResult<Json<
 /// The backup create body — `{ type }` is optional (the UI sends it); we treat any
 /// create as a manual backup.
 #[derive(Debug, Deserialize, Default)]
-struct BackupCreateBody {
+pub(crate) struct BackupCreateBody {
     #[serde(default)]
     #[allow(dead_code)]
     name: Option<String>,
@@ -893,7 +893,7 @@ pub(crate) async fn list_log_files(State(fs): State<FaceState>) -> ApiResult<Jso
 
 /// The `?limit=` (alias `?lines=`) query for a log tail read.
 #[derive(Debug, Deserialize, Default)]
-struct LogTailQuery {
+pub(crate) struct LogTailQuery {
     #[serde(default)]
     limit: Option<usize>,
     #[serde(default)]
@@ -985,7 +985,7 @@ pub(crate) fn v3_root_folder(rf: &cellarr_core::RootFolder) -> Value {
 
 /// v3 root-folder write body (`path`, optional `name`).
 #[derive(Debug, Deserialize)]
-struct RootFolderBody {
+pub(crate) struct RootFolderBody {
     #[serde(default)]
     path: Option<String>,
     #[serde(default)]
@@ -1067,7 +1067,7 @@ pub(crate) async fn get_tag(State(fs): State<FaceState>, Path(id): Path<String>)
 }
 
 #[derive(Debug, Deserialize)]
-struct TagBody {
+pub(crate) struct TagBody {
     label: String,
 }
 
@@ -1118,7 +1118,18 @@ pub(crate) async fn quality_profiles(State(fs): State<FaceState>) -> ApiResult<J
     // List every stored profile (not just the libraries' defaults) so a profile
     // created via the shim/UI shows up here without first being attached to a
     // library — the round-trip the management UI relies on.
-    let profiles = repo.list_profiles().await?;
+    // A profile that grades audio belongs to the Lidarr face, not to a video app.
+    let profiles: Vec<_> = repo
+        .list_profiles()
+        .await?
+        .into_iter()
+        .filter(|p| {
+            p.allowed_qualities.is_empty()
+                || p.allowed_qualities
+                    .iter()
+                    .any(|r| *r < cellarr_core::MUSIC_RANK_BASE)
+        })
+        .collect();
     let managed = managed_ids(&fs.state.db, managed_kind::QUALITY_PROFILE).await;
     let out = profiles
         .iter()
@@ -1190,6 +1201,7 @@ pub(crate) async fn quality_profile_schema(State(fs): State<FaceState>) -> Json<
     let items: Vec<Value> = ranking
         .qualities
         .iter()
+        .filter(|q| q.rank < cellarr_core::MUSIC_RANK_BASE)
         .map(|q| {
             json!({
                 "quality": { "id": q.rank, "name": face_quality_name(&q.name, fs.face), "source": "unknown", "resolution": 0 },
@@ -1201,7 +1213,13 @@ pub(crate) async fn quality_profile_schema(State(fs): State<FaceState>) -> Json<
     let mut schema = json!({
         "name": "",
         "upgradeAllowed": true,
-        "cutoff": ranking.qualities.last().map(|q| q.rank).unwrap_or(0),
+        "cutoff": ranking
+            .qualities
+            .iter()
+            .filter(|q| q.rank < cellarr_core::MUSIC_RANK_BASE)
+            .map(|q| q.rank)
+            .max()
+            .unwrap_or(0),
         "minFormatScore": 0,
         "cutoffFormatScore": 0,
         "minUpgradeFormatScore": 1,
@@ -1224,7 +1242,7 @@ pub(crate) async fn quality_profile_schema(State(fs): State<FaceState>) -> Json<
 /// fields (`language`, `formatItems`, …) are ignored — cellarr scores custom
 /// formats on the [`CustomFormat`] itself, which Recyclarr reads back separately.
 #[derive(Debug, Deserialize)]
-struct QualityProfileBody {
+pub(crate) struct QualityProfileBody {
     #[serde(default)]
     name: Option<String>,
     #[serde(rename = "upgradeAllowed", default = "default_true")]
@@ -1243,7 +1261,7 @@ struct QualityProfileBody {
 /// is the cellarr rank). Grouped items (the originals' nested `items[]`) are
 /// flattened — only leaf `quality.id`s that are `allowed` contribute a rank.
 #[derive(Debug, Deserialize)]
-struct ProfileItemBody {
+pub(crate) struct ProfileItemBody {
     #[serde(default)]
     quality: Option<ProfileQualityBody>,
     #[serde(default)]
@@ -1253,7 +1271,7 @@ struct ProfileItemBody {
 }
 
 #[derive(Debug, Deserialize)]
-struct ProfileQualityBody {
+pub(crate) struct ProfileQualityBody {
     #[serde(default)]
     id: Option<u32>,
 }
@@ -1288,6 +1306,7 @@ pub(crate) fn profile_from_body(
         allowed_qualities = cellarr_core::QualityRanking::default()
             .qualities
             .iter()
+            .filter(|q| q.rank < cellarr_core::MUSIC_RANK_BASE)
             .map(|q| q.rank)
             .collect();
     }
@@ -1406,6 +1425,7 @@ pub(crate) async fn quality_definitions(State(fs): State<FaceState>) -> ApiResul
     let out: Vec<Value> = ranking
         .qualities
         .iter()
+        .filter(|q| q.rank < cellarr_core::MUSIC_RANK_BASE)
         .map(|q| {
             let name = face_quality_name(&q.name, fs.face);
             let title = face_quality_name(q.display_title(), fs.face);
@@ -1430,7 +1450,7 @@ pub(crate) async fn quality_definitions(State(fs): State<FaceState>) -> ApiResul
 /// is normalized to "unset" so a default GET round-trips unchanged.
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
-struct QualityDefinitionBody {
+pub(crate) struct QualityDefinitionBody {
     #[serde(default)]
     id: Option<u32>,
     #[serde(default)]
@@ -1830,14 +1850,14 @@ const RELEASE_TYPE_TOKENS: &[&str] = &[
 /// is one we model; unknown spec kinds are preserved as release-title conditions
 /// so the round-trip never loses a format.
 #[derive(Debug, Deserialize)]
-struct CustomFormatBody {
+pub(crate) struct CustomFormatBody {
     name: String,
     #[serde(default)]
     specifications: Vec<SpecBody>,
 }
 
 #[derive(Debug, Deserialize)]
-struct SpecBody {
+pub(crate) struct SpecBody {
     #[serde(default)]
     implementation: Option<String>,
     #[serde(default)]
@@ -1849,7 +1869,7 @@ struct SpecBody {
 }
 
 #[derive(Debug, Deserialize)]
-struct FieldBody {
+pub(crate) struct FieldBody {
     #[serde(default)]
     name: Option<String>,
     #[serde(default)]
@@ -2041,7 +2061,7 @@ pub(crate) async fn find_custom_format_by_numeric(
 /// The body of `POST /customformat/test`: a release title and an optional set of
 /// parsed-field overrides the editor's live preview supplies.
 #[derive(Debug, Deserialize)]
-struct CustomFormatTestBody {
+pub(crate) struct CustomFormatTestBody {
     /// The raw release title to evaluate every CF against.
     #[serde(default)]
     title: String,
@@ -2190,7 +2210,7 @@ pub(crate) fn v3_delay_profile(dp: &cellarr_core::DelayProfile) -> Value {
 /// The v3 delay-profile write body (the Sonarr/Radarr shape).
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct DelayProfileBody {
+pub(crate) struct DelayProfileBody {
     #[serde(default)]
     enabled: Option<bool>,
     #[serde(default)]
@@ -2353,7 +2373,7 @@ pub(crate) fn v3_release_profile(rp: &cellarr_core::ReleaseProfile) -> Value {
 
 /// One `{key, value}` preferred-term entry in the v3 release-profile write body.
 #[derive(Debug, Deserialize)]
-struct PreferredTermBody {
+pub(crate) struct PreferredTermBody {
     /// The preferred term (the `key`).
     key: String,
     /// The score the term contributes (the `value`).
@@ -2365,7 +2385,7 @@ struct PreferredTermBody {
 /// `[{key, value}]` form the ecosystem sends.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ReleaseProfileBody {
+pub(crate) struct ReleaseProfileBody {
     #[serde(default)]
     name: Option<String>,
     #[serde(default)]
@@ -2707,7 +2727,7 @@ pub(crate) async fn indexer_schema(State(fs): State<FaceState>) -> Json<Vec<Valu
 /// v3 indexer write body (the Prowlarr-pushed shape). We map the `fields[]`
 /// back into cellarr's `settings` JSON and the identity onto an [`IndexerConfig`].
 #[derive(Debug, Deserialize)]
-struct IndexerBody {
+pub(crate) struct IndexerBody {
     #[serde(default)]
     name: Option<String>,
     #[serde(default)]
@@ -2744,7 +2764,7 @@ const fn default_true() -> bool {
 /// validation when pushing. cellarr never validates connectivity inline on the
 /// shim path, so this is accepted but informational.
 #[derive(Debug, Deserialize, Default)]
-struct ForceSaveQuery {
+pub(crate) struct ForceSaveQuery {
     #[serde(rename = "forceSave", default)]
     force_save: Option<bool>,
 }
@@ -3234,7 +3254,7 @@ pub(crate) async fn download_client_schema() -> Json<Vec<Value>> {
 /// [`DownloadClientConfig`]; `category` is lifted out of the fields into the typed
 /// column.
 #[derive(Debug, Deserialize)]
-struct DownloadClientBody {
+pub(crate) struct DownloadClientBody {
     #[serde(default)]
     name: Option<String>,
     #[serde(default)]
@@ -3417,7 +3437,7 @@ pub(crate) async fn list_remote_path_mappings(State(fs): State<FaceState>) -> Ap
 
 /// v3 remote-path-mapping write body (`host`/`remotePath`/`localPath`).
 #[derive(Debug, Deserialize)]
-struct RemotePathMappingBody {
+pub(crate) struct RemotePathMappingBody {
     #[serde(default)]
     host: Option<String>,
     #[serde(rename = "remotePath", default)]
@@ -3548,7 +3568,7 @@ pub(crate) async fn get_naming_config(State(fs): State<FaceState>) -> ApiResult<
 /// v3 naming-config write body. Every field is optional so a partial PUT leaves the
 /// other formats untouched (the *arr config endpoints merge rather than replace).
 #[derive(Debug, Deserialize)]
-struct NamingConfigBody {
+pub(crate) struct NamingConfigBody {
     #[serde(rename = "movieFileFormat", default)]
     movie_file_format: Option<String>,
     #[serde(rename = "seriesFolderFormat", default)]
@@ -3637,7 +3657,7 @@ pub(crate) async fn get_naming_tokens() -> Json<Value> {
 /// v3 naming-preview body: a candidate `format`, the `mediaType`/target it applies
 /// to, and an optional `sampleContext` overriding the built-in token examples.
 #[derive(Debug, Deserialize)]
-struct NamingPreviewBody {
+pub(crate) struct NamingPreviewBody {
     format: String,
     #[serde(rename = "mediaType", default)]
     media_type: Option<String>,
@@ -3710,7 +3730,7 @@ pub(crate) async fn get_media_management(State(fs): State<FaceState>) -> ApiResu
 /// `permissions`, and the Extra Files card saves `extraFiles`, each independently
 /// without clobbering the others.
 #[derive(Debug, Deserialize)]
-struct MediaManagementBody {
+pub(crate) struct MediaManagementBody {
     #[serde(rename = "recycleBinPath", default)]
     recycle_bin_path: Option<Option<String>>,
     #[serde(default)]
@@ -3983,7 +4003,7 @@ pub(crate) async fn notification_schema() -> Json<Vec<Value>> {
 /// v3 notification write body. The `fields[]` map into `settings` (the webhook
 /// `url` lives here); the `on*` flags map onto cellarr's `on_events` keys.
 #[derive(Debug, Deserialize)]
-struct NotificationBody {
+pub(crate) struct NotificationBody {
     #[serde(default)]
     name: Option<String>,
     #[serde(default)]
@@ -4359,7 +4379,7 @@ pub(crate) async fn import_list_schema(State(fs): State<FaceState>) -> Json<Vec<
 /// [`ImportListConfig`]; `cleanLibraryLevel` maps onto the [`CleanAction`]
 /// (defaulting to the safe `None`).
 #[derive(Debug, Deserialize)]
-struct ImportListBody {
+pub(crate) struct ImportListBody {
     #[serde(default)]
     name: Option<String>,
     #[serde(default)]
@@ -4607,7 +4627,7 @@ pub(crate) async fn list_import_list_exclusions(State(fs): State<FaceState>) -> 
 /// v3 import-list-exclusion write body. The ecosystem posts the external id under
 /// the media type's field (`tvdbId`/`tmdbId`/`imdbId`) plus a title.
 #[derive(Debug, Deserialize)]
-struct ImportListExclusionBody {
+pub(crate) struct ImportListExclusionBody {
     #[serde(default)]
     title: Option<String>,
     #[serde(rename = "tvdbId", default)]
@@ -4714,7 +4734,7 @@ pub(crate) async fn delete_blocklist_item(
 /// v3 `DELETE /blocklist/bulk` — clear several blocklisted releases at once (the
 /// shape the UI's "remove selected" posts: `{ "ids": [..] }`).
 #[derive(Debug, Deserialize)]
-struct BlocklistBulkBody {
+pub(crate) struct BlocklistBulkBody {
     #[serde(default)]
     ids: Vec<i64>,
 }
@@ -4739,7 +4759,7 @@ pub(crate) async fn delete_blocklist_bulk(
 // --- lookup ----------------------------------------------------------------
 
 #[derive(Debug, Deserialize)]
-struct LookupQuery {
+pub(crate) struct LookupQuery {
     term: Option<String>,
 }
 
@@ -5045,7 +5065,7 @@ pub(crate) async fn list_resources(fs: &FaceState, surface: MediaType) -> ApiRes
 /// a paged envelope, so *arr clients that do pass params still get an array); it is
 /// just the requested slice.
 #[derive(Debug, Deserialize)]
-struct PageQuery {
+pub(crate) struct PageQuery {
     // Held as strings and parsed leniently (see `paginate`), so a client that
     // sends a non-numeric `page`/`pageSize` gets the full array rather than a 400
     // — these endpoints must never reject a query the way the *arr originals never
@@ -5116,7 +5136,7 @@ pub(crate) async fn list_movies(
 /// (Bazarr, the content-detail UI's monitor tree) pass `seriesId`; cellarr also
 /// accepts the `contentId` spelling for its own face.
 #[derive(Debug, Deserialize)]
-struct EpisodeListQuery {
+pub(crate) struct EpisodeListQuery {
     #[serde(rename = "seriesId", default)]
     series_id: Option<String>,
     #[serde(rename = "contentId", default)]
@@ -5517,7 +5537,7 @@ pub(crate) fn iso_to_utc(date: &str) -> String {
 /// field the UI toggles — `monitored` — and ignores the rest of the (large) v3
 /// movie/series body a client may round-trip back.
 #[derive(Debug, Deserialize)]
-struct ContentUpdateBody {
+pub(crate) struct ContentUpdateBody {
     #[serde(default)]
     monitored: Option<bool>,
     /// The tag ids to associate with this movie/series (the v3 `tags` array).
@@ -5585,7 +5605,7 @@ pub(crate) async fn update_content(
 /// movie/series delete. Both default to `false` (the *arr default): the record is
 /// removed but the files stay and the title may be re-added by an import list.
 #[derive(Debug, Deserialize)]
-struct DeleteContentQuery {
+pub(crate) struct DeleteContentQuery {
     /// Whether to remove the media files from disk (recycled when a recycle bin
     /// is configured, otherwise unlinked).
     #[serde(rename = "deleteFiles", default)]
@@ -5759,7 +5779,7 @@ pub(crate) async fn add_content_exclusion(
 // --- add -------------------------------------------------------------------
 
 #[derive(Debug, Deserialize)]
-struct AddBody {
+pub(crate) struct AddBody {
     title: Option<String>,
     #[serde(rename = "qualityProfileId")]
     quality_profile_id: Option<String>,
@@ -5803,7 +5823,7 @@ struct AddBody {
 /// `lastSeason`/`pilot`/`none`); the search-on-add flags are accepted and ignored
 /// (the daemon's monitored-missing sweep covers acquisition).
 #[derive(Debug, Deserialize)]
-struct AddOptions {
+pub(crate) struct AddOptions {
     #[serde(default)]
     monitor: Option<cellarr_core::MonitorOption>,
 }
@@ -6018,7 +6038,7 @@ pub(crate) async fn pick_library(
 // --- command ---------------------------------------------------------------
 
 #[derive(Debug, Deserialize)]
-struct CommandBody {
+pub(crate) struct CommandBody {
     name: String,
     #[serde(rename = "movieId")]
     movie_id: Option<String>,
@@ -6093,7 +6113,7 @@ pub(crate) async fn list_commands(State(fs): State<FaceState>) -> ApiResult<Json
 /// (Sonarr), and the cellarr-native `contentId` — all carrying the same cellarr
 /// [`ContentId`] uuid.
 #[derive(Debug, Deserialize)]
-struct ReleaseQuery {
+pub(crate) struct ReleaseQuery {
     #[serde(rename = "contentId")]
     content_id: Option<String>,
     #[serde(rename = "movieId")]
@@ -6232,7 +6252,7 @@ pub(crate) fn v3_release(
 /// apps use interchangeably (`movieId`/`seriesId`/`contentId`), all carrying the
 /// same cellarr [`ContentId`] uuid — matching the `GET /api/v3/release` query.
 #[derive(Debug, Deserialize)]
-struct GrabReleaseBody {
+pub(crate) struct GrabReleaseBody {
     /// The indexer-advertised guid of the chosen release (falls back to its
     /// download URL when the indexer advertises no guid). Optional in the wire
     /// shape so a missing guid is a structured 400 from the handler rather than an
@@ -6336,7 +6356,7 @@ pub(crate) async fn grab_release(
 /// The `GET /api/v3/manualimport` query: the loose folder to scan for media files
 /// (the Sonarr/Radarr manual-import `folder` parameter).
 #[derive(Debug, Deserialize)]
-struct ManualImportQuery {
+pub(crate) struct ManualImportQuery {
     folder: Option<String>,
 }
 
@@ -6431,13 +6451,13 @@ pub(crate) fn v3_manual_import_row(c: &cellarr_jobs::ManualImportCandidate, face
 /// the *arr `movieId`/`seriesId` spellings), confirming or overriding the scan's
 /// suggestion.
 #[derive(Debug, Deserialize)]
-struct ManualImportCommitBody {
+pub(crate) struct ManualImportCommitBody {
     #[serde(default)]
     files: Vec<ManualImportFile>,
 }
 
 #[derive(Debug, Deserialize)]
-struct ManualImportFile {
+pub(crate) struct ManualImportFile {
     path: Option<String>,
     #[serde(rename = "contentId", default)]
     content_id: Option<String>,
@@ -6538,7 +6558,7 @@ pub(crate) async fn manual_import_commit(
 /// The `PUT /api/v3/episode/monitor` body — the Sonarr monitor-toggle shape: a set
 /// of episode ids and the monitored flag to apply to all of them.
 #[derive(Debug, Deserialize)]
-struct EpisodeMonitorBody {
+pub(crate) struct EpisodeMonitorBody {
     #[serde(rename = "episodeIds", default)]
     episode_ids: Vec<String>,
     #[serde(default)]
@@ -6626,7 +6646,7 @@ pub(crate) async fn walk_episode_nodes(
 /// The `PUT /api/v3/season/monitor` body — toggle monitoring for one season and
 /// (by default) every episode beneath it, the Sonarr season-toggle behavior.
 #[derive(Debug, Deserialize)]
-struct SeasonMonitorBody {
+pub(crate) struct SeasonMonitorBody {
     #[serde(rename = "seasonId", default)]
     season_id: Option<String>,
     #[serde(default)]
@@ -6741,7 +6761,7 @@ pub(crate) async fn resolve_season_node(
 /// The `GET /api/v3/calendar` query: an optional `[start, end]` ISO date window
 /// (the originals' calendar paging) plus the usual `libraryId` surface hint.
 #[derive(Debug, Deserialize)]
-struct CalendarQuery {
+pub(crate) struct CalendarQuery {
     #[serde(default)]
     start: Option<String>,
     #[serde(default)]
@@ -6991,11 +7011,11 @@ pub(crate) async fn resolve_queue_grab(state: &AppState, raw: &str) -> ApiResult
 /// the client (and its data) and whether to blocklist the release so it is never
 /// re-grabbed (the Sonarr/Radarr queue-remove options).
 #[derive(Debug, Deserialize)]
-struct QueueRemoveQuery {
+pub(crate) struct QueueRemoveQuery {
     #[serde(rename = "removeFromClient", default)]
-    remove_from_client: Option<bool>,
+    pub(crate) remove_from_client: Option<bool>,
     #[serde(default)]
-    blocklist: Option<bool>,
+    pub(crate) blocklist: Option<bool>,
 }
 
 /// v3 `DELETE /api/v3/queue/{id}` — **remove a queue item**.
@@ -7070,7 +7090,7 @@ pub(crate) async fn delete_queue_item(
 /// The `PUT /api/v3/queue/{id}` change-category body: the new download category to
 /// tag the queued download with.
 #[derive(Debug, Deserialize)]
-struct QueueCategoryBody {
+pub(crate) struct QueueCategoryBody {
     #[serde(default)]
     category: Option<String>,
 }
@@ -7105,7 +7125,7 @@ pub(crate) async fn update_queue_category(
 /// the on-disk download path; the user picks the content match (or accepts the
 /// grab's own content ref).
 #[derive(Debug, Deserialize)]
-struct QueueGrabBody {
+pub(crate) struct QueueGrabBody {
     /// The queue id (numeric projection or uuid) of the completed download.
     /// Accepts a JSON number (the *arr-native numeric id) or a string.
     #[serde(default)]
@@ -7226,7 +7246,7 @@ pub(crate) fn grab_numeric_id(id: &str) -> i64 {
 }
 
 #[derive(Debug, Deserialize)]
-struct HistoryQuery {
+pub(crate) struct HistoryQuery {
     #[serde(rename = "movieId")]
     movie_id: Option<String>,
     #[serde(rename = "seriesId")]
@@ -7471,7 +7491,7 @@ pub(crate) fn slug(title: &str) -> String {
 /// optional `path` mirrors the originals' field (a full path whose file name is
 /// parsed when `title` is absent).
 #[derive(Debug, Deserialize)]
-struct ParseQuery {
+pub(crate) struct ParseQuery {
     #[serde(default)]
     title: Option<String>,
     #[serde(default)]
@@ -7774,7 +7794,7 @@ pub(crate) fn v3_media_file(
 /// The `?seriesId=` / `?movieId=` filter on the file-list resources, accepting
 /// both spellings plus cellarr's own `contentId`.
 #[derive(Debug, Deserialize)]
-struct FileListQuery {
+pub(crate) struct FileListQuery {
     #[serde(rename = "seriesId", default)]
     series_id: Option<String>,
     #[serde(rename = "movieId", default)]
@@ -8080,7 +8100,7 @@ pub(crate) async fn get_collection(
 /// profile a tool changes. Radarr also sends `searchOnAdd`/`minimumAvailability`
 /// (accepted and ignored — cellarr's monitored-missing sweep covers acquisition).
 #[derive(Debug, Deserialize, Default)]
-struct CollectionBody {
+pub(crate) struct CollectionBody {
     #[serde(default)]
     monitored: Option<bool>,
     #[serde(rename = "qualityProfileId", default)]
@@ -8200,7 +8220,7 @@ pub(crate) async fn get_metadata_consumer(
 /// `fields[]` set of per-artifact toggles; cellarr reads the single `enable` flag
 /// (mapped to `write_nfo`) and accepts the rest.
 #[derive(Debug, Deserialize, Default)]
-struct MetadataBody {
+pub(crate) struct MetadataBody {
     #[serde(default)]
     enable: Option<bool>,
 }
