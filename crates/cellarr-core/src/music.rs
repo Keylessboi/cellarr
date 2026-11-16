@@ -252,6 +252,72 @@ impl MetadataProfile {
     }
 }
 
+/// `(cellarr quality name, Lidarr quality id)`.
+///
+/// Lidarr numbers its qualities in its source, and stores those numbers in every
+/// profile and file record of an install. cellarr identifies a quality by name,
+/// so this is the bridge: the compatibility API speaks the numbers, and the
+/// migration reads them out of an existing database. It lives here, below both,
+/// so neither depends on the other for it.
+pub const LIDARR_QUALITY_IDS: &[(&str, u32)] = &[
+    ("Unknown", 0),
+    ("MP3-192", 1),
+    ("MP3-VBR-V0", 2),
+    ("MP3-256", 3),
+    ("MP3-320", 4),
+    ("MP3-160", 5),
+    ("FLAC", 6),
+    ("ALAC", 7),
+    ("MP3-VBR-V2", 8),
+    ("AAC-192", 9),
+    ("AAC-256", 10),
+    ("AAC-320", 11),
+    ("AAC-VBR", 12),
+    ("WAV", 13),
+    ("OGG Vorbis Q10", 14),
+    ("OGG Vorbis Q9", 15),
+    ("OGG Vorbis Q8", 16),
+    ("OGG Vorbis Q7", 17),
+    ("OGG Vorbis Q6", 18),
+    ("OGG Vorbis Q5", 19),
+    ("WMA", 20),
+    ("FLAC 24bit", 21),
+    ("MP3-128", 22),
+    ("MP3-96", 23),
+    ("MP3-80", 24),
+    ("MP3-64", 25),
+    ("MP3-56", 26),
+    ("MP3-48", 27),
+    ("MP3-40", 28),
+    ("MP3-32", 29),
+    ("MP3-24", 30),
+    ("MP3-16", 31),
+    ("MP3-8", 32),
+    ("MP3-112", 33),
+    ("MP3-224", 34),
+    ("APE", 35),
+    ("WavPack", 36),
+    ("ALAC 24bit", 37),
+];
+
+/// The Lidarr id of a cellarr quality name (0 — Unknown — when Lidarr has none).
+#[must_use]
+pub fn lidarr_quality_id(name: &str) -> u32 {
+    LIDARR_QUALITY_IDS
+        .iter()
+        .find(|(n, _)| n.eq_ignore_ascii_case(name))
+        .map_or(0, |(_, id)| *id)
+}
+
+/// The cellarr quality name a Lidarr quality id stands for.
+#[must_use]
+pub fn lidarr_quality_name(id: u32) -> Option<&'static str> {
+    LIDARR_QUALITY_IDS
+        .iter()
+        .find(|(_, i)| *i == id)
+        .map(|(n, _)| *n)
+}
+
 /// Every primary type MusicBrainz assigns a release group.
 pub const PRIMARY_ALBUM_TYPES: &[&str] = &["Album", "EP", "Single", "Broadcast", "Other"];
 

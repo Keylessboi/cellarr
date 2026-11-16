@@ -48,8 +48,9 @@ pub(crate) async fn read_indexers(
     kind: SourceKind,
 ) -> Result<Vec<IndexerConfig>> {
     let rows = sqlx::query(
-        "SELECT Id, Name, Implementation, Settings, Protocol, Priority, EnableRss
-         FROM Indexers ORDER BY Id ASC",
+        // `*`, not a column list: Radarr/Sonarr store `Protocol`, Lidarr derives it
+        // from the implementation and has no such column.
+        "SELECT * FROM Indexers ORDER BY Id ASC",
     )
     .fetch_all(pool)
     .await?;
@@ -106,8 +107,7 @@ pub(crate) async fn read_download_clients(
     kind: SourceKind,
 ) -> Result<Vec<DownloadClientConfig>> {
     let rows = sqlx::query(
-        "SELECT Id, Name, Implementation, Settings, Protocol, Priority, Enable
-         FROM DownloadClients ORDER BY Id ASC",
+        "SELECT * FROM DownloadClients ORDER BY Id ASC",
     )
     .fetch_all(pool)
     .await?;
@@ -151,13 +151,33 @@ fn protocol_of(row: &sqlx::sqlite::SqliteRow) -> Protocol {
             _ => Protocol::Usenet,
         };
     }
-    match row.try_get::<i64, _>("Protocol").ok() {
-        Some(1) => Protocol::Torrent,
-        _ => Protocol::Usenet,
+    if let Ok(n) = row.try_get::<i64, _>("Protocol") {
+        return if n == 1 { Protocol::Torrent } else { Protocol::Usenet };
+    }
+    // No `Protocol` column (Lidarr): it follows from what the entry is.
+    protocol_of_implementation(&opt_text(row, "Implementation").unwrap_or_default())
+}
+
+/// The protocol an indexer or download-client implementation speaks. The
+/// usenet ones are the short, well-known list; everything else (Torznab, every
+/// torrent client, torrent blackhole) is a torrent.
+fn protocol_of_implementation(implementation: &str) -> Protocol {
+    const USENET: &[&str] = &[
+        "newznab",
+        "sabnzbd",
+        "nzbget",
+        "nzbvortex",
+        "usenetblackhole",
+        "pneumatic",
+        "usenetdownloadstation",
+    ];
+    if USENET.contains(&implementation.to_ascii_lowercase().as_str()) {
+        Protocol::Usenet
+    } else {
+        Protocol::Torrent
     }
 }
 
-/// Parse the source `Settings` JSON blob, defaulting to an empty object.
 fn parse_settings(raw: Option<String>) -> serde_json::Value {
     raw.and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()))

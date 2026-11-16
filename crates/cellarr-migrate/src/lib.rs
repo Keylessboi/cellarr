@@ -27,6 +27,7 @@
 #![warn(missing_docs)]
 
 mod config_read;
+mod lidarr;
 mod error;
 mod model;
 mod profiles;
@@ -40,6 +41,7 @@ use cellarr_core::MediaType;
 use cellarr_db::Database;
 
 pub use error::{MigrationError, Result};
+pub use lidarr::MusicReport;
 pub use model::{ExternalIds, MappedContent, MappedFile, MappedInstall};
 pub use source::SourceKind;
 
@@ -77,6 +79,8 @@ pub struct MigrationPreview {
     /// migration — files are recognized in place — and surfaced so the UI can
     /// state that plainly.
     pub scheduled_file_operations: usize,
+    /// What a Lidarr source adds: its artists, albums, tracks and files.
+    pub music: Option<MusicReport>,
 }
 
 /// The result of a completed import.
@@ -88,6 +92,8 @@ pub struct MigrationReport {
     /// and episode) — the preserved identities that spare cellarr from
     /// re-identifying the library.
     pub identities_written: usize,
+    /// What a Lidarr source wrote: artists, albums, tracks, files, profiles.
+    pub music: Option<MusicReport>,
 }
 
 /// Detect whether the database at `path` is a Sonarr or Radarr install.
@@ -111,6 +117,7 @@ async fn read_all(source_paths: &[&str]) -> Result<(MappedInstall, Vec<SourceKin
         let mapped = match source.kind() {
             SourceKind::Radarr => radarr::read(source.pool()).await?,
             SourceKind::Sonarr => sonarr::read(source.pool()).await?,
+            SourceKind::Lidarr => read_lidarr_config(source.pool()).await?,
         };
         unified.merge(mapped);
     }
@@ -123,7 +130,27 @@ async fn read_all(source_paths: &[&str]) -> Result<(MappedInstall, Vec<SourceKin
 /// Returns a [`MigrationError`] if any source cannot be read or mapped.
 pub async fn preview(source_paths: &[&str]) -> Result<MigrationPreview> {
     let (unified, kinds) = read_all(source_paths).await?;
-    Ok(summarize(&unified, kinds))
+    let mut preview = summarize(&unified, kinds);
+    for path in source_paths {
+        let source = Source::open(path).await?;
+        if source.kind() == SourceKind::Lidarr {
+            preview.music = Some(lidarr::preview(source.pool()).await?);
+        }
+    }
+    Ok(preview)
+}
+
+/// What a Lidarr database contributes to the generic install: its root folders,
+/// indexers and download clients. Its library (artists → tracks) is streamed by
+/// [`lidarr::import`] instead, and its quality profiles keep their integer ids.
+async fn read_lidarr_config(pool: &sqlx::sqlite::SqlitePool) -> Result<MappedInstall> {
+    Ok(MappedInstall {
+        kind: Some(SourceKind::Lidarr),
+        root_folders: config_read::read_root_folders(pool).await?,
+        indexers: config_read::read_indexers(pool, SourceKind::Lidarr).await?,
+        download_clients: config_read::read_download_clients(pool, SourceKind::Lidarr).await?,
+        ..MappedInstall::default()
+    })
 }
 
 /// Build the preview summary from a mapped install.
@@ -160,6 +187,7 @@ fn summarize(unified: &MappedInstall, kinds: Vec<SourceKind>) -> MigrationPrevie
         download_client_count: unified.download_clients.len(),
         root_folder_count: unified.root_folders.len(),
         scheduled_file_operations,
+        music: None,
     }
 }
 
@@ -178,8 +206,16 @@ pub async fn import(source_paths: &[&str], db: &Database) -> Result<MigrationRep
     let (unified, kinds) = read_all(source_paths).await?;
     let preview = summarize(&unified, kinds);
     let identities_written = write::write_install(&unified, db).await?;
+    let mut music = None;
+    for path in source_paths {
+        let source = Source::open(path).await?;
+        if source.kind() == SourceKind::Lidarr {
+            music = Some(lidarr::import(source.pool(), db).await?);
+        }
+    }
     Ok(MigrationReport {
         preview,
         identities_written,
+        music,
     })
 }

@@ -801,111 +801,32 @@ impl MusicRepo {
     ) -> Result<Vec<Track>> {
         let now = format_time(time::OffsetDateTime::now_utc())?;
         self.write(move |conn| {
+            Box::pin(async move { store_tracks(conn, library, album, release_mbid, tracks, &now).await })
+        })
+        .await
+    }
+
+    /// Store the track lists of many albums in one transaction. A migration uses
+    /// this: a large library is tens of thousands of albums, and one transaction
+    /// per album is the difference between minutes and an hour.
+    ///
+    /// # Errors
+    /// Returns a [`DbError`] on write failure; nothing is stored then.
+    pub async fn set_many_album_tracks(
+        &self,
+        library: LibraryId,
+        albums: Vec<(ContentId, Option<String>, Vec<NewTrack>)>,
+    ) -> Result<usize> {
+        let now = format_time(time::OffsetDateTime::now_utc())?;
+        self.write(move |conn| {
             Box::pin(async move {
-                let existing = sqlx::query(&pq(&format!(
-                    "SELECT {TRACK_COLS} FROM track_meta t WHERE t.album_content_id = ?1"
-                )))
-                .bind(album.to_string())
-                .fetch_all(&mut *conn)
-                .await?
-                .into_iter()
-                .map(row_to_track)
-                .collect::<Result<Vec<_>>>()?;
-                let mut by_slot: HashMap<(u32, u32), Track> = existing
-                    .into_iter()
-                    .map(|t| ((t.disc, t.position), t))
-                    .collect();
-
-                let mut out = Vec::with_capacity(tracks.len());
-                for new in tracks {
-                    if let Some(mut kept) = by_slot.remove(&(new.disc, new.position)) {
-                        sqlx::query(&pq(
-                            "UPDATE track_meta SET mbid = ?2, title = ?3, duration_ms = ?4
-                             WHERE content_id = ?1",
-                        ))
-                        .bind(kept.content_id.to_string())
-                        .bind(&new.mbid)
-                        .bind(&new.title)
-                        .bind(new.duration_ms.map(i64::from))
-                        .execute(&mut *conn)
-                        .await?;
-                        index_title(conn, kept.content_id, &new.title).await?;
-                        kept.mbid = new.mbid;
-                        kept.title = new.title;
-                        kept.duration_ms = new.duration_ms;
-                        out.push(kept);
-                        continue;
-                    }
-                    let id = next_seq(conn, "track", new.id).await?;
-                    let content_id = ContentId::from_uuid(seq_uuid(seq_u32(id)));
-                    let coords = format!(
-                        "{{\"type\":\"track\",\"disc\":{},\"track\":{}}}",
-                        new.disc, new.position
-                    );
-                    insert_node(conn, content_id, library, Some(album), "track", &coords, true)
-                        .await?;
-                    sqlx::query(&pq(
-                        "INSERT INTO track_meta
-                            (id, content_id, album_content_id, mbid, title, disc, position, duration_ms)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                    ))
-                    .bind(id)
-                    .bind(content_id.to_string())
-                    .bind(album.to_string())
-                    .bind(&new.mbid)
-                    .bind(&new.title)
-                    .bind(i64::from(new.disc))
-                    .bind(i64::from(new.position))
-                    .bind(new.duration_ms.map(i64::from))
-                    .execute(&mut *conn)
-                    .await?;
-                    index_title(conn, content_id, &new.title).await?;
-                    out.push(Track {
-                        id,
-                        content_id,
-                        album_content_id: album,
-                        mbid: new.mbid,
-                        title: new.title,
-                        disc: new.disc,
-                        position: new.position,
-                        duration_ms: new.duration_ms,
-                    });
+                let mut stored = 0usize;
+                for (album, release, tracks) in albums {
+                    stored += store_tracks(conn, library, album, release, tracks, &now)
+                        .await?
+                        .len();
                 }
-
-                for stale in by_slot.into_values() {
-                    let has_file = sqlx::query(&pq(
-                        "SELECT 1 AS x FROM track_file WHERE track_content_id = ?1 LIMIT 1",
-                    ))
-                    .bind(stale.content_id.to_string())
-                    .fetch_optional(&mut *conn)
-                    .await?
-                    .is_some();
-                    if has_file {
-                        out.push(stale);
-                        continue;
-                    }
-                    sqlx::query(&pq("DELETE FROM content_fts WHERE content_id = ?1"))
-                        .bind(stale.content_id.to_string())
-                        .execute(&mut *conn)
-                        .await?;
-                    sqlx::query(&pq("DELETE FROM content WHERE id = ?1"))
-                        .bind(stale.content_id.to_string())
-                        .execute(&mut *conn)
-                        .await?;
-                }
-
-                sqlx::query(&pq(
-                    "UPDATE album_meta SET tracks_fetched_at = ?2,
-                        release_mbid = COALESCE(?3, release_mbid)
-                     WHERE content_id = ?1",
-                ))
-                .bind(album.to_string())
-                .bind(&now)
-                .bind(&release_mbid)
-                .execute(&mut *conn)
-                .await?;
-                out.sort_by_key(|t| (t.disc, t.position));
-                Ok(out)
+                Ok(stored)
             })
         })
         .await
@@ -1653,6 +1574,120 @@ enum ArtistKey {
 enum TrackFileKey {
     Seq(i64),
     Text(String),
+}
+
+/// Reconcile an album's stored tracks with `tracks`: keep matching ones (by disc
+/// and position) with their ids, add new ones, drop vanished ones that have no
+/// file, and stamp the album as fetched.
+async fn store_tracks(
+    conn: &mut DbConnection,
+    library: LibraryId,
+    album: ContentId,
+    release_mbid: Option<String>,
+    tracks: Vec<NewTrack>,
+    now: &str,
+) -> Result<Vec<Track>> {
+    let existing = sqlx::query(&pq(&format!(
+        "SELECT {TRACK_COLS} FROM track_meta t WHERE t.album_content_id = ?1"
+    )))
+    .bind(album.to_string())
+    .fetch_all(&mut *conn)
+    .await?
+    .into_iter()
+    .map(row_to_track)
+    .collect::<Result<Vec<_>>>()?;
+    let mut by_slot: HashMap<(u32, u32), Track> =
+        existing.into_iter().map(|t| ((t.disc, t.position), t)).collect();
+
+    let mut out = Vec::with_capacity(tracks.len());
+    for new in tracks {
+        if let Some(mut kept) = by_slot.remove(&(new.disc, new.position)) {
+            sqlx::query(&pq(
+                "UPDATE track_meta SET mbid = ?2, title = ?3, duration_ms = ?4
+                 WHERE content_id = ?1",
+            ))
+            .bind(kept.content_id.to_string())
+            .bind(&new.mbid)
+            .bind(&new.title)
+            .bind(new.duration_ms.map(i64::from))
+            .execute(&mut *conn)
+            .await?;
+            index_title(conn, kept.content_id, &new.title).await?;
+            kept.mbid = new.mbid;
+            kept.title = new.title;
+            kept.duration_ms = new.duration_ms;
+            out.push(kept);
+            continue;
+        }
+        let id = next_seq(conn, "track", new.id).await?;
+        let content_id = ContentId::from_uuid(seq_uuid(seq_u32(id)));
+        let coords = format!(
+            "{{\"type\":\"track\",\"disc\":{},\"track\":{}}}",
+            new.disc, new.position
+        );
+        insert_node(conn, content_id, library, Some(album), "track", &coords, true).await?;
+        sqlx::query(&pq(
+            "INSERT INTO track_meta
+                (id, content_id, album_content_id, mbid, title, disc, position, duration_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        ))
+        .bind(id)
+        .bind(content_id.to_string())
+        .bind(album.to_string())
+        .bind(&new.mbid)
+        .bind(&new.title)
+        .bind(i64::from(new.disc))
+        .bind(i64::from(new.position))
+        .bind(new.duration_ms.map(i64::from))
+        .execute(&mut *conn)
+        .await?;
+        index_title(conn, content_id, &new.title).await?;
+        out.push(Track {
+            id,
+            content_id,
+            album_content_id: album,
+            mbid: new.mbid,
+            title: new.title,
+            disc: new.disc,
+            position: new.position,
+            duration_ms: new.duration_ms,
+        });
+    }
+
+    for stale in by_slot.into_values() {
+        let has_file = sqlx::query(&pq(
+            "SELECT 1 AS x FROM track_file WHERE track_content_id = ?1 LIMIT 1",
+        ))
+        .bind(stale.content_id.to_string())
+        .fetch_optional(&mut *conn)
+        .await?
+        .is_some();
+        if has_file {
+            out.push(stale);
+            continue;
+        }
+        sqlx::query(&pq("DELETE FROM content_fts WHERE content_id = ?1"))
+            .bind(stale.content_id.to_string())
+            .execute(&mut *conn)
+            .await?;
+        sqlx::query(&pq("DELETE FROM content WHERE id = ?1"))
+            .bind(stale.content_id.to_string())
+            .execute(&mut *conn)
+            .await?;
+    }
+
+    sqlx::query(&pq(
+        "UPDATE album_meta SET tracks_fetched_at = ?2,
+            release_mbid = COALESCE(?3, release_mbid)
+         WHERE content_id = ?1",
+    ))
+    .bind(album.to_string())
+    .bind(now)
+    .bind(&release_mbid)
+    .execute(&mut *conn)
+    .await?;
+    out.sort_by_key(|t| (t.disc, t.position));
+    Ok(out)
 }
 
 fn key_of(row: &DbRow) -> Result<ContentId> {

@@ -71,12 +71,18 @@ impl BlocklistRepository for BlocklistRepo {
     }
 
     async fn is_blocklisted(&self, content_id: ContentId, release: &Release) -> Result<bool> {
+        // A release is blocklisted by its identity key, or by its title: a title
+        // is the only identity a blocklist imported from another manager carries
+        // (it recorded the release name, not the indexer's guid).
         let key = release_key(release);
+        let title_key = release.title.trim().to_ascii_lowercase();
         let row = sqlx::query(&pq(
-            "SELECT 1 FROM blocklist WHERE content_id = ?1 AND release_key = ?2 LIMIT 1"),
+            "SELECT 1 FROM blocklist
+             WHERE content_id = ?1 AND (release_key = ?2 OR release_key = ?3) LIMIT 1"),
         )
         .bind(content_id.to_string())
         .bind(key)
+        .bind(title_key)
         .fetch_optional(&self.pool)
         .await?;
         Ok(row.is_some())

@@ -16,7 +16,7 @@ pub enum MigrationError {
     /// The source database did not look like any *arr schema we recognize.
     ///
     /// Carries the path so a guided import can tell the user *which* file failed.
-    #[error("could not detect a Sonarr or Radarr database at {path}: {detail}")]
+    #[error("could not detect a Sonarr, Radarr or Lidarr database at {path}: {detail}")]
     Unrecognized {
         /// The path that was probed.
         path: String,

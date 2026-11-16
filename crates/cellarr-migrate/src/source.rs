@@ -22,6 +22,9 @@ pub enum SourceKind {
     Radarr,
     /// Sonarr — a TV (series/season/episode) library.
     Sonarr,
+    /// Lidarr — a music library. Read by `crate::lidarr`, which streams the
+    /// library rather than mapping it into an in-memory install.
+    Lidarr,
 }
 
 impl SourceKind {
@@ -31,6 +34,7 @@ impl SourceKind {
         match self {
             SourceKind::Radarr => "radarr",
             SourceKind::Sonarr => "sonarr",
+            SourceKind::Lidarr => "lidarr",
         }
     }
 }
@@ -96,6 +100,9 @@ async fn table_exists(pool: &SqlitePool, name: &str) -> Result<bool> {
 async fn detect_kind(pool: &SqlitePool, path: &str) -> Result<SourceKind> {
     // Radarr is identified first by its `Movies` table; Sonarr by the
     // `Series` + `Episodes` pair (a Radarr DB has neither).
+    if crate::lidarr::is_lidarr(pool).await? {
+        return Ok(SourceKind::Lidarr);
+    }
     let has_movies = table_exists(pool, "Movies").await?;
     let has_series = table_exists(pool, "Series").await?;
     let has_episodes = table_exists(pool, "Episodes").await?;
@@ -108,14 +115,9 @@ async fn detect_kind(pool: &SqlitePool, path: &str) -> Result<SourceKind> {
     }
 
     // Recognize Lidarr's marker so the error is informative rather than opaque.
-    let lidarr_hint = if table_exists(pool, "Artists").await? {
-        " (looks like Lidarr, which is not yet supported)"
-    } else {
-        ""
-    };
     Err(MigrationError::Unrecognized {
         path: path.to_string(),
-        detail: format!("no Movies or Series/Episodes marker tables found{lidarr_hint}"),
+        detail: "no Movies, Series/Episodes or Artists/AlbumReleases marker tables found".to_string(),
     })
 }
 

@@ -333,6 +333,23 @@ async fn run_migrate(config: &Config, sources: &[PathBuf]) -> Result<()> {
     // held connection — `shutdown` stops it first.)
     db.shutdown().await;
 
+    if let Some(m) = &report.music {
+        println!(
+            "imported music: {} artists, {} albums, {} tracks, {} track files recognized in place \
+             ({} left out: no track points at them); {} quality profiles, {} metadata profiles, \
+             {} blocklist entries, {} path mappings; {} history rows not carried over",
+            m.artists,
+            m.albums,
+            m.tracks,
+            m.track_files,
+            m.unmapped_files,
+            m.quality_profiles,
+            m.metadata_profiles,
+            m.blocklist,
+            m.remote_path_mappings,
+            m.history_skipped,
+        );
+    }
     let p = &report.preview;
     println!(
         "imported {} libraries, {} content nodes ({} items), {} files, {} identities; \

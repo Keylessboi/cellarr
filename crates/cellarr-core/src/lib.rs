@@ -72,7 +72,10 @@ pub use media::{
     ContentKind, ContentMetadata, ContentNode, ContentRef, Coordinates, Library, MediaFile,
     MediaType, SeriesType, Subtitle, MissingReason, MissingSummary,};
 pub use monitor::{EpisodeFacts, MonitorOption};
-pub use music::{normalize_name, Album, Artist, MetadataProfile, Track, TrackFile};
+pub use music::{
+    lidarr_quality_id, lidarr_quality_name, normalize_name, Album, Artist, MetadataProfile, Track,
+    TrackFile,
+};
 pub use notification::{
     config_accepts, NotificationEvent, NotificationHealth, NotificationMessage,
     NotificationRelease, NotificationSender, NotificationSubject,
