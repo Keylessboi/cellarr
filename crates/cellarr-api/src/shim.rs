@@ -2599,11 +2599,15 @@ pub(crate) fn v3_indexer(ix: &cellarr_core::IndexerConfig) -> Value {
         fields.push(json!({ "order": 103, "name": "requiredFlags", "value": c.required_flags }));
     }
     let implementation = if ix.kind.eq_ignore_ascii_case("newznab") {
-        "Newznab"
+        "Newznab".to_string()
     } else if ix.kind.eq_ignore_ascii_case("cardigann") {
-        "Cardigann"
+        "Cardigann".to_string()
+    } else if let Some(p) = cellarr_plugins::catalog::find(&ix.kind)
+        .filter(|e| e.kind == cellarr_plugins::catalog::EntryKind::Indexer)
+    {
+        p.name
     } else {
-        "Torznab"
+        "Torznab".to_string()
     };
     json!({
         "id": ix_numeric_id(ix.id),
@@ -2819,12 +2823,17 @@ pub(crate) fn indexer_from_body(
             }
         }
     }
-    let kind = match body.implementation.as_deref() {
-        Some(i) if i.eq_ignore_ascii_case("newznab") => "newznab",
-        Some(i) if i.eq_ignore_ascii_case("cardigann") => "cardigann",
-        _ => "torznab",
-    }
-    .to_string();
+    let plugin = body
+        .implementation
+        .as_deref()
+        .and_then(cellarr_plugins::catalog::find)
+        .filter(|e| e.kind == cellarr_plugins::catalog::EntryKind::Indexer);
+    let kind = match (body.implementation.as_deref(), &plugin) {
+        (_, Some(p)) => p.name.to_ascii_lowercase(),
+        (Some(i), _) if i.eq_ignore_ascii_case("newznab") => "newznab".to_string(),
+        (Some(i), _) if i.eq_ignore_ascii_case("cardigann") => "cardigann".to_string(),
+        _ => "torznab".to_string(),
+    };
     let protocol = match body.protocol.as_deref() {
         Some(p) if p.eq_ignore_ascii_case("usenet") => cellarr_core::Protocol::Usenet,
         _ => cellarr_core::Protocol::Torrent,
@@ -3132,7 +3141,12 @@ pub(crate) fn v3_download_client(dc: &cellarr_core::DownloadClientConfig) -> Val
 /// The v3 `implementation` string for a cellarr download-client kind. The
 /// blackhole splits by protocol into the two implementations the ecosystem knows
 /// (`TorrentBlackhole` / `UsenetBlackhole`); other kinds map by name.
-pub(crate) fn dc_implementation(kind: &str, protocol: cellarr_core::Protocol) -> &'static str {
+pub(crate) fn dc_implementation(kind: &str, protocol: cellarr_core::Protocol) -> String {
+    if let Some(p) = cellarr_plugins::catalog::find(kind)
+        .filter(|e| e.kind == cellarr_plugins::catalog::EntryKind::DownloadClient)
+    {
+        return p.name;
+    }
     match kind {
         "blackhole" | "torrentblackhole" | "usenetblackhole" => match protocol {
             cellarr_core::Protocol::Torrent => "TorrentBlackhole",
@@ -3146,6 +3160,7 @@ pub(crate) fn dc_implementation(kind: &str, protocol: cellarr_core::Protocol) ->
         "nzbget" => "Nzbget",
         _ => "Blackhole",
     }
+    .to_string()
 }
 
 pub(crate) async fn list_download_clients(

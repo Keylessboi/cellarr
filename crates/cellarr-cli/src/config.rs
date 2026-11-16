@@ -65,6 +65,10 @@ pub struct Config {
     /// Music (MusicBrainz) and the Lidarr-compatible listener.
     #[serde(default)]
     pub music: MusicConfig,
+    /// Plugins: where WASM plugins are loaded from, and the optional sidecar
+    /// that hosts native Lidarr plugins.
+    #[serde(default)]
+    pub plugins: PluginsConfig,
     /// Optional path to a declarative **managed-config** file (config-as-code).
     /// When set, the daemon reconciles its DB from this file on boot (after
     /// migrations, before serving): tags/root folders/libraries/quality
@@ -164,6 +168,22 @@ pub struct MusicConfig {
     pub lidarr_bind: Option<IpAddr>,
     /// The port of the Lidarr-compatible listener; `None` disables it.
     pub lidarr_port: Option<u16>,
+}
+
+/// Plugin settings.
+///
+/// WASM plugins (`*.wasm`, or `<name>/plugin.wasm` with a `plugin.json`) are
+/// loaded from `dir`, by default `<data_dir>/plugins`. Native Lidarr plugins run
+/// in a separate, opt-in .NET process (see `docs/20-plugins.md`): set
+/// `dotnet_sidecar_url` to where it listens and its plugins appear beside the
+/// built-in implementations.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PluginsConfig {
+    /// Where WASM plugins are loaded from. `None` means `<data_dir>/plugins`.
+    pub dir: Option<PathBuf>,
+    /// Base URL of the native-plugin sidecar, when one is running.
+    pub dotnet_sidecar_url: Option<String>,
 }
 
 /// Logging settings.
@@ -287,6 +307,7 @@ impl Default for Config {
             subtitles: SubtitlesConfig::default(),
             media_management: MediaManagementConfig::default(),
             music: MusicConfig::default(),
+            plugins: PluginsConfig::default(),
             managed_config_path: None,
             max_active_downloads: None,
             upgrade_search_limit: None,

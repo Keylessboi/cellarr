@@ -218,6 +218,19 @@ impl Daemon {
             "subtitle provider initialized"
         );
 
+        // Plugins: load the WASM ones from the plugin directory and publish what
+        // loaded, so the *arr faces list them beside the built-in implementations.
+        #[cfg(feature = "plugins")]
+        {
+            let dir = config
+                .plugins
+                .dir
+                .clone()
+                .unwrap_or_else(|| config.data_dir.join("plugins"));
+            let (loaded, failed) = cellarr_plugins::registry::load_and_install(&dir);
+            info!(dir = %dir.display(), loaded, failed = failed.len(), "plugins loaded");
+        }
+
         // The MusicBrainz-backed music catalogue, shared by the pipeline handler
         // (background refresh/track fill) and the Lidarr face (add/lookup). One
         // instance, so MusicBrainz's one-request-a-second limit is honoured across

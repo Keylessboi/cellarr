@@ -6,7 +6,11 @@ license.workspace = true
 rust-version.workspace = true
 publish = false
 
+[features]
+plugins = ["dep:cellarr-plugins", "cellarr-plugins/wasm"]
+
 [dependencies]
+cellarr-plugins = { workspace = true, optional = true }
 cellarr-core.workspace = true
 cellarr-db.workspace = true
 cellarr-decide.workspace = true

@@ -210,14 +210,22 @@ pub fn global() -> Arc<Registry> {
 /// on a blocking thread, never on the async runtime.
 #[must_use]
 pub fn http_transport() -> Transport {
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .user_agent(concat!("cellarr-plugin-host/", env!("CARGO_PKG_VERSION")))
-        .build();
+    // Built on first use, never here: a blocking client owns a runtime, which
+    // must not be created or dropped on an async thread (boot is one). Plugin
+    // calls always run on blocking threads.
+    let client: Arc<OnceLock<std::result::Result<reqwest::blocking::Client, String>>> =
+        Arc::new(OnceLock::new());
     Arc::new(move |req: &crate::capability::HttpRequest| {
         let client = client
+            .get_or_init(|| {
+                reqwest::blocking::Client::builder()
+                    .timeout(std::time::Duration::from_secs(30))
+                    .user_agent(concat!("cellarr-plugin-host/", env!("CARGO_PKG_VERSION")))
+                    .build()
+                    .map_err(|e| e.to_string())
+            })
             .as_ref()
-            .map_err(|e| PluginError::Host(e.to_string()))?;
+            .map_err(|e| PluginError::Host(e.clone()))?;
         let method = reqwest::Method::from_bytes(req.method.as_bytes())
             .map_err(|e| PluginError::Guest(format!("bad method: {e}")))?;
         let mut rb = client.request(method, &req.url);
@@ -244,4 +252,51 @@ pub fn http_transport() -> Transport {
             body,
         })
     })
+}
+
+/// The catalog entries for this registry's plugins.
+#[must_use]
+pub fn catalog_entries(reg: &Registry) -> Vec<crate::catalog::Entry> {
+    use crate::catalog::{Entry, EntryField, EntryKind};
+    use crate::host::PluginProtocol;
+    reg.all()
+        .iter()
+        .map(|p| Entry {
+            name: p.info().name.clone(),
+            version: p.info().version.clone(),
+            description: p.info().description.clone(),
+            kind: match p.kind() {
+                PluginKind::Indexer => EntryKind::Indexer,
+                PluginKind::DownloadClient => EntryKind::DownloadClient,
+            },
+            protocol: match p.info().protocol {
+                PluginProtocol::Torrent => "torrent".into(),
+                PluginProtocol::Usenet => "usenet".into(),
+            },
+            fields: p
+                .fields()
+                .iter()
+                .map(|f| EntryField {
+                    name: f.name.clone(),
+                    label: f.label.clone(),
+                    kind: f.kind.clone(),
+                    default_value: f.default_value.clone(),
+                    help_text: f.help_text.clone(),
+                    advanced: f.advanced,
+                    privacy: f.privacy,
+                })
+                .collect(),
+            runtime: "wasm".into(),
+        })
+        .collect()
+}
+
+/// Load `dir`, install it as the process-wide registry, and publish its catalog.
+pub fn load_and_install(dir: &Path) -> (usize, Vec<LoadFailure>) {
+    let reg = Registry::load_dir(dir, http_transport());
+    let n = reg.all().len();
+    let failures = reg.failures().to_vec();
+    crate::catalog::set_runtime("wasm", catalog_entries(&reg));
+    install(reg);
+    (n, failures)
 }

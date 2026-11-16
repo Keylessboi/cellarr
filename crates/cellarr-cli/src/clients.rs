@@ -54,6 +54,9 @@ pub enum DownloadClientFactoryError {
 pub enum ConfiguredDownloadClient {
     /// qBittorrent (torrent, WebUI v2).
     Qbittorrent(QbittorrentClient),
+    /// A WASM plugin download client.
+    #[cfg(feature = "plugins")]
+    Plugin(cellarr_plugins::PluginDownloadClient),
     /// Transmission (torrent, RPC).
     Transmission(TransmissionClient),
     /// Deluge (torrent, JSON-RPC WebUI).
@@ -130,6 +133,22 @@ impl ConfiguredDownloadClient {
                     config.protocol,
                 )))
             }
+            #[cfg(feature = "plugins")]
+            other
+                if cellarr_plugins::registry::global()
+                    .get(other)
+                    .is_some_and(|p| p.kind() == cellarr_plugins::PluginKind::DownloadClient) =>
+            {
+                let plugin = cellarr_plugins::registry::global()
+                    .get(other)
+                    .expect("checked above");
+                Ok(Self::Plugin(cellarr_plugins::PluginDownloadClient::new(
+                    plugin,
+                    config.settings.clone(),
+                    category,
+                    name,
+                )))
+            }
             other => Err(DownloadClientFactoryError::UnsupportedKind {
                 kind: other.to_string(),
             }),
@@ -197,6 +216,8 @@ impl DownloadClient for ConfiguredDownloadClient {
             Self::Sabnzbd(c) => <SabnzbdClient as DownloadClient>::name(c),
             Self::Nzbget(c) => <NzbgetClient as DownloadClient>::name(c),
             Self::Blackhole(c) => <BlackholeClient as DownloadClient>::name(c),
+            #[cfg(feature = "plugins")]
+            Self::Plugin(c) => DownloadClient::name(c),
         }
     }
 
@@ -213,6 +234,10 @@ impl DownloadClient for ConfiguredDownloadClient {
             Self::Sabnzbd(c) => DownloadClient::add(c, grab).await,
             Self::Nzbget(c) => DownloadClient::add(c, grab).await,
             Self::Blackhole(c) => DownloadClient::add(c, grab).await,
+            #[cfg(feature = "plugins")]
+            Self::Plugin(c) => DownloadClient::add(c, grab)
+                .await
+                .map_err(|e| DownloadError::Api(format!("plugin: {e}"))),
         }
     }
 
@@ -225,6 +250,10 @@ impl DownloadClient for ConfiguredDownloadClient {
             Self::Sabnzbd(c) => DownloadClient::status(c, download_id).await,
             Self::Nzbget(c) => DownloadClient::status(c, download_id).await,
             Self::Blackhole(c) => DownloadClient::status(c, download_id).await,
+            #[cfg(feature = "plugins")]
+            Self::Plugin(c) => DownloadClient::status(c, download_id)
+                .await
+                .map_err(|e| DownloadError::Api(format!("plugin: {e}"))),
         }
     }
 
@@ -237,6 +266,10 @@ impl DownloadClient for ConfiguredDownloadClient {
             Self::Sabnzbd(c) => DownloadClient::remove(c, download_id, delete_data).await,
             Self::Nzbget(c) => DownloadClient::remove(c, download_id, delete_data).await,
             Self::Blackhole(c) => DownloadClient::remove(c, download_id, delete_data).await,
+            #[cfg(feature = "plugins")]
+            Self::Plugin(c) => DownloadClient::remove(c, download_id, delete_data)
+                .await
+                .map_err(|e| DownloadError::Api(format!("plugin: {e}"))),
         }
     }
 }

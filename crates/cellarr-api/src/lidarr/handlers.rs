@@ -1999,15 +1999,51 @@ pub(crate) async fn update_download_client(
     Ok(Json(lidarr_client(v)))
 }
 
+/// A recorded schema list with the loaded plugins of `kind` appended.
+fn schema_with_plugins(template: &str, kind: cellarr_plugins::catalog::EntryKind) -> Value {
+    let mut list: Vec<Value> = serde_json::from_str(template).unwrap_or_default();
+    list.extend(
+        cellarr_plugins::catalog::of_kind(kind)
+            .iter()
+            .map(cellarr_plugins::catalog::schema_resource),
+    );
+    Value::Array(list)
+}
+
 pub(crate) async fn download_client_schema() -> Json<Value> {
-    Json(
-        serde_json::from_str(include_str!("templates/downloadclient_schema.json"))
-            .unwrap_or(Value::Null),
-    )
+    Json(schema_with_plugins(
+        include_str!("templates/downloadclient_schema.json"),
+        cellarr_plugins::catalog::EntryKind::DownloadClient,
+    ))
 }
 
 pub(crate) async fn indexer_schema() -> Json<Value> {
-    Json(serde_json::from_str(include_str!("templates/indexer_schema.json")).unwrap_or(Value::Null))
+    Json(schema_with_plugins(
+        include_str!("templates/indexer_schema.json"),
+        cellarr_plugins::catalog::EntryKind::Indexer,
+    ))
+}
+
+/// `GET /plugin`: the loaded plugins, WASM and native.
+pub(crate) async fn list_plugins() -> Json<Vec<Value>> {
+    Json(
+        cellarr_plugins::catalog::entries()
+            .iter()
+            .map(|e| {
+                json!({
+                    "name": e.name,
+                    "version": e.version,
+                    "description": e.description,
+                    "kind": match e.kind {
+                        cellarr_plugins::catalog::EntryKind::Indexer => "indexer",
+                        cellarr_plugins::catalog::EntryKind::DownloadClient => "downloadClient",
+                    },
+                    "protocol": e.protocol,
+                    "runtime": e.runtime,
+                })
+            })
+            .collect(),
+    )
 }
 
 // --- small endpoints Lidarr serves that have nothing to show here ---------------

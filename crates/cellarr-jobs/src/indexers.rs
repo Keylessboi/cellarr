@@ -250,6 +250,18 @@ impl DbIndexerSet {
         if config.kind.eq_ignore_ascii_case("cardigann") {
             return self.build_cardigann(config);
         }
+        // A loaded plugin implements this kind: it takes its own settings.
+        #[cfg(feature = "plugins")]
+        if let Some(plugin) = cellarr_plugins::registry::global().get(&config.kind) {
+            if plugin.kind() == cellarr_plugins::PluginKind::Indexer {
+                return Ok(NabAdapter::Plugin(cellarr_plugins::PluginIndexer::new(
+                    plugin,
+                    config.settings.clone(),
+                    config.id,
+                    config.name.clone(),
+                )));
+            }
+        }
 
         let raw_base =
             setting_str(config, "baseUrl").ok_or_else(|| IndexerSetError::Misconfigured {
@@ -371,6 +383,14 @@ pub enum NabAdapter {
     Newznab(NewznabIndexer),
     /// A Cardigann-definition tracker (HTML-scrape, interpreted from YAML).
     Cardigann(CardigannIndexer),
+    /// A WASM plugin indexer.
+    #[cfg(feature = "plugins")]
+    Plugin(cellarr_plugins::PluginIndexer),
+}
+
+#[cfg(feature = "plugins")]
+fn plugin_err(e: cellarr_plugins::PluginError) -> IndexerError {
+    IndexerError::Unsupported(format!("plugin: {e}"))
 }
 
 impl NabAdapter {
@@ -379,6 +399,8 @@ impl NabAdapter {
             NabAdapter::Torznab(a) => a.search(terms).await,
             NabAdapter::Newznab(a) => a.search(terms).await,
             NabAdapter::Cardigann(a) => a.search(terms).await,
+            #[cfg(feature = "plugins")]
+            NabAdapter::Plugin(a) => a.search(terms).await.map_err(plugin_err),
         }
     }
 
@@ -387,6 +409,8 @@ impl NabAdapter {
             NabAdapter::Torznab(a) => a.latest().await,
             NabAdapter::Newznab(a) => a.latest().await,
             NabAdapter::Cardigann(a) => a.latest().await,
+            #[cfg(feature = "plugins")]
+            NabAdapter::Plugin(a) => a.latest().await.map_err(plugin_err),
         }
     }
 
@@ -395,6 +419,8 @@ impl NabAdapter {
             NabAdapter::Torznab(a) => a.resolve(release).await,
             NabAdapter::Newznab(a) => a.resolve(release).await,
             NabAdapter::Cardigann(a) => a.resolve(release).await,
+            #[cfg(feature = "plugins")]
+            NabAdapter::Plugin(_) => Ok(release),
         }
     }
 }

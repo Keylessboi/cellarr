@@ -242,6 +242,10 @@ struct Fixture {
 }
 
 async fn fixture_for(album_tag: &str) -> Fixture {
+    fixture_with(album_tag, false).await
+}
+
+async fn fixture_with(album_tag: &str, use_plugins: bool) -> Fixture {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_test_writer()
@@ -261,6 +265,16 @@ async fn fixture_for(album_tag: &str) -> Fixture {
     config.music.lidarr_metadata_url = Some(format!("{stub_url}/meta"));
     // MusicBrainz is the fallback; point it at the stub too so nothing leaves the box.
     config.music.musicbrainz_url = Some(format!("{stub_url}/mb"));
+    if use_plugins {
+        let dir = tmp.path().join("plugins");
+        std::fs::create_dir_all(&dir).unwrap();
+        let fixtures =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../cellarr-plugins/tests/fixtures");
+        for f in ["torznab.wasm", "qbit.wasm"] {
+            std::fs::copy(fixtures.join(f), dir.join(f)).unwrap();
+        }
+        config.plugins.dir = Some(dir);
+    }
     let daemon = Daemon::boot(&config).await.expect("daemon boots");
     let addr = daemon.addr();
     let (stop, stop_rx) = tokio::sync::oneshot::channel::<()>();
@@ -302,7 +316,9 @@ async fn fixture_for(album_tag: &str) -> Fixture {
     api.post_ok(
         "/downloadclient",
         json!({
-            "name": "qbit", "implementation": "QBittorrent", "configContract": "QBittorrentSettings",
+            "name": "qbit",
+            "implementation": if use_plugins { "QBittorrentPlugin" } else { "QBittorrent" },
+            "configContract": "QBittorrentSettings",
             "protocol": "torrent", "enable": true, "priority": 1, "tags": [],
             "fields": [
                 {"name": "host", "value": host}, {"name": "port", "value": port.parse::<u16>().unwrap()},
@@ -316,7 +332,9 @@ async fn fixture_for(album_tag: &str) -> Fixture {
     api.post_ok(
         "/indexer",
         json!({
-            "name": "stub-torznab", "implementation": "Torznab", "configContract": "TorznabSettings",
+            "name": "stub-torznab",
+            "implementation": if use_plugins { "TorznabPlugin" } else { "Torznab" },
+            "configContract": "TorznabSettings",
             "enableRss": true, "enableAutomaticSearch": true, "enableInteractiveSearch": true,
             "priority": 25, "protocol": "torrent", "tags": [],
             "fields": [
@@ -524,6 +542,69 @@ async fn a_download_tagged_as_another_album_is_never_filed_into_the_library() {
     assert_eq!(walk(&stub.download_dir).len(), 3, "source files are intact");
     let al = api.get(&format!("/album/{album_id}")).await;
     assert_eq!(al["statistics"]["trackFileCount"], 0);
+
+    stop.send(()).unwrap();
+    serve.await.unwrap().expect("clean shutdown");
+}
+
+#[tokio::test]
+async fn the_same_flow_works_with_a_plugin_indexer_and_a_plugin_download_client() {
+    let Fixture {
+        api,
+        stub,
+        library,
+        album_id,
+        stop,
+        serve,
+        _tmp,
+    } = fixture_with("Kid A", true).await;
+
+    // The plugins are listed, and offered in the schemas beside the built-ins.
+    let plugins = api.get("/plugin").await;
+    let names: Vec<&str> = plugins
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|p| p["name"].as_str())
+        .collect();
+    assert!(
+        names.contains(&"TorznabPlugin") && names.contains(&"QBittorrentPlugin"),
+        "{names:?}"
+    );
+    let schema = api.get("/indexer/schema").await;
+    assert!(schema
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|s| s["implementation"] == "TorznabPlugin"));
+    let clients = api.get("/downloadclient").await;
+    assert_eq!(clients[0]["implementation"], "QBittorrentPlugin");
+
+    let imported = within(60, || async {
+        let files = api.get(&format!("/trackfile?albumId={album_id}")).await;
+        files.as_array().is_some_and(|f| f.len() == 3)
+    })
+    .await;
+    assert!(
+        imported,
+        "not imported. searches: {:?} adds: {:?} queue: {}",
+        stub.searches.lock().unwrap(),
+        stub.added.lock().unwrap(),
+        api.get("/queue?page=1&pageSize=50").await
+    );
+    assert_eq!(
+        stub.added.lock().unwrap().len(),
+        1,
+        "the plugin client made the grab"
+    );
+    assert!(stub.added.lock().unwrap()[0].contains("category=lidarr"));
+    assert_eq!(
+        walk(&library)
+            .iter()
+            .filter(|p| p.extension().is_some_and(|e| e == "flac"))
+            .count(),
+        3
+    );
 
     stop.send(()).unwrap();
     serve.await.unwrap().expect("clean shutdown");

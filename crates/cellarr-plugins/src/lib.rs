@@ -18,6 +18,7 @@
 #![forbid(unsafe_code)]
 
 pub mod capability;
+pub mod catalog;
 pub mod config;
 pub mod error;
 
