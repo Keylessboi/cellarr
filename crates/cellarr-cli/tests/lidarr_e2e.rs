@@ -238,7 +238,74 @@ where
     assert!(within(secs, f).await, "timed out waiting for: {what}");
 }
 
+/// Kid A as its standard pressing lists it: (title, seconds, recording id).
+/// Track listings are facts, recorded from the metadata service.
+const KID_A_RELEASE: &str = "e1bdf797-8b89-4d4c-8986-bcb0974d9726";
+const KID_A_TRACKS: [(&str, u64, &str); 10] = [
+    (
+        "Everything in Its Right Place",
+        251,
+        "60bd9d53-01ff-4562-8058-eb44b3940317",
+    ),
+    ("Kid A", 285, "0852f01a-1832-453d-ae8e-345499ecc027"),
+    (
+        "The National Anthem",
+        352,
+        "c7492f6e-adf3-4ff5-85dc-33d527dc81d8",
+    ),
+    (
+        "How to Disappear Completely",
+        356,
+        "740d324e-4356-4116-812d-17ea76a190ce",
+    ),
+    ("Treefingers", 223, "31c89fdc-afdb-4d84-bc61-2dbabf0b4f23"),
+    ("Optimistic", 316, "4d7b8fcb-fafc-4416-9170-752f12e10a2e"),
+    ("In Limbo", 211, "27f5b46c-f749-40e7-bc10-1524393168f0"),
+    ("Idioteque", 309, "1c0377bb-c00b-4bbe-b4b2-615f13324adc"),
+    ("Morning Bell", 276, "5616efb3-4c50-40ab-a792-e2e34faae75f"),
+    (
+        "Motion Picture Soundtrack",
+        419,
+        "f8764ab0-996b-40c8-9645-10f47e8c43d0",
+    ),
+];
+
+/// The album tag that asks for the whole pressing, MusicBrainz-tagged.
+const FULL_KID_A: &str = "Kid A (complete)";
+
+fn write_full_kid_a(folder: &Path) {
+    std::fs::create_dir_all(folder).unwrap();
+    for (i, (title, secs, recording)) in KID_A_TRACKS.iter().enumerate() {
+        let n = (i + 1).to_string();
+        cellarr_fs::audio::testing::write_flac_secs(
+            &folder.join(format!("{n:0>2} - {title}.flac")),
+            16,
+            *secs,
+            &[
+                ("ARTIST", "Radiohead"),
+                ("ALBUMARTIST", "Radiohead"),
+                ("ALBUM", "Kid A"),
+                ("TITLE", title),
+                ("TRACKNUMBER", &n),
+                ("TRACKTOTAL", "10"),
+                ("DISCNUMBER", "1"),
+                ("DATE", "2000"),
+                ("MUSICBRAINZ_ARTISTID", RADIOHEAD),
+                ("MUSICBRAINZ_ALBUMARTISTID", RADIOHEAD),
+                ("MUSICBRAINZ_RELEASEGROUPID", KID_A),
+                ("MUSICBRAINZ_ALBUMID", KID_A_RELEASE),
+                ("MUSICBRAINZ_TRACKID", recording),
+            ],
+        )
+        .unwrap();
+    }
+}
+
 fn write_download(dir: &Path, album_tag: &str) {
+    if album_tag == FULL_KID_A {
+        write_full_kid_a(&dir.join("Radiohead - Kid A (2000) [FLAC]"));
+        return;
+    }
     let folder = dir.join("Radiohead - Kid A (2000) [FLAC]");
     std::fs::create_dir_all(&folder).unwrap();
     for (i, title) in TITLES.iter().enumerate() {
@@ -269,6 +336,7 @@ struct Fixture {
     stop: tokio::sync::oneshot::Sender<()>,
     serve: tokio::task::JoinHandle<anyhow::Result<()>>,
     _sidecar: Option<LidarrProcess>,
+    sidecar_url: Option<String>,
     _tmp: tempfile::TempDir,
 }
 
@@ -368,10 +436,12 @@ async fn fixture_with(album_tag: &str, mode: Mode) -> Fixture {
     // MusicBrainz is the fallback; point it at the stub too so nothing leaves the box.
     config.music.musicbrainz_url = Some(format!("{stub_url}/mb"));
     let mut sidecar = None;
+    let mut sidecar_url = None;
     if mode == Mode::Sidecar {
         let bin = PathBuf::from(std::env::var("LIDARR_SIDECAR_BIN").expect("LIDARR_SIDECAR_BIN"));
         let (url, proc) = start_lidarr(&bin, &tmp.path().join("sidecar")).await;
         sidecar = Some(proc);
+        sidecar_url = Some(url.clone());
         config.plugins.dotnet_sidecar_url = Some(url);
         config.plugins.dotnet_sidecar_key = Some(SIDECAR_KEY.into());
         config.plugins.dotnet_sidecar_root = Some(tmp.path().join("sidecar-root"));
@@ -542,6 +612,7 @@ async fn fixture_with(album_tag: &str, mode: Mode) -> Fixture {
         stop,
         serve,
         _sidecar: sidecar,
+        sidecar_url,
         _tmp: tmp,
     }
 }
@@ -768,6 +839,7 @@ async fn the_same_flow_works_through_a_real_lidarr_sidecar() {
         // the sidecar and delete the temp dir mid-test.
         _sidecar,
         _tmp,
+        ..
     } = fixture_with("Kid A", Mode::Sidecar).await;
 
     // The search went through the sidecar's Torznab to the stub, and the grab
@@ -809,6 +881,74 @@ async fn the_same_flow_works_through_a_real_lidarr_sidecar() {
             .count(),
         3
     );
+
+    stop.send(()).unwrap();
+    serve.await.unwrap().expect("clean shutdown");
+}
+
+#[tokio::test]
+async fn a_complete_album_is_staged_by_the_sidecar_and_imported_from_there() {
+    if std::env::var("LIDARR_SIDECAR_BIN").is_err() {
+        eprintln!("skipped: set LIDARR_SIDECAR_BIN to a Lidarr install to run the sidecar test");
+        return;
+    }
+    let Fixture {
+        api,
+        library,
+        album_id,
+        stop,
+        serve,
+        _sidecar,
+        sidecar_url,
+        _tmp,
+        ..
+    } = fixture_with(FULL_KID_A, Mode::Sidecar).await;
+    let sidecar_url = sidecar_url.unwrap();
+    let http = reqwest::Client::new();
+
+    let imported = within(240, || async {
+        let _ = api
+            .send(
+                reqwest::Method::POST,
+                "/command",
+                &json!({"name": "CheckForFinishedDownload"}),
+            )
+            .await;
+        let files = api.get(&format!("/trackfile?albumId={album_id}")).await;
+        files.as_array().is_some_and(|f| !f.is_empty())
+    })
+    .await;
+    let history: Value = http
+        .get(format!("{sidecar_url}/api/v1/history?page=1&pageSize=100"))
+        .header("X-Api-Key", SIDECAR_KEY)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let events: Vec<String> = history["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|r| r["eventType"].as_str().map(str::to_string))
+        .collect();
+    assert!(imported, "not imported; sidecar history: {events:?}");
+    assert!(
+        events.iter().any(|e| e == "downloadImported"),
+        "the sidecar staged the download: {events:?}"
+    );
+    let in_library: Vec<PathBuf> = walk(&library)
+        .into_iter()
+        .filter(|p| p.extension().is_some_and(|e| e == "flac"))
+        .collect();
+    assert!(!in_library.is_empty(), "files reached the library");
+    for f in &in_library {
+        assert!(
+            f.starts_with(&library),
+            "only the library holds cellarr's import: {f:?}"
+        );
+    }
 
     stop.send(()).unwrap();
     serve.await.unwrap().expect("clean shutdown");

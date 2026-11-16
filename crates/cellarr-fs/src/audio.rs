@@ -211,6 +211,20 @@ pub mod testing {
     /// # Errors
     /// Returns any I/O error from creating or writing the file.
     pub fn write_flac(path: &Path, bits: u8, comments: &[(&str, &str)]) -> std::io::Result<()> {
+        write_flac_secs(path, bits, 180, comments)
+    }
+
+    /// [`write_flac`] with a given length in seconds (what a tagger or Lidarr's
+    /// matcher reads from the stream header).
+    ///
+    /// # Errors
+    /// Returns any I/O error from creating or writing the file.
+    pub fn write_flac_secs(
+        path: &Path,
+        bits: u8,
+        secs: u64,
+        comments: &[(&str, &str)],
+    ) -> std::io::Result<()> {
         let mut out = Vec::new();
         out.extend_from_slice(b"fLaC");
         // STREAMINFO (type 0), 34 bytes.
@@ -221,7 +235,7 @@ pub mod testing {
         out.extend_from_slice(&[0, 0, 0, 0, 0, 0]); // min/max frame size (unknown)
                                                     // 20 bits sample rate, 3 bits channels-1, 5 bits bps-1, 36 bits samples.
         let sample_rate: u64 = 44_100;
-        let total_samples: u64 = 44_100 * 180;
+        let total_samples: u64 = 44_100 * secs;
         let packed: u64 =
             (sample_rate << 44) | (1u64 << 41) | ((u64::from(bits) - 1) << 36) | total_samples;
         out.extend_from_slice(&packed.to_be_bytes());
