@@ -362,6 +362,10 @@ impl<E: PipelineEnv> LivePipelineHandler<E> {
         // doing TV before a large movie library makes a freshly-added show's
         // episodes appear promptly instead of waiting behind a full movie
         // re-resolve. `false` (is TV) sorts ahead of `true`.
+        // Music is not resolved here: its identity comes from MusicBrainz through the
+        // music catalogue (`RefreshArtist`/`FillTracks`), and walking a music library
+        // would load every track of every album (a million nodes) to resolve none.
+        libraries.retain(|l| l.media_type != MediaType::Music);
         libraries.sort_by_key(|l| l.media_type != MediaType::Tv);
         let content = self.db.content();
         // Throttle: only the least-recently-refreshed batch of series is re-resolved

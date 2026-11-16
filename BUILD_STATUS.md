@@ -39,6 +39,7 @@ strategy and every hard number live in **[`docs/parity/TESTING.md`](docs/parity/
 | Web UI | `web/` | Next.js + vendored SRCL; all v1 screens; light/dark/system theming |
 | Inference fallback | `cellarr-llm` | feature-gated, local-first, default off |
 | Plugin host | `cellarr-plugins` | feature-gated wasmtime Component-Model host |
+| Music | `cellarr-media`, `cellarr-meta`, `cellarr-db`, `cellarr-jobs`, `cellarr-api` | MusicBrainz catalogue, album-unit pipeline, tag-driven import, Lidarr `/api/v1` face with a pinned contract test, Lidarr database import |
 
 ## Verified end-to-end (real, not just unit tests)
 
@@ -69,7 +70,8 @@ strategy and every hard number live in **[`docs/parity/TESTING.md`](docs/parity/
   cargo feature wires the sqlx driver; the repository layer is SQLite-only for now. `just test-pg`
   reports the deferral; the harness is preserved behind `CELLARR_ENABLE_PG_TESTS=1`. See
   [`docs/08-database.md`](docs/08-database.md).
-- **Music & books media types** — designed for in the model; post-v1 per [`docs/00-vision.md`](docs/00-vision.md).
+- **Books media type** — designed for in the model; post-v1 per [`docs/00-vision.md`](docs/00-vision.md).
+- **Music is built** and is a drop-in for Lidarr — see [`docs/19-lidarr-compat.md`](docs/19-lidarr-compat.md). Still open there: manual import of loose music files, renaming/retagging existing files, music import lists, metadata sidecar writers (all listed, with reasons, in `crates/cellarr-api/tests/contracts/lidarr-gaps.json`).
 - **Differential-oracle parity** — DONE for the parser: pinned Sonarr 4.0.17 + Radarr 6.2.1 diffed
   against cellarr over the corpus → **90% exact** (up from 76.7%), mechanical gaps fixed, all
   remaining gaps catalogued in [`docs/parity/`](docs/parity/README.md). Reproduce with `just oracle`.

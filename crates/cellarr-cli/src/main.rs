@@ -36,7 +36,7 @@ struct Cli {
 enum Command {
     /// Run the daemon (the default when no subcommand is given).
     Run,
-    /// Import an existing Radarr/Sonarr SQLite database into the cellarr DB.
+    /// Import an existing Radarr, Sonarr or Lidarr SQLite database into the cellarr DB.
     Migrate {
         /// Path(s) to the source *arr database file(s). A Radarr and a Sonarr DB
         /// can be imported together into one unified library set.
@@ -333,6 +333,9 @@ async fn run_migrate(config: &Config, sources: &[PathBuf]) -> Result<()> {
     // held connection — `shutdown` stops it first.)
     db.shutdown().await;
 
+    // A Lidarr-only import has no video libraries to report; its summary is the
+    // music line below.
+    let music_only = report.music.is_some() && report.preview.library_count == 0;
     if let Some(m) = &report.music {
         println!(
             "imported music: {} artists, {} albums, {} tracks, {} track files recognized in place \
@@ -351,6 +354,9 @@ async fn run_migrate(config: &Config, sources: &[PathBuf]) -> Result<()> {
         );
     }
     let p = &report.preview;
+    if music_only && p.indexer_count + p.download_client_count == 0 {
+        return Ok(());
+    }
     println!(
         "imported {} libraries, {} content nodes ({} items), {} files, {} identities; \
          {} profiles, {} custom formats, {} indexers, {} download clients ({} file operations)",

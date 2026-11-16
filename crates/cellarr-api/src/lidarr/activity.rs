@@ -44,7 +44,10 @@ struct Library {
 }
 
 impl Library {
-    async fn load(state: &AppState) -> ApiResult<Self> {
+    /// The artists (there are hundreds) and exactly the albums `ids` name. A page
+    /// of history or a queue refresh must cost work proportional to the page, not
+    /// to a library of tens of thousands of albums.
+    async fn load(state: &AppState, ids: &[ContentId]) -> ApiResult<Self> {
         let music = state.db.music();
         let artists: HashMap<ContentId, Artist> = music
             .artists()
@@ -53,7 +56,7 @@ impl Library {
             .map(|a| (a.content_id, a))
             .collect();
         let albums = music
-            .albums()
+            .albums_by_content(ids)
             .await?
             .into_iter()
             .map(|a| (a.content_id, a))
@@ -94,12 +97,18 @@ impl Library {
 
 async fn queue_records(fs: &FaceState, embed: bool) -> ApiResult<Vec<Value>> {
     let Json(base) = shim::queue(State(fs.clone())).await?;
-    let library = Library::load(app(fs)).await?;
     let records = base
         .get("records")
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
+    let ids: Vec<ContentId> = records
+        .iter()
+        .filter_map(|r| r.get("contentId").and_then(Value::as_str))
+        .filter_map(|s| s.parse::<uuid::Uuid>().ok())
+        .map(ContentId::from_uuid)
+        .collect();
+    let library = Library::load(app(fs), &ids).await?;
     let mut out = Vec::with_capacity(records.len());
     for mut r in records {
         let content = r
@@ -323,7 +332,8 @@ pub(crate) async fn history(
         .music()
         .history_page(album, artist, &kinds, None, (pg - 1) * size, size)
         .await?;
-    let library = Library::load(state).await?;
+    let ids: Vec<ContentId> = records.iter().map(|r| r.content_id).collect();
+    let library = Library::load(state, &ids).await?;
     let embed = flag(&q, "includeAlbum") || flag(&q, "includeArtist");
     Ok(Json(page(
         records.iter().map(|r| history_record(r, &library, embed)).collect(),
@@ -345,7 +355,8 @@ pub(crate) async fn history_since(
         .map(|c| event_kinds(c).to_vec())
         .unwrap_or_default();
     let (_, records) = state.db.music().history_page(None, None, &kinds, Some(since), 0, 1000).await?;
-    let library = Library::load(state).await?;
+    let ids: Vec<ContentId> = records.iter().map(|r| r.content_id).collect();
+    let library = Library::load(state, &ids).await?;
     Ok(Json(records.iter().map(|r| history_record(r, &library, false)).collect()))
 }
 
@@ -369,7 +380,8 @@ pub(crate) async fn history_artist(
         .music()
         .history_page(None, Some(artist.content_id), &kinds, None, 0, 1000)
         .await?;
-    let library = Library::load(state).await?;
+    let ids: Vec<ContentId> = records.iter().map(|r| r.content_id).collect();
+    let library = Library::load(state, &ids).await?;
     Ok(Json(records.iter().map(|r| history_record(r, &library, false)).collect()))
 }
 
@@ -380,8 +392,9 @@ async fn album_page(
     albums: &[Album],
     include_artist: bool,
 ) -> ApiResult<Vec<Value>> {
-    let library = Library::load(state).await?;
-    let stats = state.db.music().album_stats(None).await?;
+    let ids: Vec<ContentId> = albums.iter().map(|a| a.content_id).collect();
+    let library = Library::load(state, &[]).await?;
+    let stats = state.db.music().album_stats_for(&ids).await?;
     Ok(albums
         .iter()
         .map(|al| {
@@ -508,8 +521,9 @@ pub(crate) async fn blocklist(
 ) -> ApiResult<Json<Value>> {
     use cellarr_core::BlocklistRepository;
     let state = app(&fs);
-    let library = Library::load(state).await?;
     let mut entries = BlocklistRepository::list(&state.db.blocklist()).await?;
+    let ids: Vec<ContentId> = entries.iter().map(|e| e.content_id).collect();
+    let library = Library::load(state, &ids).await?;
     entries.sort_by(|a, b| b.blocklisted_at.cmp(&a.blocklisted_at));
     // Only music releases: an entry belongs to the music library when the album it
     // was blocked for is one.

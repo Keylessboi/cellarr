@@ -1,0 +1,117 @@
+#!/usr/bin/env python3
+"""Build a synthetic Lidarr database at a chosen scale, for measuring cellarr against it.
+
+    scripts/synth-lidarr-db out.db                      # the reference library below
+    scripts/synth-lidarr-db out.db --artists 100 --albums 3000
+
+The defaults are one real install's size: 914 artists, 41,459 albums, ~1.03M tracks across two
+releases per album, 35,798 track files, 16,271 blocklist rows and 934,521 history rows. The
+tables and columns are Lidarr's own (the ones cellarr's importer reads), the content is
+generated. Standard library only.
+"""
+import argparse
+import json
+import random
+import sqlite3
+
+DDL = """
+CREATE TABLE RootFolders (Id INTEGER PRIMARY KEY, Path TEXT);
+CREATE TABLE Indexers (Id INTEGER PRIMARY KEY, Name TEXT, Implementation TEXT, Settings TEXT, ConfigContract TEXT, EnableRss INTEGER, EnableAutomaticSearch INTEGER, EnableInteractiveSearch INTEGER, Priority INTEGER, Tags TEXT, DownloadClientId INTEGER);
+CREATE TABLE DownloadClients (Id INTEGER PRIMARY KEY, Enable INTEGER, Name TEXT, Implementation TEXT, Settings TEXT, ConfigContract TEXT, Priority INTEGER, RemoveCompletedDownloads INTEGER, RemoveFailedDownloads INTEGER, Tags TEXT);
+CREATE TABLE RemotePathMappings (Id INTEGER PRIMARY KEY, Host TEXT, RemotePath TEXT, LocalPath TEXT);
+CREATE TABLE QualityProfiles (Id INTEGER PRIMARY KEY, Name TEXT, Cutoff INTEGER, Items TEXT, UpgradeAllowed INTEGER, MinFormatScore INTEGER, CutoffFormatScore INTEGER, FormatItems TEXT);
+CREATE TABLE MetadataProfiles (Id INTEGER PRIMARY KEY, Name TEXT, PrimaryAlbumTypes TEXT, SecondaryAlbumTypes TEXT, ReleaseStatuses TEXT);
+CREATE TABLE ArtistMetadata (Id INTEGER PRIMARY KEY, ForeignArtistId TEXT, Name TEXT, Overview TEXT, Disambiguation TEXT, Type TEXT, Status INTEGER, Images TEXT, Links TEXT, Genres TEXT, Ratings TEXT, Members TEXT, Aliases TEXT, OldForeignArtistIds TEXT);
+CREATE TABLE Artists (Id INTEGER PRIMARY KEY, ArtistMetadataId INTEGER, CleanName TEXT, SortName TEXT, Path TEXT, Monitored INTEGER, MonitorNewItems INTEGER, LastInfoSync TEXT, QualityProfileId INTEGER, MetadataProfileId INTEGER, Added TEXT, AddOptions TEXT, Tags TEXT);
+CREATE TABLE Albums (Id INTEGER PRIMARY KEY, ArtistMetadataId INTEGER, ForeignAlbumId TEXT, OldForeignAlbumIds TEXT, Title TEXT, Overview TEXT, Disambiguation TEXT, ReleaseDate TEXT, Images TEXT, Links TEXT, Genres TEXT, AlbumType TEXT, SecondaryTypes TEXT, Ratings TEXT, CleanTitle TEXT, ProfileId INTEGER, Monitored INTEGER, AnyReleaseOk INTEGER, LastInfoSync TEXT, Added TEXT, AddOptions TEXT, LastSearchTime TEXT);
+CREATE TABLE AlbumReleases (Id INTEGER PRIMARY KEY, AlbumId INTEGER, ForeignReleaseId TEXT, Title TEXT, Status TEXT, Duration INTEGER, Label TEXT, Disambiguation TEXT, Country TEXT, ReleaseDate TEXT, Media TEXT, TrackCount INTEGER, Monitored INTEGER);
+CREATE TABLE Tracks (Id INTEGER PRIMARY KEY, ForeignTrackId TEXT, ForeignRecordingId TEXT, AlbumReleaseId INTEGER, ArtistMetadataId INTEGER, TrackNumber TEXT, AbsoluteTrackNumber INTEGER, Title TEXT, Duration INTEGER, Explicit INTEGER, Ratings TEXT, MediumNumber INTEGER, TrackFileId INTEGER);
+CREATE TABLE TrackFiles (Id INTEGER PRIMARY KEY, AlbumId INTEGER, Quality TEXT, Size INTEGER, SceneName TEXT, DateAdded TEXT, ReleaseGroup TEXT, MediaInfo TEXT, Modified TEXT, Path TEXT, OriginalFilePath TEXT, IndexerFlags INTEGER);
+CREATE TABLE Blocklist (Id INTEGER PRIMARY KEY, ArtistId INTEGER, AlbumIds TEXT, SourceTitle TEXT, Quality TEXT, Date TEXT, PublishedDate TEXT, Size INTEGER, Protocol TEXT, Indexer TEXT, Message TEXT, TorrentInfoHash TEXT, IndexerFlags INTEGER);
+CREATE TABLE History (Id INTEGER PRIMARY KEY, AlbumId INTEGER, ArtistId INTEGER, TrackId INTEGER, SourceTitle TEXT, Quality TEXT, Date TEXT, EventType INTEGER, Data TEXT, DownloadId TEXT);
+"""
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
+    ap.add_argument("out")
+    ap.add_argument("--artists", type=int, default=914)
+    ap.add_argument("--albums", type=int, default=41459)
+    ap.add_argument("--files", type=int, default=35798)
+    ap.add_argument("--blocklist", type=int, default=16271)
+    ap.add_argument("--history", type=int, default=934521)
+    ap.add_argument("--seed", type=int, default=1)
+    a = ap.parse_args()
+    rnd = random.Random(a.seed)
+    db = sqlite3.connect(a.out)
+    db.executescript(DDL)
+    q = db.cursor()
+    q.execute("INSERT INTO RootFolders VALUES (1, '/data/media/music')")
+    q.execute("""INSERT INTO QualityProfiles VALUES (1, 'Any', 6, ?, 1, 0, 0, '[]')""", (json.dumps([
+        {"quality": 6, "items": [], "allowed": True}, {"quality": 4, "items": [], "allowed": True}]),))
+    q.execute("""INSERT INTO MetadataProfiles VALUES (1, 'Standard', ?, ?, ?)""", (
+        json.dumps([{"primaryAlbumType": {"id": 0, "name": "Album"}, "allowed": True}]),
+        json.dumps([{"secondaryAlbumType": {"id": 0, "name": "Studio"}, "allowed": True}]),
+        json.dumps([{"releaseStatus": {"id": 0, "name": "Official"}, "allowed": True}])))
+    for i in range(1, a.artists + 1):
+        q.execute("INSERT INTO ArtistMetadata VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                  (i, f"artist-{i:06d}", f"Artist {i}", "", "", "Group", 0, "[]", "[]", '["Rock"]', "{}", "[]", "[]", "[]"))
+        q.execute("INSERT INTO Artists VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                  (i, i, f"artist{i}", f"Artist {i}", f"/data/media/music/Artist {i}", 1, 0, None, 1, 1,
+                   "2025-01-01 00:00:00", "{}", "[]"))
+    track_id = release_id = 0
+    file_ids = []
+    for al in range(1, a.albums + 1):
+        meta = rnd.randint(1, a.artists)
+        year = 1970 + rnd.randint(0, 55)
+        q.execute("INSERT INTO Albums VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                  (al, meta, f"album-{al:07d}", "[]", f"Album {al}", "", "", f"{year}-06-01 00:00:00",
+                   "[]", "[]", "[]", "Album", "[]", "{}", f"album{al}", 0, 1, 1, None, "2025-01-01 00:00:00", "{}", None))
+        for which in (0, 1):
+            release_id += 1
+            n = rnd.randint(8, 14) + which
+            q.execute("INSERT INTO AlbumReleases VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                      (release_id, al, f"rel-{release_id:07d}", f"Album {al}", "Official", 0, "[]", "", "[]", None, "[]", n, 1 - which))
+            rows = []
+            for t in range(1, n + 1):
+                track_id += 1
+                rows.append((track_id, f"ft{track_id}", f"rec{track_id}", release_id, meta, str(t), t,
+                             f"Track {t} of {al}", rnd.randint(120000, 420000), 0, "{}", 1, 0))
+            q.executemany("INSERT INTO Tracks VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+            if which == 0 and len(file_ids) < a.files:
+                file_ids.append((al, track_id - n + 1, n))
+    # Files: one per track of the first albums that have them, up to --files.
+    fid = 0
+    for al, first_track, n in file_ids:
+        for k in range(n):
+            if fid >= a.files:
+                break
+            fid += 1
+            q.execute("INSERT INTO TrackFiles VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                      (fid, al, '{"quality":6,"revision":{"version":1,"real":0,"isRepack":false}}',
+                       rnd.randint(20_000_000, 40_000_000), "", "2025-03-01 00:00:00", "", "{}", "2025-03-01 00:00:00",
+                       f"/data/media/music/Album {al}/{k+1:02d}.flac", "", 0))
+            q.execute("UPDATE Tracks SET TrackFileId = ? WHERE Id = ?", (fid, first_track + k))
+    for i in range(1, a.blocklist + 1):
+        al = rnd.randint(1, a.albums)
+        q.execute("INSERT INTO Blocklist VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                  (i, 1, f"[{al}]", f"Artist - Album {al} [dead {i}]", "{}", "2025-06-01 00:00:00", None, 1,
+                   "TorrentDownloadProtocol", "TPB", "dead", "hash", 0))
+    q.executemany("INSERT INTO History VALUES (?,?,?,?,?,?,?,?,?,?)",
+                  ((i, rnd.randint(1, a.albums), 1, 0, "x", "{}", "2025-06-01 00:00:00", 1, "{}", "d") for i in range(1, a.history + 1)))
+    # Lidarr's own indexes. The importer does not depend on them, but a database
+    # without them is not what an install looks like.
+    db.executescript("""
+        CREATE INDEX IX_Albums_ArtistMetadataId ON Albums (ArtistMetadataId);
+        CREATE INDEX IX_AlbumReleases_AlbumId ON AlbumReleases (AlbumId);
+        CREATE INDEX IX_Tracks_AlbumReleaseId ON Tracks (AlbumReleaseId);
+        CREATE INDEX IX_TrackFiles_AlbumId ON TrackFiles (AlbumId);
+        CREATE INDEX IX_History_AlbumId ON History (AlbumId);
+    """)
+    db.commit()
+    db.close()
+    print(f"{a.out}: {a.artists} artists, {a.albums} albums, {track_id} tracks, {fid} files")
+
+
+if __name__ == "__main__":
+    main()

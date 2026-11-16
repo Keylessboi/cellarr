@@ -80,7 +80,7 @@ async fn album_or_404(state: &AppState, id: i64) -> ApiResult<Album> {
 }
 
 async fn artist_resource(state: &AppState, a: &Artist) -> ApiResult<Value> {
-    let stats = state.db.music().artist_stats().await?;
+    let stats = state.db.music().artist_stats_for(&[a.content_id]).await?;
     let seqs = profile_seqs(state, a.quality_profile_id.into_iter().collect()).await?;
     let mut v = resources::artist(
         a,
@@ -126,36 +126,87 @@ async fn attach_neighbours(state: &AppState, resources: &mut [Value], artists: &
     Ok(())
 }
 
+/// What rendering albums needs beyond the albums themselves: every artist (there
+/// are hundreds) and their profile ids. Loaded once per request.
+struct AlbumRenderer {
+    artists: HashMap<ContentId, Artist>,
+    seqs: HashMap<QualityProfileId, i64>,
+}
+
+impl AlbumRenderer {
+    async fn load(state: &AppState) -> ApiResult<Self> {
+        let artists: HashMap<ContentId, Artist> = state
+            .db
+            .music()
+            .artists()
+            .await?
+            .into_iter()
+            .map(|a| (a.content_id, a))
+            .collect();
+        let seqs = profile_seqs(state, artists.values().filter_map(|a| a.quality_profile_id).collect()).await?;
+        Ok(Self { artists, seqs })
+    }
+
+    /// Render one slice of albums. Statistics are fetched for exactly the slice.
+    async fn render(&self, state: &AppState, albums: &[Album], with_tracks: bool) -> ApiResult<Vec<Value>> {
+        let music = state.db.music();
+        let seq_of = |a: &Artist| a.quality_profile_id.and_then(|p| self.seqs.get(&p).copied());
+        let wanted: Vec<ContentId> = albums.iter().map(|a| a.content_id).collect();
+        let stats: HashMap<ContentId, MusicStats> = music.album_stats_for(&wanted).await?;
+        let mut out = Vec::with_capacity(albums.len());
+        for al in albums {
+            let artist = self.artists.get(&al.artist_content_id);
+            let tracks = if with_tracks {
+                music.tracks_for_album(al.content_id).await?
+            } else {
+                Vec::new()
+            };
+            out.push(resources::album(
+                al,
+                artist.map_or(0, |a| a.id),
+                artist.map(|a| resources::artist_ref(a, seq_of(a))),
+                Some(stats.get(&al.content_id).copied().unwrap_or_default()),
+                artist.and_then(seq_of),
+                &tracks,
+            ));
+        }
+        Ok(out)
+    }
+}
+
 /// Render albums with their artists and statistics.
 async fn album_resources(state: &AppState, albums: &[Album], with_tracks: bool) -> ApiResult<Vec<Value>> {
-    let music = state.db.music();
-    let artists: HashMap<ContentId, Artist> = music
-        .artists()
-        .await?
-        .into_iter()
-        .map(|a| (a.content_id, a))
-        .collect();
-    let seqs = profile_seqs(state, artists.values().filter_map(|a| a.quality_profile_id).collect()).await?;
-    let seq_of = |a: &Artist| a.quality_profile_id.and_then(|p| seqs.get(&p).copied());
-    let stats: HashMap<ContentId, MusicStats> = music.album_stats(None).await?;
-    let mut out = Vec::with_capacity(albums.len());
-    for al in albums {
-        let artist = artists.get(&al.artist_content_id);
-        let tracks = if with_tracks {
-            music.tracks_for_album(al.content_id).await?
-        } else {
-            Vec::new()
-        };
-        out.push(resources::album(
-            al,
-            artist.map_or(0, |a| a.id),
-            artist.map(|a| resources::artist_ref(a, seq_of(a))),
-            Some(stats.get(&al.content_id).copied().unwrap_or_default()),
-            artist.and_then(seq_of),
-            &tracks,
-        ));
+    AlbumRenderer::load(state).await?.render(state, albums, with_tracks).await
+}
+
+/// Render albums straight to a JSON array body, a slice at a time.
+///
+/// The whole album list of a large library is tens of megabytes of JSON; building it
+/// as one tree of values first would hold several times that in memory at once. Here
+/// each slice is rendered, written to the body, and dropped, so peak memory is the
+/// body itself plus one slice.
+async fn album_array(state: &AppState, albums: &[Album], with_tracks: bool) -> ApiResult<axum::response::Response> {
+    use axum::response::IntoResponse;
+    const SLICE: usize = 250;
+    let renderer = AlbumRenderer::load(state).await?;
+    let mut body: Vec<u8> = Vec::with_capacity(albums.len().min(50_000) * 1800 + 2);
+    body.push(b'[');
+    let mut first = true;
+    for chunk in albums.chunks(SLICE) {
+        for value in renderer.render(state, chunk, with_tracks).await? {
+            if !first {
+                body.push(b',');
+            }
+            first = false;
+            serde_json::to_writer(&mut body, &value).map_err(|e| ApiError::Internal(e.to_string()))?;
+        }
     }
-    Ok(out)
+    body.push(b']');
+    Ok((
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        body,
+    )
+        .into_response())
 }
 
 // --- artists -----------------------------------------------------------------
@@ -488,7 +539,7 @@ fn lookup_artist_resource(h: &cellarr_meta::MbArtist, known: Option<&Artist>) ->
 pub(crate) async fn list_albums(
     State(fs): State<FaceState>,
     Query(q): Params,
-) -> ApiResult<Json<Vec<Value>>> {
+) -> ApiResult<axum::response::Response> {
     let state = app(&fs);
     let music = state.db.music();
     let albums: Vec<Album> = if let Some(mbid) = param(&q, "foreignAlbumId") {
@@ -501,7 +552,7 @@ pub(crate) async fn list_albums(
         let all = music.albums().await?;
         if ids.is_empty() { all } else { all.into_iter().filter(|a| ids.contains(&a.id)).collect() }
     };
-    Ok(Json(album_resources(state, &albums, flag(&q, "includeTracks")).await?))
+    album_array(state, &albums, flag(&q, "includeTracks")).await
 }
 
 pub(crate) async fn get_album(

@@ -461,28 +461,53 @@ pub(crate) async fn import(pool: &SqlitePool, db: &Database) -> Result<MusicRepo
     }
 
     // --- tracks of each album's selected release -------------------------------
+    //
+    // One ordered pass over the Tracks table, not a query per album: it needs no
+    // index (a database that lost them still imports in seconds), reads each row
+    // once, and holds only one album's tracks at a time.
+    let release_owner: HashMap<i64, (ContentId, Option<String>)> = albums_by_id
+        .values()
+        .filter(|(_, release_row, _)| *release_row != 0)
+        .map(|(content, release_row, mbid)| (*release_row, (*content, mbid.clone())))
+        .collect();
     let mut batch: Vec<(ContentId, Option<String>, Vec<NewTrack>)> = Vec::new();
     let mut track_of_file: HashMap<i64, i64> = HashMap::new();
-    let mut ordered: Vec<(&i64, &(ContentId, i64, Option<String>))> = albums_by_id.iter().collect();
-    ordered.sort_by_key(|(id, _)| **id);
-    for (_, (content, release_row, release_mbid)) in ordered {
-        if *release_row == 0 {
-            continue;
+    let mut current: Option<(i64, Vec<NewTrack>, HashMap<i64, u32>)> = None;
+    let flush = |current: &mut Option<(i64, Vec<NewTrack>, HashMap<i64, u32>)>,
+                 batch: &mut Vec<(ContentId, Option<String>, Vec<NewTrack>)>,
+                 report: &mut MusicReport| {
+        if let Some((release, tracks, _)) = current.take() {
+            if let Some((content, mbid)) = release_owner.get(&release) {
+                report.tracks += tracks.len();
+                batch.push((*content, mbid.clone(), tracks));
+            }
         }
-        let rows = sqlx::query(
+    };
+    {
+        use futures::TryStreamExt;
+        let mut rows = sqlx::query(
             "SELECT Id, ForeignRecordingId, Title, Duration, MediumNumber, AbsoluteTrackNumber,
-                    TrackFileId
-             FROM Tracks WHERE AlbumReleaseId = ?1
-             ORDER BY MediumNumber ASC, AbsoluteTrackNumber ASC, Id ASC",
+                    TrackFileId, AlbumReleaseId
+             FROM Tracks ORDER BY AlbumReleaseId ASC, MediumNumber ASC, AbsoluteTrackNumber ASC, Id ASC",
         )
-        .bind(release_row)
-        .fetch_all(pool)
-        .await?;
-        let mut tracks = Vec::with_capacity(rows.len());
-        let mut position_in_disc: HashMap<i64, u32> = HashMap::new();
-        for r in &rows {
+        .fetch(pool);
+        while let Some(r) = rows.try_next().await? {
+            let release: i64 = r.try_get("AlbumReleaseId").unwrap_or(0);
+            if !release_owner.contains_key(&release) {
+                continue;
+            }
+            if current.as_ref().is_some_and(|(cur, _, _)| *cur != release) {
+                flush(&mut current, &mut batch, &mut report);
+                if batch.len() >= TRACK_BATCH {
+                    music
+                        .set_many_album_tracks(library.id, std::mem::take(&mut batch))
+                        .await?;
+                }
+            }
+            let (_, tracks, per_disc) =
+                current.get_or_insert_with(|| (release, Vec::new(), HashMap::new()));
             let medium: i64 = r.try_get("MediumNumber").unwrap_or(1).max(1);
-            let position = position_in_disc.entry(medium).or_insert(0);
+            let position = per_disc.entry(medium).or_insert(0);
             *position += 1;
             let id: i64 = r.try_get("Id").unwrap_or(0);
             let file: i64 = r.try_get("TrackFileId").unwrap_or(0);
@@ -491,7 +516,7 @@ pub(crate) async fn import(pool: &SqlitePool, db: &Database) -> Result<MusicRepo
             }
             tracks.push(NewTrack {
                 id: Some(id),
-                mbid: opt_text(r, "ForeignRecordingId"),
+                mbid: opt_text(&r, "ForeignRecordingId"),
                 title: r.try_get("Title").unwrap_or_default(),
                 disc: u32::try_from(medium).unwrap_or(1),
                 position: *position,
@@ -502,12 +527,8 @@ pub(crate) async fn import(pool: &SqlitePool, db: &Database) -> Result<MusicRepo
                     .filter(|d| *d > 0),
             });
         }
-        report.tracks += tracks.len();
-        batch.push((*content, release_mbid.clone(), tracks));
-        if batch.len() >= TRACK_BATCH {
-            music.set_many_album_tracks(library.id, std::mem::take(&mut batch)).await?;
-        }
     }
+    flush(&mut current, &mut batch, &mut report);
     if !batch.is_empty() {
         music.set_many_album_tracks(library.id, batch).await?;
     }

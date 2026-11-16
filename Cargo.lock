@@ -654,6 +654,7 @@ dependencies = [
  "cellarr-core",
  "cellarr-db",
  "cellarr-decide",
+ "futures",
  "rstest",
  "serde",
  "serde_json",

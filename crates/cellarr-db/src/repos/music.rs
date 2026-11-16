@@ -243,7 +243,7 @@ impl MusicRepo {
                 .execute(&mut *conn)
                 .await?;
                 write_aliases(conn, content_id, &new.aliases).await?;
-                index_title(conn, content_id, &new.name).await?;
+                index_new_title(conn, content_id, &new.name).await?;
                 Ok(Artist {
                     id,
                     content_id,
@@ -495,13 +495,14 @@ impl MusicRepo {
                 let mut inserted = Vec::new();
                 for new in albums {
                     let existing = sqlx::query(&pq(
-                        "SELECT content_id FROM album_meta WHERE mbid = ?1",
+                        "SELECT content_id, title FROM album_meta WHERE mbid = ?1",
                     ))
                     .bind(&new.mbid)
                     .fetch_optional(&mut *conn)
                     .await?;
                     if let Some(row) = existing {
                         let content_id: String = row.try_get("content_id")?;
+                        let old_title: String = row.try_get("title")?;
                         sqlx::query(&pq(
                             "UPDATE album_meta SET title = ?2, title_norm = ?3,
                                 disambiguation = ?4, album_type = ?5, secondary_types = ?6,
@@ -518,7 +519,9 @@ impl MusicRepo {
                         .execute(&mut *conn)
                         .await?;
                         let cid = ContentId::from_uuid(parse_uuid("content_id", &content_id)?);
-                        index_title(conn, cid, &new.title).await?;
+                        if old_title != new.title {
+                            index_title(conn, cid, &new.title).await?;
+                        }
                         write_content_meta(conn, cid, &new.title, new.release_date.as_deref())
                             .await?;
                         continue;
@@ -557,7 +560,7 @@ impl MusicRepo {
                     .bind(&added_at)
                     .execute(&mut *conn)
                     .await?;
-                    index_title(conn, content_id, &new.title).await?;
+                    index_new_title(conn, content_id, &new.title).await?;
                     write_content_meta(conn, content_id, &new.title, new.release_date.as_deref())
                         .await?;
                     inserted.push(Album {
@@ -1152,6 +1155,42 @@ impl MusicRepo {
         Ok(out)
     }
 
+    /// File statistics for the named artists only, by indexed lookups: the cost
+    /// of one artist's statistics must not be the cost of the whole library's.
+    ///
+    /// # Errors
+    /// Returns a [`DbError`] on query failure.
+    pub async fn artist_stats_for(&self, artists: &[ContentId]) -> Result<HashMap<ContentId, MusicStats>> {
+        let mut out: HashMap<ContentId, MusicStats> = HashMap::new();
+        for chunk in artists.chunks(400) {
+            let marks = (1..=chunk.len()).map(|i| format!("?{i}")).collect::<Vec<_>>().join(",");
+            let queries = [
+                format!("SELECT artist_content_id AS k, count(*) AS n FROM album_meta WHERE artist_content_id IN ({marks}) GROUP BY artist_content_id"),
+                format!("SELECT al.artist_content_id AS k, count(*) AS n FROM track_meta t JOIN album_meta al ON al.content_id = t.album_content_id WHERE al.artist_content_id IN ({marks}) GROUP BY al.artist_content_id"),
+                format!("SELECT tf.artist_content_id AS k, count(*) AS n, COALESCE(sum(mf.size), 0) AS bytes FROM track_file tf JOIN media_file mf ON mf.id = tf.media_file_id WHERE tf.artist_content_id IN ({marks}) GROUP BY tf.artist_content_id"),
+            ];
+            for (i, sql) in queries.iter().enumerate() {
+                let sql = pq(sql);
+                let mut q = sqlx::query(&sql);
+                for id in chunk {
+                    q = q.bind(id.to_string());
+                }
+                for row in q.fetch_all(&self.pool).await? {
+                    let e = out.entry(key_of(&row)?).or_default();
+                    match i {
+                        0 => e.album_count = row.try_get("n")?,
+                        1 => e.track_count = row.try_get("n")?,
+                        _ => {
+                            e.track_file_count = row.try_get("n")?;
+                            e.size_on_disk = row.try_get("bytes")?;
+                        }
+                    }
+                }
+            }
+        }
+        Ok(out)
+    }
+
     /// File statistics per album: for every album, or only one artist's.
     ///
     /// # Errors
@@ -1512,6 +1551,48 @@ impl MusicRepo {
         Ok(out)
     }
 
+    /// File statistics for exactly the albums named, in two queries however many.
+    ///
+    /// # Errors
+    /// Returns a [`DbError`] on query failure.
+    pub async fn album_stats_for(&self, albums: &[ContentId]) -> Result<HashMap<ContentId, MusicStats>> {
+        let mut out: HashMap<ContentId, MusicStats> = HashMap::new();
+        for chunk in albums.chunks(400) {
+            let marks = (1..=chunk.len()).map(|i| format!("?{i}")).collect::<Vec<_>>().join(",");
+            let tracks = format!(
+                "SELECT album_content_id AS k, count(*) AS n FROM track_meta
+                 WHERE album_content_id IN ({marks}) GROUP BY album_content_id"
+            );
+            let tracks = pq(&tracks);
+            let mut q = sqlx::query(&tracks);
+            for id in chunk {
+                q = q.bind(id.to_string());
+            }
+            for row in q.fetch_all(&self.pool).await? {
+                let e = out.entry(key_of(&row)?).or_default();
+                e.album_count = 1;
+                e.track_count = row.try_get("n")?;
+            }
+            let files = format!(
+                "SELECT tf.album_content_id AS k, count(*) AS n, COALESCE(sum(mf.size), 0) AS bytes
+                 FROM track_file tf JOIN media_file mf ON mf.id = tf.media_file_id
+                 WHERE tf.album_content_id IN ({marks}) GROUP BY tf.album_content_id"
+            );
+            let files = pq(&files);
+            let mut q = sqlx::query(&files);
+            for id in chunk {
+                q = q.bind(id.to_string());
+            }
+            for row in q.fetch_all(&self.pool).await? {
+                let e = out.entry(key_of(&row)?).or_default();
+                e.album_count = 1;
+                e.track_file_count = row.try_get("n")?;
+                e.size_on_disk = row.try_get("bytes")?;
+            }
+        }
+        Ok(out)
+    }
+
     // --- metadata profiles ---------------------------------------------------
 
     /// Every metadata profile. A database that has none yet reports the
@@ -1645,7 +1726,6 @@ async fn store_tracks(
             .bind(new.duration_ms.map(i64::from))
             .execute(&mut *conn)
             .await?;
-            index_title(conn, kept.content_id, &new.title).await?;
             kept.mbid = new.mbid;
             kept.title = new.title;
             kept.duration_ms = new.duration_ms;
@@ -1674,7 +1754,6 @@ async fn store_tracks(
         .bind(new.duration_ms.map(i64::from))
         .execute(&mut *conn)
         .await?;
-        index_title(conn, content_id, &new.title).await?;
         out.push(Track {
             id,
             content_id,
@@ -1699,10 +1778,6 @@ async fn store_tracks(
             out.push(stale);
             continue;
         }
-        sqlx::query(&pq("DELETE FROM content_fts WHERE content_id = ?1"))
-            .bind(stale.content_id.to_string())
-            .execute(&mut *conn)
-            .await?;
         sqlx::query(&pq("DELETE FROM content WHERE id = ?1"))
             .bind(stale.content_id.to_string())
             .execute(&mut *conn)
@@ -1784,6 +1859,22 @@ async fn insert_node(
     Ok(())
 }
 
+/// Index the title of a node that has just been created. There is nothing to
+/// delete first, and skipping the delete matters: the index is keyed by an
+/// unindexed column, so every delete scans it, and a library of tens of
+/// thousands of albums would otherwise be quadratic to build.
+async fn index_new_title(conn: &mut DbConnection, id: ContentId, title: &str) -> Result<()> {
+    sqlx::query(&pq(
+        "INSERT INTO content_fts (content_id, title) VALUES (?1, ?2)",
+    ))
+    .bind(id.to_string())
+    .bind(title)
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
+}
+
+/// Re-index the title of an existing node (replacing its row).
 async fn index_title(conn: &mut DbConnection, id: ContentId, title: &str) -> Result<()> {
     sqlx::query(&pq("DELETE FROM content_fts WHERE content_id = ?1"))
         .bind(id.to_string())

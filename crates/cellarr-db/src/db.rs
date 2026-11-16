@@ -27,6 +27,22 @@ use crate::repos::{
 };
 use crate::writer::{WriterHandle, WriterShutdown};
 
+/// The page cache each SQLite connection keeps, in KiB.
+///
+/// 16 MiB by default; the pool has up to nine connections, so the worst case is
+/// about 150 MiB however large the database. Raise it with `CELLARR_DB_CACHE_MIB`
+/// when the file sits on slow network storage and the working set is large.
+#[cfg(not(feature = "postgres"))]
+fn page_cache_kib() -> u64 {
+    const DEFAULT_MIB: u64 = 16;
+    let mib = std::env::var("CELLARR_DB_CACHE_MIB")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|m| *m > 0)
+        .unwrap_or(DEFAULT_MIB);
+    mib * 1024
+}
+
 /// Default bound on the writer channel: enough to absorb normal write bursts
 /// without unbounded memory growth.
 const DEFAULT_WRITER_BOUND: usize = 256;
@@ -180,14 +196,15 @@ impl Database {
             .busy_timeout(Duration::from_secs(5))
             .foreign_keys(true)
             .synchronous(sqlx::sqlite::SqliteSynchronous::Normal)
-            // Give each connection a page cache large enough to hold the whole
-            // working set in memory. The database file can live on high-latency
-            // storage (a homelab NAS mount reaches it over CIFS), where every
-            // uncached page read is a network round-trip; a 2 MB default cache
-            // turned list endpoints into thousands of round-trips and multi-second
-            // loads. A generous cache means a connection reads each page from the
-            // network at most once, then serves it from RAM.
-            .pragma("cache_size", "-65536")
+            // Each connection gets its own page cache (see `page_cache_kib`). The
+            // database file can live on high-latency storage (a homelab NAS mount
+            // reaches it over CIFS), where every uncached page read is a network
+            // round-trip and a 2 MB default cache turned list endpoints into
+            // thousands of them; a cache sized to the working set means a connection
+            // reads each page from the network at most once. On local disk a small
+            // cache is enough, and the pool multiplies it by its connection count,
+            // so it is tunable (`CELLARR_DB_CACHE_MIB`).
+            .pragma("cache_size", format!("-{}", page_cache_kib()))
             // Keep sort/temp b-trees (ORDER BY, GROUP BY spills) in memory rather
             // than materializing them onto the (possibly networked) DB directory.
             .pragma("temp_store", "MEMORY");
