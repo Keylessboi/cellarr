@@ -997,7 +997,7 @@ where
             // unresolvable absolute (or identify failure) is skipped for the
             // preview rather than held — the user is browsing candidates, not
             // committing a placement.
-            let parsed = cellarr_parse::parse_title(&release.title);
+            let parsed = cellarr_parse::parse_title_for(content.media_type, &release.title);
             let parsed = match self.remap_absolute_coords(content, parsed).await {
                 Ok(p) => p,
                 Err(_) => continue,
@@ -1161,7 +1161,7 @@ where
 
         // Parse + reconcile any anime absolute, exactly as a run does. An
         // unresolvable absolute holds for manual resolution — never a guess.
-        let parsed = cellarr_parse::parse_title(&release.title);
+        let parsed = cellarr_parse::parse_title_for(content.media_type, &release.title);
         let parsed = match self.remap_absolute_coords(content, parsed).await {
             Ok(p) => p,
             Err(reason) => {
@@ -1286,7 +1286,7 @@ where
                 continue;
             }
             // --- Parse (real cellarr-parse on the *title*) ----------------
-            let parsed = cellarr_parse::parse_title(&release.title);
+            let parsed = cellarr_parse::parse_title_for(content.media_type, &release.title);
 
             // --- Identify: anime absolute->episode remap (the XEM call-site) --
             // An anime release advertises an *absolute* episode number; the
@@ -1736,6 +1736,14 @@ where
 
     /// The currently-best on-disk file for `content`, expressed for the decision
     /// engine. Reads through the real media-file repository.
+    /// An album's title, for checking a download against it.
+    async fn album_title(&self, album: &ContentRef) -> String {
+        match self.db.music().album_by_content(album.id).await {
+            Ok(Some(a)) => a.title,
+            _ => String::new(),
+        }
+    }
+
     async fn on_disk_for(&self, content: &ContentRef) -> Result<Option<OnDiskFile>> {
         use cellarr_core::repo::MediaFileRepository;
         let files = self
@@ -1778,6 +1786,11 @@ where
         destinations: &[(String, cellarr_core::ContentId)],
     ) -> Result<()> {
         use cellarr_core::repo::MediaFileRepository;
+        if title_parsed.music.is_some() {
+            return self
+                .persist_imported_tracks(title_parsed, release_type, destinations)
+                .await;
+        }
         // The quality the decision engine graded the grab on, single-sourced from
         // core's catalogue. A parse it cannot bucket lands on the Unknown
         // sentinel, which still records the file as present (so the node is no
@@ -1847,6 +1860,81 @@ where
                 .link(*owner, file_id)
                 .await
                 .map_err(|e| JobError::Persistence(Box::new(e)))?;
+        }
+        Ok(())
+    }
+
+    /// Record the track files an album import placed: one `media_file` per
+    /// file, graded by the release title, or by the file itself when the title
+    /// stated no quality, and linked to its track and to the album.
+    ///
+    /// A track that already held a file at another path (an upgrade, say MP3 to
+    /// FLAC) has the superseded file removed, but only once the new one is
+    /// recorded, and only if it lies inside the library.
+    async fn persist_imported_tracks(
+        &self,
+        title_parsed: &ParsedRelease,
+        release_type: cellarr_core::ReleaseType,
+        destinations: &[(String, cellarr_core::ContentId)],
+    ) -> Result<()> {
+        let from_title = cellarr_core::resolve_quality(title_parsed, &self.config.ranking);
+        let mut seen = std::collections::BTreeSet::new();
+        for (dest, track) in destinations {
+            if !seen.insert(dest.clone()) {
+                continue;
+            }
+            let path = std::path::Path::new(dest);
+            let tags = cellarr_fs::read_audio_tags(path);
+            let quality = if is_unknown_quality(&from_title) {
+                tags.as_ref()
+                    .and_then(cellarr_fs::audio_quality_name)
+                    .and_then(|name| self.config.ranking.by_name(name))
+                    .unwrap_or_else(|| from_title.clone())
+            } else {
+                from_title.clone()
+            };
+            let media_info = tags.as_ref().map(|t| {
+                serde_json::json!({
+                    "source": "audio-tags",
+                    "codec": t.codec,
+                    "bitrateKbps": t.bitrate_kbps,
+                    "sampleRate": t.sample_rate,
+                    "bitDepth": t.bit_depth,
+                    "durationMs": t.duration_ms,
+                })
+            });
+            let file = cellarr_core::MediaFile {
+                id: cellarr_core::MediaFileId::new(),
+                path: dest.clone(),
+                size: std::fs::metadata(dest).map(|m| m.len()).unwrap_or(0),
+                quality,
+                languages: Vec::new(),
+                media_info,
+                custom_format_score: None,
+                release_type: Some(release_type),
+            };
+            self.db
+                .music()
+                .record_track_file(*track, file, None, None)
+                .await
+                .map_err(|e| JobError::Persistence(Box::new(e)))?;
+            let superseded = self
+                .db
+                .music()
+                .other_track_files(*track, dest)
+                .await
+                .map_err(|e| JobError::Persistence(Box::new(e)))?;
+            for (id, old) in superseded {
+                self.db
+                    .music()
+                    .delete_track_file(id)
+                    .await
+                    .map_err(|e| JobError::Persistence(Box::new(e)))?;
+                let old = std::path::PathBuf::from(old);
+                if old.starts_with(&self.config.library_root) && old.exists() {
+                    let _ = tokio::fs::remove_file(&old).await;
+                }
+            }
         }
         Ok(())
     }
@@ -2448,7 +2536,13 @@ where
         }
         // Collect the source file(s). A single-file download is the file itself;
         // a directory is walked for its media files.
-        let sources = collect_sources(src).map_err(|e| format!("scan source: {e}"))?;
+        let is_music = matched_ref.media_type == cellarr_core::MediaType::Music;
+        let sources = if is_music {
+            crate::music_import::collect_audio_sources(src)
+        } else {
+            collect_sources(src)
+        }
+        .map_err(|e| format!("scan source: {e}"))?;
         if sources.is_empty() {
             return Err(format!("no importable files under {content_path}").into());
         }
@@ -2470,10 +2564,15 @@ where
         // season carries no `Episode` token, so `{Episode Block}` could not render,
         // and even if it could, every file in the pack would render to the same
         // destination and collide.
-        let placements = self
-            .resolve_pack_placements(matched_ref, &sources)
-            .await
-            .map_err(|e| format!("resolve pack placements: {e}"))?;
+        let placements = if is_music {
+            let title = self.album_title(matched_ref).await;
+            crate::music_import::plan_album_placements(self.db, matched_ref, &title, &sources)
+                .await?
+        } else {
+            self.resolve_pack_placements(matched_ref, &sources)
+                .await
+                .map_err(|e| format!("resolve pack placements: {e}"))?
+        };
 
         let mut moves = Vec::with_capacity(placements.len());
         use cellarr_core::repo::MediaFileRepository;
@@ -2554,7 +2653,12 @@ where
         // match the grabbed episode fails a perfectly good import.
         let placed_sources: Vec<std::path::PathBuf> =
             placements.iter().map(|(p, _)| p.clone()).collect();
-        verify_second_parse(title_parsed, &placed_sources)?;
+        // The second-parse cross-check reads video numbering out of file names; a
+        // music file's identity was already established from its own tags when it
+        // was placed on a track.
+        if !is_music {
+            verify_second_parse(title_parsed, &placed_sources)?;
+        }
 
         let plan = cellarr_fs::plan_import(grab_id, moves)
             .await
@@ -2689,7 +2793,10 @@ where
         // Align the parsed coordinates with the grab's committed identity so the
         // verify checks the file against the right episode. The durable release type
         // is likewise taken from the grab (recorded at Grab) rather than re-derived.
-        let mut parsed = cellarr_parse::parse_title(&grab.request.release.title);
+        let mut parsed = cellarr_parse::parse_title_for(
+            grab.request.content_ref.media_type,
+            &grab.request.release.title,
+        );
         parsed.coordinates = vec![grab.request.content_ref.coords.clone()];
         let release_type = grab
             .request
@@ -3884,7 +3991,8 @@ fn naming_format_for(configured: &str, media_type: cellarr_core::MediaType) -> &
         MediaType::Movie => "{Movie Title}",
         MediaType::Tv => "{Series Title}",
         // Music/book formats key off the generic {Title} token.
-        MediaType::Music | MediaType::Book => "{Title}",
+        MediaType::Music => "{Artist Name}",
+        MediaType::Book => "{Title}",
     };
     if configured.contains(primary_token) {
         return configured;
@@ -3916,6 +4024,14 @@ fn naming_format_for_node<'a>(
         && !anime_format.trim().is_empty()
         && cellarr_fs::has_absolute_episode(tokens);
     let chosen = if use_anime { anime_format } else { format };
+    // A multi-disc album keeps each disc in its own folder; the `Medium` token is
+    // only supplied for one, so its presence selects that layout.
+    if media_type == MediaType::Music
+        && !chosen.contains("{Artist Name}")
+        && tokens.tokens.iter().any(|(k, _)| k == "Medium")
+    {
+        return "{Artist Folder}/{Album Title} ({Release Year})/CD{Medium}/{Track} - {Track Title}.{Extension}";
+    }
     naming_format_for(chosen, media_type)
 }
 
@@ -3930,7 +4046,10 @@ fn default_naming_format(media_type: cellarr_core::MediaType) -> &'static str {
             "{Series Title}/Season {Season}/{Series Title} - S{Season}E{Episode}.{Extension}"
         }
         MediaType::Movie => "{Movie Title} ({Release Year})/{Movie Title}.{Extension}",
-        MediaType::Music | MediaType::Book => "{Title}.{Extension}",
+        MediaType::Music => {
+            "{Artist Folder}/{Album Title} ({Release Year})/{Track} - {Track Title}.{Extension}"
+        }
+        MediaType::Book => "{Title}.{Extension}",
     }
 }
 

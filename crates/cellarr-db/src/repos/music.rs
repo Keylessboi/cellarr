@@ -1087,6 +1087,30 @@ impl MusicRepo {
         .await
     }
 
+    /// The files a track holds at any path other than `keep_path`: what an
+    /// upgrade supersedes once the better file is in place.
+    ///
+    /// # Errors
+    /// Returns a [`DbError`] on query failure.
+    pub async fn other_track_files(
+        &self,
+        track: ContentId,
+        keep_path: &str,
+    ) -> Result<Vec<(i64, String)>> {
+        let rows = sqlx::query(&pq(
+            "SELECT tf.id AS id, mf.path AS path FROM track_file tf
+             JOIN media_file mf ON mf.id = tf.media_file_id
+             WHERE tf.track_content_id = ?1 AND mf.path <> ?2",
+        ))
+        .bind(track.to_string())
+        .bind(keep_path)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter()
+            .map(|r| Ok((r.try_get("id")?, r.try_get("path")?)))
+            .collect()
+    }
+
     /// An album's track files.
     ///
     /// # Errors

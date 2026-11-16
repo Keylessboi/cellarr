@@ -30,6 +30,8 @@ pub mod error;
 pub mod importlists;
 pub mod indexers;
 pub mod job;
+pub mod music_import;
+pub mod music_lookup;
 pub mod notify;
 pub mod runner;
 pub mod scheduler;
