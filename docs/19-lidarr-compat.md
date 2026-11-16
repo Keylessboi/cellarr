@@ -197,7 +197,7 @@ real server answering the same calls Lidarr's clients make.
 | Memory, just started | **~140 MiB** | ~900 MiB "fresh pod" |
 | Memory, after a mixed workload | **~410 MiB** (**~240 MiB** with `MALLOC_ARENA_MAX=2`) | 1.5–1.7 GiB (reached 1.7 GiB and wedged; limit raised to 3 GiB) |
 | Memory, empty library | **29 MiB** | n/a |
-| Binary | 35 MB, no runtime, no .NET, no plugin host unless built in | ~200 MB image |
+| Runtime | one 35 MB native binary; no .NET runtime | a .NET application |
 
 Request latency on that library, best of three (the SQLite file on local disk):
 
