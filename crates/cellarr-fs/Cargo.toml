@@ -8,6 +8,7 @@ publish = false
 
 [dependencies]
 cellarr-core.workspace = true
+lofty.workspace = true
 tokio.workspace = true
 rayon.workspace = true
 serde.workspace = true

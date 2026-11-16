@@ -24,6 +24,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod audio;
 mod error;
 mod extras;
 mod fsops;
@@ -36,6 +37,7 @@ mod recycle;
 mod rename;
 mod scan;
 
+pub use audio::{audio_quality_name, is_audio_file, read_audio_tags, AudioTags, AUDIO_EXTS};
 pub use error::{FsError, Result};
 pub use extras::{import_extras, ExtraOutcome};
 pub use fsops::{

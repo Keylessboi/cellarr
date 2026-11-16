@@ -27,6 +27,8 @@ repository = ""
 rust-version = "1.85"
 
 [workspace.dependencies]
+# Audio tag + stream-property reading for music import (pure Rust, no ffmpeg).
+lofty = "0.22"
 # Internal crates
 cellarr-core = { path = "crates/cellarr-core" }
 cellarr-db = { path = "crates/cellarr-db" }
