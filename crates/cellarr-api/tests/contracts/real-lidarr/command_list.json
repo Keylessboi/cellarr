@@ -1,0 +1,43 @@
+{
+ "shape": [
+  "[]",
+  {
+   "body": {
+    "addNewArtists": "boolean",
+    "filter": "string",
+    "folders": [
+     "[]",
+     "string"
+    ],
+    "isExclusive": "boolean",
+    "isLongRunning": "boolean",
+    "isTypeExclusive": "boolean",
+    "lastExecutionTime": "string",
+    "lastStartTime": "string",
+    "name": "string",
+    "requiresDiskAccess": "boolean",
+    "sendUpdatesToClient": "boolean",
+    "suppressMessages": "boolean",
+    "trigger": "string",
+    "updateScheduledTask": "boolean"
+   },
+   "commandName": "string",
+   "duration": "string",
+   "ended": "string",
+   "id": "integer",
+   "lastExecutionTime": "string",
+   "message": "string",
+   "name": "string",
+   "priority": "string",
+   "queued": "string",
+   "result": "string",
+   "sendUpdatesToClient": "boolean",
+   "started": "string",
+   "stateChangeTime": "string",
+   "status": "string",
+   "trigger": "string",
+   "updateScheduledTask": "boolean"
+  }
+ ],
+ "status": 200
+}

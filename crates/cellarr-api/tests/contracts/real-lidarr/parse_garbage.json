@@ -1,0 +1,7 @@
+{
+ "shape": {
+  "customFormatScore": "integer",
+  "title": "string"
+ },
+ "status": 200
+}

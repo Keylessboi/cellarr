@@ -1,0 +1,27 @@
+{
+ "shape": {
+  "allowFingerprinting": "string",
+  "autoUnmonitorPreviouslyDownloadedTracks": "boolean",
+  "chmodFolder": "string",
+  "chownGroup": "string",
+  "copyUsingHardlinks": "boolean",
+  "createEmptyArtistFolders": "boolean",
+  "deleteEmptyFolders": "boolean",
+  "downloadPropersAndRepacks": "string",
+  "enableMediaInfo": "boolean",
+  "extraFileExtensions": "string",
+  "fileDate": "string",
+  "id": "integer",
+  "importExtraFiles": "boolean",
+  "minimumFreeSpaceWhenImporting": "integer",
+  "recycleBin": "string",
+  "recycleBinCleanupDays": "integer",
+  "rescanAfterRefresh": "string",
+  "scriptImportPath": "string",
+  "setPermissionsLinux": "boolean",
+  "skipFreeSpaceCheckWhenImporting": "boolean",
+  "useScriptImport": "boolean",
+  "watchLibraryForChanges": "boolean"
+ },
+ "status": 200
+}

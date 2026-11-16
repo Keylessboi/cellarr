@@ -1,0 +1,492 @@
+{
+  "album_list_artist": [
+    "[].addOptions: extra in cellarr",
+    "[].added: extra in cellarr",
+    "[].artist.allMusicId: extra in cellarr",
+    "[].artist.folder: extra in cellarr",
+    "[].artist.links[]: Lidarr has elements, cellarr has none",
+    "[].artist.mbId: extra in cellarr",
+    "[].artist.members: extra in cellarr",
+    "[].artist.overview: extra in cellarr",
+    "[].artist.remotePoster: extra in cellarr",
+    "[].artist.rootFolderPath: extra in cellarr",
+    "[].cleanTitle: extra in cellarr",
+    "[].disambiguation: extra in cellarr",
+    "[].grabbed: extra in cellarr",
+    "[].images[]: Lidarr has no elements, cellarr has",
+    "[].lastSearchTime: extra in cellarr",
+    "[].media[]: Lidarr has no elements, cellarr has",
+    "[].remoteCover: extra in cellarr",
+    "[].statistics: extra in cellarr"
+  ],
+  "album_list_by_foreignid": [
+    "[].addOptions: extra in cellarr",
+    "[].added: extra in cellarr",
+    "[].artist.addOptions: extra in cellarr",
+    "[].artist.allMusicId: extra in cellarr",
+    "[].artist.folder: extra in cellarr",
+    "[].artist.links[]: Lidarr has elements, cellarr has none",
+    "[].artist.mbId: extra in cellarr",
+    "[].artist.members: extra in cellarr",
+    "[].artist.overview: extra in cellarr",
+    "[].artist.remotePoster: extra in cellarr",
+    "[].artist.rootFolderPath: extra in cellarr",
+    "[].cleanTitle: extra in cellarr",
+    "[].genres[]: Lidarr has elements, cellarr has none",
+    "[].grabbed: extra in cellarr",
+    "[].images[].extension: missing from cellarr (Lidarr: string)",
+    "[].lastSearchTime: extra in cellarr",
+    "[].links[]: Lidarr has elements, cellarr has none",
+    "[].ratings.value: Lidarr number, cellarr integer",
+    "[].releases[]: Lidarr has elements, cellarr has none",
+    "[].remoteCover: extra in cellarr"
+  ],
+  "album_lookup": [
+    "[].artist.added: missing from cellarr (Lidarr: string)",
+    "[].artist.artistType: missing from cellarr (Lidarr: string)",
+    "[].artist.disambiguation: missing from cellarr (Lidarr: string)",
+    "[].artist.discogsId: missing from cellarr (Lidarr: integer)",
+    "[].artist.ended: missing from cellarr (Lidarr: boolean)",
+    "[].artist.genres[]: Lidarr has elements, cellarr has none",
+    "[].artist.id: extra in cellarr",
+    "[].artist.lastAlbum: missing from cellarr (Lidarr: null)",
+    "[].artist.links[]: Lidarr has elements, cellarr has none",
+    "[].artist.mbId: extra in cellarr",
+    "[].artist.monitorNewItems: missing from cellarr (Lidarr: string)",
+    "[].artist.nextAlbum: missing from cellarr (Lidarr: null)",
+    "[].artist.path: extra in cellarr",
+    "[].artist.ratings: missing from cellarr (Lidarr: object)",
+    "[].artist.status: missing from cellarr (Lidarr: string)",
+    "[].artist.tadbId: missing from cellarr (Lidarr: integer)",
+    "[].genres[]: Lidarr has elements, cellarr has none",
+    "[].media[]: Lidarr has elements, cellarr has none",
+    "[].overview: extra in cellarr",
+    "[].releases[]: Lidarr has elements, cellarr has none",
+    "[].remoteCover: missing from cellarr (Lidarr: string)"
+  ],
+  "album_lookup_mbid": [
+    "[].artist.addOptions: extra in cellarr",
+    "[].artist.allMusicId: extra in cellarr",
+    "[].artist.cleanName: extra in cellarr",
+    "[].artist.folder: extra in cellarr",
+    "[].artist.id: extra in cellarr",
+    "[].artist.links[]: Lidarr has elements, cellarr has none",
+    "[].artist.mbId: extra in cellarr",
+    "[].artist.members: extra in cellarr",
+    "[].artist.overview: extra in cellarr",
+    "[].artist.path: extra in cellarr",
+    "[].artist.ratings.value: Lidarr number, cellarr integer",
+    "[].artist.remotePoster: extra in cellarr",
+    "[].artist.rootFolderPath: extra in cellarr",
+    "[].artist.sortName: extra in cellarr",
+    "[].genres[]: Lidarr has elements, cellarr has none",
+    "[].id: extra in cellarr",
+    "[].media[]: Lidarr has elements, cellarr has none",
+    "[].overview: extra in cellarr",
+    "[].releases[]: Lidarr has elements, cellarr has none",
+    "[].remoteCover: missing from cellarr (Lidarr: string)"
+  ],
+  "artist_add": [
+    ".allMusicId: extra in cellarr",
+    ".folder: extra in cellarr",
+    ".images[]: Lidarr has elements, cellarr has none",
+    ".links[]: Lidarr has elements, cellarr has none",
+    ".mbId: extra in cellarr",
+    ".members: extra in cellarr",
+    ".remotePoster: extra in cellarr"
+  ],
+  "artist_add_missing_fields": [
+    "[].formattedMessagePlaceholderValues.comparisonProperty: missing from cellarr (Lidarr: string)",
+    "[].formattedMessagePlaceholderValues.comparisonValue: missing from cellarr (Lidarr: integer)"
+  ],
+  "artist_editor_put": [
+    "[]: Lidarr has elements, cellarr has none"
+  ],
+  "artist_get": [
+    ".allMusicId: extra in cellarr",
+    ".folder: extra in cellarr",
+    ".images[]: Lidarr has elements, cellarr has none",
+    ".lastAlbum.addOptions: extra in cellarr",
+    ".lastAlbum.added: extra in cellarr",
+    ".lastAlbum.artist: missing from cellarr (Lidarr: object)",
+    ".lastAlbum.cleanTitle: extra in cellarr",
+    ".lastAlbum.disambiguation: extra in cellarr",
+    ".lastAlbum.grabbed: extra in cellarr",
+    ".lastAlbum.images[]: Lidarr has no elements, cellarr has",
+    ".lastAlbum.lastSearchTime: extra in cellarr",
+    ".lastAlbum.media[]: Lidarr has no elements, cellarr has",
+    ".lastAlbum.remoteCover: extra in cellarr",
+    ".links[]: Lidarr has elements, cellarr has none",
+    ".mbId: extra in cellarr",
+    ".members: extra in cellarr",
+    ".remotePoster: extra in cellarr"
+  ],
+  "artist_list": [
+    "[].allMusicId: extra in cellarr",
+    "[].folder: extra in cellarr",
+    "[].images[]: Lidarr has elements, cellarr has none",
+    "[].lastAlbum.addOptions: extra in cellarr",
+    "[].lastAlbum.added: extra in cellarr",
+    "[].lastAlbum.artist: missing from cellarr (Lidarr: object)",
+    "[].lastAlbum.cleanTitle: extra in cellarr",
+    "[].lastAlbum.disambiguation: extra in cellarr",
+    "[].lastAlbum.grabbed: extra in cellarr",
+    "[].lastAlbum.images[]: Lidarr has no elements, cellarr has",
+    "[].lastAlbum.lastSearchTime: extra in cellarr",
+    "[].lastAlbum.media[]: Lidarr has no elements, cellarr has",
+    "[].lastAlbum.remoteCover: extra in cellarr",
+    "[].links[]: Lidarr has elements, cellarr has none",
+    "[].mbId: extra in cellarr",
+    "[].members: extra in cellarr",
+    "[].remotePoster: extra in cellarr",
+    "[].statistics: extra in cellarr"
+  ],
+  "artist_list_by_mbid": [
+    "[].addOptions: extra in cellarr",
+    "[].allMusicId: extra in cellarr",
+    "[].folder: extra in cellarr",
+    "[].lastAlbum.addOptions: extra in cellarr",
+    "[].lastAlbum.added: extra in cellarr",
+    "[].lastAlbum.artist: missing from cellarr (Lidarr: object)",
+    "[].lastAlbum.cleanTitle: extra in cellarr",
+    "[].lastAlbum.genres[]: Lidarr has elements, cellarr has none",
+    "[].lastAlbum.grabbed: extra in cellarr",
+    "[].lastAlbum.images[].extension: missing from cellarr (Lidarr: string)",
+    "[].lastAlbum.images[].remoteUrl: extra in cellarr",
+    "[].lastAlbum.lastSearchTime: extra in cellarr",
+    "[].lastAlbum.links[]: Lidarr has elements, cellarr has none",
+    "[].lastAlbum.ratings.value: Lidarr number, cellarr integer",
+    "[].lastAlbum.releases[]: Lidarr has elements, cellarr has none",
+    "[].lastAlbum.remoteCover: extra in cellarr",
+    "[].links[]: Lidarr has elements, cellarr has none",
+    "[].mbId: extra in cellarr",
+    "[].members: extra in cellarr",
+    "[].overview: extra in cellarr",
+    "[].remotePoster: extra in cellarr"
+  ],
+  "artist_lookup": [
+    "[].genres[]: Lidarr has elements, cellarr has none",
+    "[].images[]: Lidarr has elements, cellarr has none",
+    "[].links[]: Lidarr has elements, cellarr has none"
+  ],
+  "artist_lookup_empty": [
+    "status: Lidarr 503, cellarr 200"
+  ],
+  "artist_lookup_mbid": [
+    "[].addOptions: missing from cellarr (Lidarr: object)",
+    "[].images[]: Lidarr has elements, cellarr has none",
+    "[].links[]: Lidarr has elements, cellarr has none"
+  ],
+  "artist_lookup_nomatch": [
+    "[]: Lidarr has no elements, cellarr has"
+  ],
+  "artist_lookup_unicode": [
+    "[].cleanName: extra in cellarr",
+    "[].id: extra in cellarr",
+    "[].links[]: Lidarr has elements, cellarr has none",
+    "[].overview: extra in cellarr",
+    "[].path: extra in cellarr",
+    "[].sortName: extra in cellarr"
+  ],
+  "artist_put_404": [
+    "status: Lidarr 400, cellarr 404"
+  ],
+  "artist_put_unmonitor": [
+    ".addOptions: extra in cellarr",
+    ".allMusicId: extra in cellarr",
+    ".folder: extra in cellarr",
+    ".lastAlbum.addOptions: extra in cellarr",
+    ".lastAlbum.added: extra in cellarr",
+    ".lastAlbum.artist: missing from cellarr (Lidarr: object)",
+    ".lastAlbum.cleanTitle: extra in cellarr",
+    ".lastAlbum.genres[]: Lidarr has elements, cellarr has none",
+    ".lastAlbum.grabbed: extra in cellarr",
+    ".lastAlbum.images[].extension: missing from cellarr (Lidarr: string)",
+    ".lastAlbum.images[].remoteUrl: extra in cellarr",
+    ".lastAlbum.lastSearchTime: extra in cellarr",
+    ".lastAlbum.links[]: Lidarr has elements, cellarr has none",
+    ".lastAlbum.ratings.value: Lidarr number, cellarr integer",
+    ".lastAlbum.releases[]: Lidarr has elements, cellarr has none",
+    ".lastAlbum.remoteCover: extra in cellarr",
+    ".links[]: Lidarr has elements, cellarr has none",
+    ".mbId: extra in cellarr",
+    ".members: extra in cellarr",
+    ".overview: extra in cellarr",
+    ".remotePoster: extra in cellarr"
+  ],
+  "auth_missing_key": [
+    "status: Lidarr 401, cellarr 200"
+  ],
+  "auth_wrong_key": [
+    "status: Lidarr 401, cellarr 200"
+  ],
+  "bad_json_body": [
+    ".traceId: missing from cellarr (Lidarr: string)"
+  ],
+  "calendar_bad_date": [
+    "status: Lidarr 400, cellarr 200"
+  ],
+  "calendar_range": [
+    "[].addOptions: extra in cellarr",
+    "[].added: extra in cellarr",
+    "[].artist.addOptions: extra in cellarr",
+    "[].artist.allMusicId: extra in cellarr",
+    "[].artist.folder: extra in cellarr",
+    "[].artist.links[]: Lidarr has elements, cellarr has none",
+    "[].artist.mbId: extra in cellarr",
+    "[].artist.members: extra in cellarr",
+    "[].artist.overview: extra in cellarr",
+    "[].artist.remotePoster: extra in cellarr",
+    "[].artist.rootFolderPath: extra in cellarr",
+    "[].cleanTitle: extra in cellarr",
+    "[].genres[]: Lidarr has elements, cellarr has none",
+    "[].grabbed: extra in cellarr",
+    "[].images[].extension: missing from cellarr (Lidarr: string)",
+    "[].lastSearchTime: extra in cellarr",
+    "[].links[]: Lidarr has elements, cellarr has none",
+    "[].ratings.value: Lidarr number, cellarr integer",
+    "[].releases[].country[]: Lidarr has elements, cellarr has none",
+    "[].releases[].label[]: Lidarr has elements, cellarr has none",
+    "[].releases[].mediaCount: extra in cellarr",
+    "[].releases[].mediumCount: missing from cellarr (Lidarr: integer)",
+    "[].remoteCover: extra in cellarr"
+  ],
+  "command_get": [
+    "status: Lidarr 404, cellarr 200"
+  ],
+  "command_list": [
+    "[]: Lidarr has elements, cellarr has none"
+  ],
+  "command_missing_name": [
+    ": Lidarr array, cellarr object"
+  ],
+  "command_refresh": [
+    ".body.artistId: extra in cellarr",
+    ".body.artistIds: missing from cellarr (Lidarr: array)",
+    ".body.isNewArtist: missing from cellarr (Lidarr: boolean)",
+    ".body.suppressMessages: missing from cellarr (Lidarr: boolean)",
+    ".clientUserAgent: extra in cellarr",
+    ".duration: extra in cellarr",
+    ".ended: extra in cellarr",
+    ".exception: extra in cellarr",
+    ".lastExecutionTime: extra in cellarr",
+    ".message: extra in cellarr"
+  ],
+  "command_refresh_poll": [
+    "status: Lidarr 500, cellarr 201"
+  ],
+  "command_rescan": [
+    ".body.addNewArtists: missing from cellarr (Lidarr: boolean)",
+    ".body.completionMessage: extra in cellarr",
+    ".body.filter: missing from cellarr (Lidarr: string)",
+    ".body.suppressMessages: missing from cellarr (Lidarr: boolean)",
+    ".clientUserAgent: extra in cellarr",
+    ".duration: extra in cellarr",
+    ".ended: extra in cellarr",
+    ".exception: extra in cellarr",
+    ".lastExecutionTime: extra in cellarr",
+    ".message: extra in cellarr"
+  ],
+  "command_unknown": [
+    "status: Lidarr 500, cellarr 400"
+  ],
+  "customformat_schema": [
+    "[].fields[].helpText: missing from cellarr (Lidarr: string)",
+    "[].fields[].isFloat: missing from cellarr (Lidarr: boolean)",
+    "[].fields[].privacy: missing from cellarr (Lidarr: string)",
+    "[].presets[]: Lidarr has elements, cellarr has none"
+  ],
+  "delayprofile": [
+    "[].bypassIfAboveCustomFormatScore: missing from cellarr (Lidarr: boolean)",
+    "[].minimumCustomFormatScore: missing from cellarr (Lidarr: integer)"
+  ],
+  "delayprofile_get": [
+    "status: Lidarr 200, cellarr 404"
+  ],
+  "downloadclient_create_qbit": [
+    "status: Lidarr 400, cellarr 201"
+  ],
+  "downloadclient_delete": [
+    "status: Lidarr 400, cellarr 200"
+  ],
+  "downloadclient_get": [
+    "status: Lidarr 404, cellarr 200"
+  ],
+  "downloadclient_schema": [
+    "[].fields[].selectOptions: extra in cellarr"
+  ],
+  "empty_body_post": [
+    ".errors.: missing from cellarr (Lidarr: array)",
+    ".errors.$: extra in cellarr",
+    ".traceId: missing from cellarr (Lidarr: string)"
+  ],
+  "importlist_schema": [
+    "[].enableAuto: extra in cellarr",
+    "[].enableAutomaticAdd: missing from cellarr (Lidarr: boolean)",
+    "[].enabled: extra in cellarr",
+    "[].fields[].isFloat: missing from cellarr (Lidarr: boolean)",
+    "[].fields[].value: Lidarr string, cellarr boolean",
+    "[].listOrder: missing from cellarr (Lidarr: integer)",
+    "[].message: missing from cellarr (Lidarr: object)",
+    "[].metadataProfileId: missing from cellarr (Lidarr: integer)",
+    "[].minRefreshInterval: missing from cellarr (Lidarr: string)",
+    "[].monitorNewItems: missing from cellarr (Lidarr: string)",
+    "[].qualityProfileId: missing from cellarr (Lidarr: integer)",
+    "[].shouldMonitor: missing from cellarr (Lidarr: string)",
+    "[].shouldMonitorExisting: missing from cellarr (Lidarr: boolean)",
+    "[].shouldSearch: missing from cellarr (Lidarr: boolean)"
+  ],
+  "indexer_create_torznab": [
+    "status: Lidarr 400, cellarr 201"
+  ],
+  "indexer_delete": [
+    "status: Lidarr 400, cellarr 200"
+  ],
+  "indexer_get": [
+    "status: Lidarr 404, cellarr 200"
+  ],
+  "indexer_schema": [
+    "[].fields[].helpTextWarning: missing from cellarr (Lidarr: string)",
+    "[].fields[].selectOptions: missing from cellarr (Lidarr: array)",
+    "[].fields[].selectOptionsProviderAction: extra in cellarr",
+    "[].presets[]: Lidarr has no elements, cellarr has"
+  ],
+  "log": [
+    "status: Lidarr 200, cellarr 404"
+  ],
+  "manualimport": [
+    "status: Lidarr 200, cellarr 404"
+  ],
+  "notification_schema": [
+    "[].fields[].helpLink: missing from cellarr (Lidarr: string)",
+    "[].fields[].helpText: missing from cellarr (Lidarr: string)",
+    "[].fields[].isFloat: missing from cellarr (Lidarr: boolean)",
+    "[].fields[].placeholder: missing from cellarr (Lidarr: string)",
+    "[].fields[].selectOptions: missing from cellarr (Lidarr: array)",
+    "[].includeHealthWarnings: missing from cellarr (Lidarr: boolean)",
+    "[].message: missing from cellarr (Lidarr: object)",
+    "[].onAlbumDelete: missing from cellarr (Lidarr: boolean)",
+    "[].onApplicationUpdate: missing from cellarr (Lidarr: boolean)",
+    "[].onArtistAdd: missing from cellarr (Lidarr: boolean)",
+    "[].onArtistDelete: missing from cellarr (Lidarr: boolean)",
+    "[].onDownload: extra in cellarr",
+    "[].onDownloadFailure: missing from cellarr (Lidarr: boolean)",
+    "[].onImportFailure: missing from cellarr (Lidarr: boolean)",
+    "[].onReleaseImport: missing from cellarr (Lidarr: boolean)",
+    "[].onTrackRetag: missing from cellarr (Lidarr: boolean)",
+    "[].supportsOnAlbumDelete: missing from cellarr (Lidarr: boolean)",
+    "[].supportsOnApplicationUpdate: missing from cellarr (Lidarr: boolean)",
+    "[].supportsOnArtistAdd: missing from cellarr (Lidarr: boolean)",
+    "[].supportsOnArtistDelete: missing from cellarr (Lidarr: boolean)",
+    "[].supportsOnDownload: extra in cellarr",
+    "[].supportsOnDownloadFailure: missing from cellarr (Lidarr: boolean)",
+    "[].supportsOnImportFailure: missing from cellarr (Lidarr: boolean)",
+    "[].supportsOnReleaseImport: missing from cellarr (Lidarr: boolean)",
+    "[].supportsOnTrackRetag: missing from cellarr (Lidarr: boolean)"
+  ],
+  "parse": [
+    ".albums[].addOptions: extra in cellarr",
+    ".albums[].added: extra in cellarr",
+    ".albums[].artist.allMusicId: extra in cellarr",
+    ".albums[].artist.folder: extra in cellarr",
+    ".albums[].artist.links[]: Lidarr has elements, cellarr has none",
+    ".albums[].artist.mbId: extra in cellarr",
+    ".albums[].artist.members: extra in cellarr",
+    ".albums[].artist.overview: extra in cellarr",
+    ".albums[].artist.remotePoster: extra in cellarr",
+    ".albums[].artist.rootFolderPath: extra in cellarr",
+    ".albums[].cleanTitle: extra in cellarr",
+    ".albums[].disambiguation: extra in cellarr",
+    ".albums[].grabbed: extra in cellarr",
+    ".albums[].images[]: Lidarr has no elements, cellarr has",
+    ".albums[].lastSearchTime: extra in cellarr",
+    ".albums[].media[]: Lidarr has no elements, cellarr has",
+    ".albums[].remoteCover: extra in cellarr",
+    ".albums[].statistics: extra in cellarr",
+    ".artist.allMusicId: extra in cellarr",
+    ".artist.folder: extra in cellarr",
+    ".artist.links[]: Lidarr has elements, cellarr has none",
+    ".artist.mbId: extra in cellarr",
+    ".artist.members: extra in cellarr",
+    ".artist.overview: extra in cellarr",
+    ".artist.remotePoster: extra in cellarr",
+    ".artist.rootFolderPath: extra in cellarr",
+    ".customFormatScore: missing from cellarr (Lidarr: integer)",
+    ".customFormats: missing from cellarr (Lidarr: array)",
+    ".id: extra in cellarr",
+    ".parsedAlbumInfo.artistTitleInfo.titleWithoutYear: extra in cellarr",
+    ".parsedAlbumInfo.discographyEnd: missing from cellarr (Lidarr: integer)",
+    ".parsedAlbumInfo.discographyStart: missing from cellarr (Lidarr: integer)",
+    ".parsedAlbumInfo.releaseTitle: missing from cellarr (Lidarr: string)",
+    ".parsedAlbumInfo.releaseVersion: missing from cellarr (Lidarr: string)"
+  ],
+  "parse_discography": [
+    ".albums[]: Lidarr has elements, cellarr has none",
+    ".customFormatScore: missing from cellarr (Lidarr: integer)",
+    ".customFormats: missing from cellarr (Lidarr: array)",
+    ".id: extra in cellarr",
+    ".parsedAlbumInfo.artistTitleInfo.titleWithoutYear: extra in cellarr",
+    ".parsedAlbumInfo.discographyEnd: missing from cellarr (Lidarr: integer)",
+    ".parsedAlbumInfo.discographyStart: missing from cellarr (Lidarr: integer)",
+    ".parsedAlbumInfo.releaseTitle: missing from cellarr (Lidarr: string)",
+    ".parsedAlbumInfo.releaseVersion: missing from cellarr (Lidarr: string)"
+  ],
+  "parse_empty": [
+    "status: Lidarr 204, cellarr 200"
+  ],
+  "parse_garbage": [
+    ".albums: extra in cellarr",
+    ".artist: extra in cellarr",
+    ".customFormatScore: missing from cellarr (Lidarr: integer)",
+    ".id: extra in cellarr",
+    ".parsedAlbumInfo: extra in cellarr"
+  ],
+  "qualityprofile_post_bad": [
+    "status: Lidarr 500, cellarr 400"
+  ],
+  "qualityprofile_put_404": [
+    "status: Lidarr 500, cellarr 404"
+  ],
+  "release_push_bad": [
+    "status: Lidarr 400, cellarr 404"
+  ],
+  "rename": [
+    "status: Lidarr 200, cellarr 404"
+  ],
+  "retag": [
+    "status: Lidarr 200, cellarr 404"
+  ],
+  "rootfolder_missing_path": [
+    "[].formattedMessagePlaceholderValues.comparisonProperty: missing from cellarr (Lidarr: string)",
+    "[].formattedMessagePlaceholderValues.comparisonValue: missing from cellarr (Lidarr: integer)"
+  ],
+  "rootfolder_nonexistent": [
+    "[].formattedMessagePlaceholderValues.path: missing from cellarr (Lidarr: string)"
+  ],
+  "system_backup": [
+    "status: Lidarr 200, cellarr 500"
+  ],
+  "system_task": [
+    "[]: Lidarr has elements, cellarr has none"
+  ],
+  "tag_detail": [
+    "status: Lidarr 200, cellarr 400"
+  ],
+  "track_list_by_artist": [
+    "[].artist: extra in cellarr"
+  ],
+  "track_no_params": [
+    ".content: missing from cellarr (Lidarr: string)",
+    ".description: extra in cellarr"
+  ],
+  "trackfile_no_params": [
+    ".content: missing from cellarr (Lidarr: string)",
+    ".description: extra in cellarr"
+  ],
+  "update": [
+    "[]: Lidarr has elements, cellarr has none"
+  ],
+  "wanted_missing_data": [
+    ".records[]: Lidarr has elements, cellarr has none"
+  ]
+}

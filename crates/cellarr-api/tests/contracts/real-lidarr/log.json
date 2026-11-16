@@ -1,0 +1,22 @@
+{
+ "shape": {
+  "page": "integer",
+  "pageSize": "integer",
+  "records": [
+   "[]",
+   {
+    "exception": "string",
+    "exceptionType": "string",
+    "id": "integer",
+    "level": "string",
+    "logger": "string",
+    "message": "string",
+    "time": "string"
+   }
+  ],
+  "sortDirection": "string",
+  "sortKey": "string",
+  "totalRecords": "integer"
+ },
+ "status": 200
+}

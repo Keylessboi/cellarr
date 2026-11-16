@@ -1,0 +1,30 @@
+{
+ "shape": {
+  "cutoff": "integer",
+  "cutoffFormatScore": "integer",
+  "formatItems": [
+   "[]",
+   {}
+  ],
+  "items": [
+   "[]",
+   {
+    "allowed": "boolean",
+    "id": "integer",
+    "items": [
+     "[]",
+     {}
+    ],
+    "name": "string",
+    "quality": {
+     "id": "integer",
+     "name": "string"
+    }
+   }
+  ],
+  "minFormatScore": "integer",
+  "name": "string",
+  "upgradeAllowed": "boolean"
+ },
+ "status": 200
+}

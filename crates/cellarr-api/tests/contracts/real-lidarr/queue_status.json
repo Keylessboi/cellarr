@@ -1,0 +1,12 @@
+{
+ "shape": {
+  "count": "integer",
+  "errors": "boolean",
+  "totalCount": "integer",
+  "unknownCount": "integer",
+  "unknownErrors": "boolean",
+  "unknownWarnings": "boolean",
+  "warnings": "boolean"
+ },
+ "status": 200
+}

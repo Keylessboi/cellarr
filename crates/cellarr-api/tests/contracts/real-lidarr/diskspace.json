@@ -1,0 +1,12 @@
+{
+ "shape": [
+  "[]",
+  {
+   "freeSpace": "integer",
+   "label": "string",
+   "path": "string",
+   "totalSpace": "integer"
+  }
+ ],
+ "status": 200
+}

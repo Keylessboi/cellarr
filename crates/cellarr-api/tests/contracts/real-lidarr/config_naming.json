@@ -1,0 +1,16 @@
+{
+ "shape": {
+  "artistFolderFormat": "string",
+  "colonReplacementFormat": "integer",
+  "id": "integer",
+  "includeAlbumTitle": "boolean",
+  "includeArtistName": "boolean",
+  "includeQuality": "boolean",
+  "multiDiscTrackFormat": "string",
+  "renameTracks": "boolean",
+  "replaceIllegalCharacters": "boolean",
+  "replaceSpaces": "boolean",
+  "standardTrackFormat": "string"
+ },
+ "status": 200
+}

@@ -1,0 +1,15 @@
+{
+ "shape": {
+  "errors": {
+   "": [
+    "[]",
+    "string"
+   ]
+  },
+  "status": "integer",
+  "title": "string",
+  "traceId": "string",
+  "type": "string"
+ },
+ "status": 400
+}

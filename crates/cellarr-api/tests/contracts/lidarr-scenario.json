@@ -1,0 +1,782 @@
+[
+ {
+  "name": "status",
+  "path": "/system/status"
+ },
+ {
+  "name": "health",
+  "path": "/health"
+ },
+ {
+  "name": "qualityprofile_list",
+  "path": "/qualityprofile"
+ },
+ {
+  "name": "qualityprofile_schema",
+  "path": "/qualityprofile/schema"
+ },
+ {
+  "name": "metadataprofile_list",
+  "path": "/metadataprofile"
+ },
+ {
+  "name": "metadataprofile_schema",
+  "path": "/metadataprofile/schema"
+ },
+ {
+  "name": "qualitydefinition",
+  "path": "/qualitydefinition"
+ },
+ {
+  "name": "rootfolder_empty",
+  "path": "/rootfolder"
+ },
+ {
+  "name": "rootfolder_add",
+  "method": "POST",
+  "path": "/rootfolder",
+  "body": {
+   "name": "Music",
+   "path": "{root}",
+   "defaultMetadataProfileId": 1,
+   "defaultQualityProfileId": 1,
+   "defaultMonitorOption": "all",
+   "defaultNewItemMonitorOption": "all",
+   "defaultTags": []
+  }
+ },
+ {
+  "name": "rootfolder_list",
+  "path": "/rootfolder"
+ },
+ {
+  "name": "tag_add",
+  "method": "POST",
+  "path": "/tag",
+  "body": {
+   "label": "test"
+  }
+ },
+ {
+  "name": "tag_list",
+  "path": "/tag"
+ },
+ {
+  "name": "indexer_schema",
+  "path": "/indexer/schema"
+ },
+ {
+  "name": "downloadclient_schema",
+  "path": "/downloadclient/schema"
+ },
+ {
+  "name": "notification_schema",
+  "path": "/notification/schema"
+ },
+ {
+  "name": "importlist_schema",
+  "path": "/importlist/schema"
+ },
+ {
+  "name": "delayprofile",
+  "path": "/delayprofile"
+ },
+ {
+  "name": "releaseprofile",
+  "path": "/releaseprofile"
+ },
+ {
+  "name": "customformat",
+  "path": "/customformat"
+ },
+ {
+  "name": "remotepathmapping",
+  "path": "/remotepathmapping"
+ },
+ {
+  "name": "diskspace",
+  "path": "/diskspace"
+ },
+ {
+  "name": "language",
+  "path": "/language"
+ },
+ {
+  "name": "config_host",
+  "path": "/config/host"
+ },
+ {
+  "name": "config_ui",
+  "path": "/config/ui"
+ },
+ {
+  "name": "config_naming",
+  "path": "/config/naming"
+ },
+ {
+  "name": "config_mediamanagement",
+  "path": "/config/mediamanagement"
+ },
+ {
+  "name": "config_indexer",
+  "path": "/config/indexer"
+ },
+ {
+  "name": "config_downloadclient",
+  "path": "/config/downloadclient"
+ },
+ {
+  "name": "config_metadataprovider",
+  "path": "/config/metadataprovider"
+ },
+ {
+  "name": "queue_empty",
+  "path": "/queue?page=1&pageSize=10"
+ },
+ {
+  "name": "queue_status",
+  "path": "/queue/status"
+ },
+ {
+  "name": "history_empty",
+  "path": "/history?page=1&pageSize=10"
+ },
+ {
+  "name": "wanted_missing_empty",
+  "path": "/wanted/missing?page=1&pageSize=10"
+ },
+ {
+  "name": "wanted_cutoff_empty",
+  "path": "/wanted/cutoff?page=1&pageSize=10"
+ },
+ {
+  "name": "blocklist_empty",
+  "path": "/blocklist?page=1&pageSize=10"
+ },
+ {
+  "name": "command_list",
+  "path": "/command"
+ },
+ {
+  "name": "calendar",
+  "path": "/calendar?start=2020-01-01&end=2030-01-01"
+ },
+ {
+  "name": "artist_lookup",
+  "path": "/artist/lookup?term=radiohead",
+  "retry": true
+ },
+ {
+  "name": "album_lookup",
+  "path": "/album/lookup?term=radiohead%20ok%20computer",
+  "retry": true
+ },
+ {
+  "name": "artist_add",
+  "method": "POST",
+  "path": "/artist",
+  "retry": false,
+  "body": {
+   "foreignArtistId": "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+   "artistName": "Radiohead",
+   "qualityProfileId": 1,
+   "metadataProfileId": 1,
+   "rootFolderPath": "{root}",
+   "monitored": true,
+   "monitorNewItems": "all",
+   "addOptions": {
+    "monitor": "none",
+    "searchForMissingAlbums": false
+   }
+  },
+  "save": "aid",
+  "from": "j['id']"
+ },
+ {
+  "name": "artist_list",
+  "path": "/artist"
+ },
+ {
+  "name": "artist_get",
+  "path": "/artist/1"
+ },
+ {
+  "name": "album_list_artist",
+  "path": "/album?artistId=1"
+ },
+ {
+  "name": "track_list_unknown_album",
+  "path": "/track?albumId=999999"
+ },
+ {
+  "name": "artist_404",
+  "path": "/artist/999999"
+ },
+ {
+  "name": "album_404",
+  "path": "/album/999999"
+ },
+ {
+  "name": "qualityprofile_404",
+  "path": "/qualityprofile/999999"
+ },
+ {
+  "name": "unknown_endpoint",
+  "path": "/nonsense"
+ },
+ {
+  "name": "command_unknown",
+  "method": "POST",
+  "path": "/command",
+  "body": {
+   "name": "NoSuchCommand"
+  }
+ },
+ {
+  "name": "command_refresh",
+  "method": "POST",
+  "path": "/command",
+  "body": {
+   "name": "RefreshArtist",
+   "artistId": 1
+  }
+ },
+ {
+  "name": "history_artist",
+  "path": "/history/artist?artistId=1"
+ },
+ {
+  "name": "parse",
+  "path": "/parse?title=Radiohead%20-%20OK%20Computer%20(1997)%20%5BFLAC%5D"
+ },
+ {
+  "name": "release_no_album",
+  "path": "/release"
+ },
+ {
+  "name": "trackfile_list",
+  "path": "/trackfile?artistId=1"
+ },
+ {
+  "name": "auth_missing_key",
+  "path": "/system/status",
+  "headers": {
+   "X-Api-Key": null
+  }
+ },
+ {
+  "name": "auth_wrong_key",
+  "path": "/system/status",
+  "headers": {
+   "X-Api-Key": "wrong"
+  }
+ },
+ {
+  "name": "auth_key_in_query",
+  "path": "/system/status?apikey=realkey0123456789abcdef0123456789",
+  "headers": {
+   "X-Api-Key": null
+  }
+ },
+ {
+  "name": "bad_json_body",
+  "method": "POST",
+  "path": "/tag",
+  "raw": "{not json"
+ },
+ {
+  "name": "empty_body_post",
+  "method": "POST",
+  "path": "/tag",
+  "raw": ""
+ },
+ {
+  "name": "tag_duplicate",
+  "method": "POST",
+  "path": "/tag",
+  "body": {
+   "label": "test"
+  }
+ },
+ {
+  "name": "tag_empty_label",
+  "method": "POST",
+  "path": "/tag",
+  "body": {
+   "label": ""
+  }
+ },
+ {
+  "name": "rootfolder_missing_path",
+  "method": "POST",
+  "path": "/rootfolder",
+  "body": {
+   "name": "x"
+  }
+ },
+ {
+  "name": "rootfolder_nonexistent",
+  "method": "POST",
+  "path": "/rootfolder",
+  "body": {
+   "name": "nope",
+   "path": "/definitely/not/here",
+   "defaultMetadataProfileId": 1,
+   "defaultQualityProfileId": 1
+  }
+ },
+ {
+  "name": "artist_lookup_empty",
+  "path": "/artist/lookup?term="
+ },
+ {
+  "name": "artist_lookup_mbid",
+  "path": "/artist/lookup?term=lidarr:a74b1b7f-71a5-4011-9441-d0b5e4122711",
+  "retry": true
+ },
+ {
+  "name": "artist_lookup_unicode",
+  "path": "/artist/lookup?term=b%C3%B6rn%20%E2%80%94%20%E3%81%82",
+  "retry": true
+ },
+ {
+  "name": "artist_lookup_nomatch",
+  "path": "/artist/lookup?term=zzzzqqqxxx9999nothing",
+  "retry": true
+ },
+ {
+  "name": "album_lookup_mbid",
+  "path": "/album/lookup?term=lidarr:f2be2b07-bc65-3210-8c61-56533162cbeb",
+  "retry": true
+ },
+ {
+  "name": "artist_add_missing_fields",
+  "method": "POST",
+  "path": "/artist",
+  "body": {
+   "artistName": "x"
+  }
+ },
+ {
+  "name": "artist_add_bad_profile",
+  "method": "POST",
+  "path": "/artist",
+  "body": {
+   "foreignArtistId": "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+   "artistName": "Radiohead",
+   "qualityProfileId": 9999,
+   "metadataProfileId": 1,
+   "rootFolderPath": "{root}",
+   "monitored": true
+  }
+ },
+ {
+  "name": "artist_add_dup",
+  "method": "POST",
+  "path": "/artist",
+  "body": {
+   "foreignArtistId": "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+   "artistName": "Radiohead",
+   "qualityProfileId": 1,
+   "metadataProfileId": 1,
+   "rootFolderPath": "{root}",
+   "monitored": true
+  }
+ },
+ {
+  "name": "artist_put_unmonitor",
+  "method": "PUT",
+  "path": "/artist/{aid}",
+  "body": {
+   "id": "{aid}",
+   "foreignArtistId": "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+   "artistName": "Radiohead",
+   "monitored": false,
+   "qualityProfileId": 1,
+   "metadataProfileId": 1,
+   "path": "{root}/Radiohead",
+   "rootFolderPath": "{root}",
+   "monitorNewItems": "none",
+   "tags": []
+  }
+ },
+ {
+  "name": "artist_put_404",
+  "method": "PUT",
+  "path": "/artist/99999",
+  "body": {
+   "id": 99999,
+   "artistName": "x"
+  }
+ },
+ {
+  "name": "artist_list_by_mbid",
+  "path": "/artist?mbId=a74b1b7f-71a5-4011-9441-d0b5e4122711"
+ },
+ {
+  "name": "artist_editor_put",
+  "method": "PUT",
+  "path": "/artist/editor",
+  "body": {
+   "artistIds": [
+    "{aid}"
+   ],
+   "monitored": true,
+   "tags": [],
+   "applyTags": "add"
+  }
+ },
+ {
+  "name": "album_list_by_foreignid",
+  "path": "/album?foreignAlbumId=bbce0087-d386-4246-a51d-dbcdfdbe8fb2"
+ },
+ {
+  "name": "album_monitor_bulk",
+  "method": "PUT",
+  "path": "/album/monitor",
+  "body": {
+   "albumIds": [],
+   "monitored": true
+  }
+ },
+ {
+  "name": "track_list_by_artist",
+  "path": "/track?artistId={aid}"
+ },
+ {
+  "name": "track_no_params",
+  "path": "/track"
+ },
+ {
+  "name": "trackfile_no_params",
+  "path": "/trackfile"
+ },
+ {
+  "name": "queue_paged",
+  "path": "/queue?page=2&pageSize=5&includeArtist=true&includeAlbum=true"
+ },
+ {
+  "name": "queue_details",
+  "path": "/queue/details"
+ },
+ {
+  "name": "history_sorted",
+  "path": "/history?page=1&pageSize=5&sortKey=date&sortDirection=descending&includeArtist=true"
+ },
+ {
+  "name": "history_since",
+  "path": "/history/since?date=2020-01-01"
+ },
+ {
+  "name": "wanted_missing_data",
+  "path": "/wanted/missing?page=1&pageSize=10&sortKey=releaseDate&sortDirection=descending&includeArtist=true&monitored=true"
+ },
+ {
+  "name": "wanted_cutoff_data",
+  "path": "/wanted/cutoff?page=1&pageSize=10&includeArtist=true"
+ },
+ {
+  "name": "calendar_range",
+  "path": "/calendar?start=1990-01-01&end=2030-01-01&unmonitored=true&includeArtist=true"
+ },
+ {
+  "name": "calendar_bad_date",
+  "path": "/calendar?start=garbage"
+ },
+ {
+  "name": "blocklist_paged",
+  "path": "/blocklist?page=1&pageSize=5"
+ },
+ {
+  "name": "blocklist_delete_404",
+  "method": "DELETE",
+  "path": "/blocklist/99999"
+ },
+ {
+  "name": "command_refresh_poll",
+  "method": "POST",
+  "path": "/command",
+  "body": {
+   "name": "RefreshArtist",
+   "artistId": "{aid}"
+  },
+  "save": "cid",
+  "from": "j['id']"
+ },
+ {
+  "name": "command_get",
+  "path": "/command/{cid}"
+ },
+ {
+  "name": "command_get_404",
+  "path": "/command/99999"
+ },
+ {
+  "name": "command_rescan",
+  "method": "POST",
+  "path": "/command",
+  "body": {
+   "name": "RescanFolders"
+  }
+ },
+ {
+  "name": "command_missing_name",
+  "method": "POST",
+  "path": "/command",
+  "body": {}
+ },
+ {
+  "name": "qualityprofile_post_bad",
+  "method": "POST",
+  "path": "/qualityprofile",
+  "body": {
+   "name": ""
+  }
+ },
+ {
+  "name": "qualityprofile_put_404",
+  "method": "PUT",
+  "path": "/qualityprofile/99999",
+  "body": {
+   "id": 99999,
+   "name": "x"
+  }
+ },
+ {
+  "name": "qualityprofile_delete_404",
+  "method": "DELETE",
+  "path": "/qualityprofile/99999"
+ },
+ {
+  "name": "metadataprofile_get",
+  "path": "/metadataprofile/1"
+ },
+ {
+  "name": "metadataprofile_404",
+  "path": "/metadataprofile/99999"
+ },
+ {
+  "name": "tag_detail",
+  "path": "/tag/detail"
+ },
+ {
+  "name": "tag_delete_404",
+  "method": "DELETE",
+  "path": "/tag/99999"
+ },
+ {
+  "name": "customformat_schema",
+  "path": "/customformat/schema"
+ },
+ {
+  "name": "delayprofile_get",
+  "path": "/delayprofile/1"
+ },
+ {
+  "name": "downloadclient_list",
+  "path": "/downloadclient"
+ },
+ {
+  "name": "downloadclient_create_qbit",
+  "method": "POST",
+  "path": "/downloadclient",
+  "body": {
+   "name": "qbit",
+   "implementation": "QBittorrent",
+   "configContract": "QBittorrentSettings",
+   "protocol": "torrent",
+   "enable": true,
+   "priority": 1,
+   "tags": [],
+   "fields": [
+    {
+     "name": "host",
+     "value": "qbit.local"
+    },
+    {
+     "name": "port",
+     "value": 8080
+    },
+    {
+     "name": "useSsl",
+     "value": false
+    },
+    {
+     "name": "urlBase",
+     "value": ""
+    },
+    {
+     "name": "username",
+     "value": "u"
+    },
+    {
+     "name": "password",
+     "value": "p"
+    },
+    {
+     "name": "musicCategory",
+     "value": "lidarr"
+    },
+    {
+     "name": "musicImportedCategory",
+     "value": ""
+    },
+    {
+     "name": "recentMusicPriority",
+     "value": 0
+    },
+    {
+     "name": "olderMusicPriority",
+     "value": 0
+    },
+    {
+     "name": "initialState",
+     "value": 0
+    },
+    {
+     "name": "sequentialOrder",
+     "value": false
+    },
+    {
+     "name": "firstAndLast",
+     "value": false
+    },
+    {
+     "name": "contentLayout",
+     "value": 0
+    }
+   ]
+  },
+  "save": "dcid",
+  "from": "j['id']"
+ },
+ {
+  "name": "downloadclient_get",
+  "path": "/downloadclient/{dcid}"
+ },
+ {
+  "name": "downloadclient_delete",
+  "method": "DELETE",
+  "path": "/downloadclient/{dcid}"
+ },
+ {
+  "name": "downloadclient_get_404",
+  "path": "/downloadclient/99999"
+ },
+ {
+  "name": "indexer_create_torznab",
+  "method": "POST",
+  "path": "/indexer",
+  "body": {
+   "name": "tz",
+   "implementation": "Torznab",
+   "configContract": "TorznabSettings",
+   "enableRss": true,
+   "enableAutomaticSearch": true,
+   "enableInteractiveSearch": true,
+   "priority": 25,
+   "tags": [],
+   "fields": [
+    {
+     "name": "baseUrl",
+     "value": "http://prowlarr.local/1/"
+    },
+    {
+     "name": "apiPath",
+     "value": "/api"
+    },
+    {
+     "name": "apiKey",
+     "value": "k"
+    },
+    {
+     "name": "categories",
+     "value": [
+      3000,
+      3010,
+      3030,
+      3040
+     ]
+    },
+    {
+     "name": "minimumSeeders",
+     "value": 1
+    }
+   ]
+  },
+  "save": "ixid",
+  "from": "j['id']"
+ },
+ {
+  "name": "indexer_get",
+  "path": "/indexer/{ixid}"
+ },
+ {
+  "name": "indexer_delete",
+  "method": "DELETE",
+  "path": "/indexer/{ixid}"
+ },
+ {
+  "name": "indexer_get_404",
+  "path": "/indexer/99999"
+ },
+ {
+  "name": "system_task",
+  "path": "/system/task"
+ },
+ {
+  "name": "system_backup",
+  "path": "/system/backup"
+ },
+ {
+  "name": "log",
+  "path": "/log?page=1&pageSize=5"
+ },
+ {
+  "name": "update",
+  "path": "/update"
+ },
+ {
+  "name": "release_search",
+  "path": "/release?albumId=1"
+ },
+ {
+  "name": "release_push_bad",
+  "method": "POST",
+  "path": "/release/push",
+  "body": {}
+ },
+ {
+  "name": "manualimport",
+  "path": "/manualimport?folder=%2Ftmp"
+ },
+ {
+  "name": "rename",
+  "path": "/rename?artistId={aid}"
+ },
+ {
+  "name": "retag",
+  "path": "/retag?artistId={aid}"
+ },
+ {
+  "name": "parse_empty",
+  "path": "/parse?title="
+ },
+ {
+  "name": "parse_garbage",
+  "path": "/parse?title=asdf%20qwer"
+ },
+ {
+  "name": "parse_discography",
+  "path": "/parse?title=Radiohead%20-%20Discography%20(1993-2016)%20%5BFLAC%5D"
+ },
+ {
+  "name": "artist_delete",
+  "method": "DELETE",
+  "path": "/artist/1?deleteFiles=false"
+ },
+ {
+  "name": "artist_after_delete",
+  "path": "/artist"
+ }
+]

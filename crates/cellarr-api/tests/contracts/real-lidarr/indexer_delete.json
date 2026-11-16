@@ -1,0 +1,7 @@
+{
+ "shape": {
+  "content": "string",
+  "message": "string"
+ },
+ "status": 400
+}

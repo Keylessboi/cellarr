@@ -1,0 +1,13 @@
+{
+ "shape": [
+  "[]",
+  {
+   "detailedDescription": "string",
+   "errorMessage": "string",
+   "isWarning": "boolean",
+   "propertyName": "string",
+   "severity": "string"
+  }
+ ],
+ "status": 400
+}

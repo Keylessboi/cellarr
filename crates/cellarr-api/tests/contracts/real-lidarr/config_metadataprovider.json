@@ -1,0 +1,10 @@
+{
+ "shape": {
+  "embedCoverArt": "boolean",
+  "id": "integer",
+  "metadataSource": "string",
+  "scrubAudioTags": "boolean",
+  "writeAudioTags": "string"
+ },
+ "status": 200
+}

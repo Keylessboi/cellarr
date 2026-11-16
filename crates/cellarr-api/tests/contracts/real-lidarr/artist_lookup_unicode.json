@@ -1,0 +1,47 @@
+{
+ "shape": [
+  "[]",
+  {
+   "added": "string",
+   "artistName": "string",
+   "artistType": "string",
+   "disambiguation": "string",
+   "discogsId": "integer",
+   "ended": "boolean",
+   "folder": "string",
+   "foreignArtistId": "string",
+   "genres": [
+    "[]",
+    {}
+   ],
+   "images": [
+    "[]",
+    {}
+   ],
+   "lastAlbum": "null",
+   "links": [
+    "[]",
+    {
+     "name": "string",
+     "url": "string"
+    }
+   ],
+   "metadataProfileId": "integer",
+   "monitorNewItems": "string",
+   "monitored": "boolean",
+   "nextAlbum": "null",
+   "qualityProfileId": "integer",
+   "ratings": {
+    "value": "integer",
+    "votes": "integer"
+   },
+   "status": "string",
+   "tadbId": "integer",
+   "tags": [
+    "[]",
+    {}
+   ]
+  }
+ ],
+ "status": 200
+}

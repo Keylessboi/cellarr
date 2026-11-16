@@ -1,0 +1,11 @@
+{
+ "shape": [
+  "[]",
+  {
+   "id": "integer",
+   "name": "string",
+   "nameLower": "string"
+  }
+ ],
+ "status": 200
+}

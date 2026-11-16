@@ -1,0 +1,28 @@
+{
+ "shape": [
+  "[]",
+  {
+   "branch": "string",
+   "changes": {
+    "fixed": [
+     "[]",
+     "string"
+    ],
+    "new": [
+     "[]",
+     "string"
+    ]
+   },
+   "fileName": "string",
+   "hash": "string",
+   "installable": "boolean",
+   "installed": "boolean",
+   "installedOn": "string",
+   "latest": "boolean",
+   "releaseDate": "string",
+   "url": "string",
+   "version": "string"
+  }
+ ],
+ "status": 200
+}

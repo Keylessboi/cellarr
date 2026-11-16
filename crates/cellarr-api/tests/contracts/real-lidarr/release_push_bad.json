@@ -1,0 +1,21 @@
+{
+ "shape": [
+  "[]",
+  {
+   "attemptedValue": "string",
+   "errorCode": "string",
+   "errorMessage": "string",
+   "formattedMessageArguments": [
+    "[]",
+    {}
+   ],
+   "formattedMessagePlaceholderValues": {
+    "propertyName": "string",
+    "propertyValue": "string"
+   },
+   "propertyName": "string",
+   "severity": "string"
+  }
+ ],
+ "status": 400
+}

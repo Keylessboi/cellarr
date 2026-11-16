@@ -1,0 +1,51 @@
+{
+ "shape": [
+  "[]",
+  {
+   "fields": [
+    "[]",
+    {
+     "advanced": "boolean",
+     "helpText": "string",
+     "isFloat": "boolean",
+     "label": "string",
+     "name": "string",
+     "order": "integer",
+     "privacy": "string",
+     "type": "string"
+    }
+   ],
+   "implementation": "string",
+   "implementationName": "string",
+   "infoLink": "string",
+   "negate": "boolean",
+   "presets": [
+    "[]",
+    {
+     "fields": [
+      "[]",
+      {
+       "advanced": "boolean",
+       "helpText": "string",
+       "isFloat": "boolean",
+       "label": "string",
+       "name": "string",
+       "order": "integer",
+       "privacy": "string",
+       "type": "string",
+       "value": "string"
+      }
+     ],
+     "implementation": "string",
+     "implementationName": "string",
+     "infoLink": "string",
+     "name": "string",
+     "negate": "boolean",
+     "required": "boolean"
+    }
+   ],
+   "required": "boolean"
+  }
+ ],
+ "status": 200
+}

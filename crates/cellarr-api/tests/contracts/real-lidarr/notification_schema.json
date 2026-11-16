@@ -1,0 +1,76 @@
+{
+ "shape": [
+  "[]",
+  {
+   "configContract": "string",
+   "fields": [
+    "[]",
+    {
+     "advanced": "boolean",
+     "helpLink": "string",
+     "helpText": "string",
+     "isFloat": "boolean",
+     "label": "string",
+     "name": "string",
+     "order": "integer",
+     "placeholder": "string",
+     "privacy": "string",
+     "selectOptions": [
+      "[]",
+      {
+       "name": "string",
+       "order": "integer",
+       "value": "integer"
+      }
+     ],
+     "type": "string",
+     "value": "integer"
+    }
+   ],
+   "implementation": "string",
+   "implementationName": "string",
+   "includeHealthWarnings": "boolean",
+   "infoLink": "string",
+   "message": {
+    "message": "string",
+    "type": "string"
+   },
+   "name": "string",
+   "onAlbumDelete": "boolean",
+   "onApplicationUpdate": "boolean",
+   "onArtistAdd": "boolean",
+   "onArtistDelete": "boolean",
+   "onDownloadFailure": "boolean",
+   "onGrab": "boolean",
+   "onHealthIssue": "boolean",
+   "onHealthRestored": "boolean",
+   "onImportFailure": "boolean",
+   "onReleaseImport": "boolean",
+   "onRename": "boolean",
+   "onTrackRetag": "boolean",
+   "onUpgrade": "boolean",
+   "presets": [
+    "[]",
+    {}
+   ],
+   "supportsOnAlbumDelete": "boolean",
+   "supportsOnApplicationUpdate": "boolean",
+   "supportsOnArtistAdd": "boolean",
+   "supportsOnArtistDelete": "boolean",
+   "supportsOnDownloadFailure": "boolean",
+   "supportsOnGrab": "boolean",
+   "supportsOnHealthIssue": "boolean",
+   "supportsOnHealthRestored": "boolean",
+   "supportsOnImportFailure": "boolean",
+   "supportsOnReleaseImport": "boolean",
+   "supportsOnRename": "boolean",
+   "supportsOnTrackRetag": "boolean",
+   "supportsOnUpgrade": "boolean",
+   "tags": [
+    "[]",
+    {}
+   ]
+  }
+ ],
+ "status": 200
+}

@@ -1,0 +1,14 @@
+{
+ "shape": {
+  "page": "integer",
+  "pageSize": "integer",
+  "records": [
+   "[]",
+   {}
+  ],
+  "sortDirection": "string",
+  "sortKey": "string",
+  "totalRecords": "integer"
+ },
+ "status": 200
+}

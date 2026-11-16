@@ -1,0 +1,42 @@
+{
+ "shape": [
+  "[]",
+  {
+   "artistIds": [
+    "[]",
+    {}
+   ],
+   "autoTagIds": [
+    "[]",
+    {}
+   ],
+   "delayProfileIds": [
+    "[]",
+    {}
+   ],
+   "downloadClientIds": [
+    "[]",
+    {}
+   ],
+   "id": "integer",
+   "importListIds": [
+    "[]",
+    {}
+   ],
+   "indexerIds": [
+    "[]",
+    {}
+   ],
+   "label": "string",
+   "notificationIds": [
+    "[]",
+    {}
+   ],
+   "restrictionIds": [
+    "[]",
+    {}
+   ]
+  }
+ ],
+ "status": 200
+}

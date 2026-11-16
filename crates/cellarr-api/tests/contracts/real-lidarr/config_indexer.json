@@ -1,0 +1,10 @@
+{
+ "shape": {
+  "id": "integer",
+  "maximumSize": "integer",
+  "minimumAge": "integer",
+  "retention": "integer",
+  "rssSyncInterval": "integer"
+ },
+ "status": 200
+}

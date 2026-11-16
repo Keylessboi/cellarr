@@ -1,0 +1,40 @@
+{
+ "shape": [
+  "[]",
+  {
+   "id": "integer",
+   "name": "string",
+   "primaryAlbumTypes": [
+    "[]",
+    {
+     "albumType": {
+      "id": "integer",
+      "name": "string"
+     },
+     "allowed": "boolean"
+    }
+   ],
+   "releaseStatuses": [
+    "[]",
+    {
+     "allowed": "boolean",
+     "releaseStatus": {
+      "id": "integer",
+      "name": "string"
+     }
+    }
+   ],
+   "secondaryAlbumTypes": [
+    "[]",
+    {
+     "albumType": {
+      "id": "integer",
+      "name": "string"
+     },
+     "allowed": "boolean"
+    }
+   ]
+  }
+ ],
+ "status": 200
+}

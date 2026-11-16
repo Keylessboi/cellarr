@@ -1,0 +1,20 @@
+{
+ "shape": {
+  "calendarWeekColumnHeader": "string",
+  "enableColorImpairedMode": "boolean",
+  "expandAlbumByDefault": "boolean",
+  "expandBroadcastByDefault": "boolean",
+  "expandEPByDefault": "boolean",
+  "expandOtherByDefault": "boolean",
+  "expandSingleByDefault": "boolean",
+  "firstDayOfWeek": "integer",
+  "id": "integer",
+  "longDateFormat": "string",
+  "shortDateFormat": "string",
+  "showRelativeDates": "boolean",
+  "theme": "string",
+  "timeFormat": "string",
+  "uiLanguage": "integer"
+ },
+ "status": 200
+}

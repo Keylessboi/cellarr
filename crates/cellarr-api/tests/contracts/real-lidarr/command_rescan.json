@@ -1,0 +1,30 @@
+{
+ "shape": {
+  "body": {
+   "addNewArtists": "boolean",
+   "filter": "string",
+   "isExclusive": "boolean",
+   "isLongRunning": "boolean",
+   "isTypeExclusive": "boolean",
+   "name": "string",
+   "requiresDiskAccess": "boolean",
+   "sendUpdatesToClient": "boolean",
+   "suppressMessages": "boolean",
+   "trigger": "string",
+   "updateScheduledTask": "boolean"
+  },
+  "commandName": "string",
+  "id": "integer",
+  "name": "string",
+  "priority": "string",
+  "queued": "string",
+  "result": "string",
+  "sendUpdatesToClient": "boolean",
+  "started": "string",
+  "stateChangeTime": "string",
+  "status": "string",
+  "trigger": "string",
+  "updateScheduledTask": "boolean"
+ },
+ "status": 201
+}

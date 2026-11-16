@@ -1,0 +1,49 @@
+{
+ "shape": [
+  "[]",
+  {
+   "configContract": "string",
+   "enableAutomaticAdd": "boolean",
+   "fields": [
+    "[]",
+    {
+     "advanced": "boolean",
+     "helpText": "string",
+     "isFloat": "boolean",
+     "label": "string",
+     "name": "string",
+     "order": "integer",
+     "privacy": "string",
+     "type": "string",
+     "value": "string"
+    }
+   ],
+   "implementation": "string",
+   "implementationName": "string",
+   "infoLink": "string",
+   "listOrder": "integer",
+   "listType": "string",
+   "message": {
+    "message": "string",
+    "type": "string"
+   },
+   "metadataProfileId": "integer",
+   "minRefreshInterval": "string",
+   "monitorNewItems": "string",
+   "name": "string",
+   "presets": [
+    "[]",
+    {}
+   ],
+   "qualityProfileId": "integer",
+   "shouldMonitor": "string",
+   "shouldMonitorExisting": "boolean",
+   "shouldSearch": "boolean",
+   "tags": [
+    "[]",
+    {}
+   ]
+  }
+ ],
+ "status": 200
+}

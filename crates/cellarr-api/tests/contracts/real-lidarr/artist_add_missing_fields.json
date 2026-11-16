@@ -1,0 +1,23 @@
+{
+ "shape": [
+  "[]",
+  {
+   "attemptedValue": "integer",
+   "errorCode": "string",
+   "errorMessage": "string",
+   "formattedMessageArguments": [
+    "[]",
+    {}
+   ],
+   "formattedMessagePlaceholderValues": {
+    "comparisonProperty": "string",
+    "comparisonValue": "integer",
+    "propertyName": "string",
+    "propertyValue": "integer"
+   },
+   "propertyName": "string",
+   "severity": "string"
+  }
+ ],
+ "status": 400
+}

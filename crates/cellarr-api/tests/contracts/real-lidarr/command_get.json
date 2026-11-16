@@ -1,0 +1,7 @@
+{
+ "shape": {
+  "description": "string",
+  "message": "string"
+ },
+ "status": 404
+}

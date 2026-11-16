@@ -1,0 +1,22 @@
+{
+ "shape": [
+  "[]",
+  {
+   "bypassIfAboveCustomFormatScore": "boolean",
+   "bypassIfHighestQuality": "boolean",
+   "enableTorrent": "boolean",
+   "enableUsenet": "boolean",
+   "id": "integer",
+   "minimumCustomFormatScore": "integer",
+   "order": "integer",
+   "preferredProtocol": "string",
+   "tags": [
+    "[]",
+    {}
+   ],
+   "torrentDelay": "integer",
+   "usenetDelay": "integer"
+  }
+ ],
+ "status": 200
+}

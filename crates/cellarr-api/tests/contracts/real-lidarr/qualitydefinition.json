@@ -1,0 +1,18 @@
+{
+ "shape": [
+  "[]",
+  {
+   "id": "integer",
+   "maxSize": "integer",
+   "minSize": "integer",
+   "preferredSize": "integer",
+   "quality": {
+    "id": "integer",
+    "name": "string"
+   },
+   "title": "string",
+   "weight": "integer"
+  }
+ ],
+ "status": 200
+}

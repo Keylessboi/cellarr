@@ -1,0 +1,25 @@
+{
+ "shape": [
+  "[]",
+  {
+   "absoluteTrackNumber": "integer",
+   "albumId": "integer",
+   "artistId": "integer",
+   "duration": "integer",
+   "explicit": "boolean",
+   "foreignRecordingId": "string",
+   "foreignTrackId": "string",
+   "hasFile": "boolean",
+   "id": "integer",
+   "mediumNumber": "integer",
+   "ratings": {
+    "value": "integer",
+    "votes": "integer"
+   },
+   "title": "string",
+   "trackFileId": "integer",
+   "trackNumber": "string"
+  }
+ ],
+ "status": 200
+}

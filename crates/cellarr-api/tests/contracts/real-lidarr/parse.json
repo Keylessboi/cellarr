@@ -1,0 +1,189 @@
+{
+ "shape": {
+  "albums": [
+   "[]",
+   {
+    "albumType": "string",
+    "anyReleaseOk": "boolean",
+    "artist": {
+     "addOptions": {
+      "albumsToMonitor": [
+       "[]",
+       {}
+      ],
+      "monitor": "string",
+      "monitored": "boolean",
+      "searchForMissingAlbums": "boolean"
+     },
+     "added": "string",
+     "artistName": "string",
+     "artistType": "string",
+     "cleanName": "string",
+     "disambiguation": "string",
+     "discogsId": "integer",
+     "ended": "boolean",
+     "foreignArtistId": "string",
+     "genres": [
+      "[]",
+      "string"
+     ],
+     "id": "integer",
+     "images": [
+      "[]",
+      {}
+     ],
+     "lastAlbum": "null",
+     "links": [
+      "[]",
+      {
+       "name": "string",
+       "url": "string"
+      }
+     ],
+     "metadataProfileId": "integer",
+     "monitorNewItems": "string",
+     "monitored": "boolean",
+     "nextAlbum": "null",
+     "path": "string",
+     "qualityProfileId": "integer",
+     "ratings": {
+      "value": "integer",
+      "votes": "integer"
+     },
+     "sortName": "string",
+     "status": "string",
+     "tadbId": "integer",
+     "tags": [
+      "[]",
+      {}
+     ]
+    },
+    "artistId": "integer",
+    "duration": "integer",
+    "foreignAlbumId": "string",
+    "genres": [
+     "[]",
+     {}
+    ],
+    "id": "integer",
+    "images": [
+     "[]",
+     {}
+    ],
+    "links": [
+     "[]",
+     {}
+    ],
+    "media": [
+     "[]",
+     {}
+    ],
+    "mediumCount": "integer",
+    "monitored": "boolean",
+    "overview": "string",
+    "profileId": "integer",
+    "ratings": {
+     "value": "integer",
+     "votes": "integer"
+    },
+    "releaseDate": "string",
+    "releases": [
+     "[]",
+     {}
+    ],
+    "secondaryTypes": [
+     "[]",
+     {}
+    ],
+    "title": "string"
+   }
+  ],
+  "artist": {
+   "addOptions": {
+    "albumsToMonitor": [
+     "[]",
+     {}
+    ],
+    "monitor": "string",
+    "monitored": "boolean",
+    "searchForMissingAlbums": "boolean"
+   },
+   "added": "string",
+   "artistName": "string",
+   "artistType": "string",
+   "cleanName": "string",
+   "disambiguation": "string",
+   "discogsId": "integer",
+   "ended": "boolean",
+   "foreignArtistId": "string",
+   "genres": [
+    "[]",
+    "string"
+   ],
+   "id": "integer",
+   "images": [
+    "[]",
+    {}
+   ],
+   "lastAlbum": "null",
+   "links": [
+    "[]",
+    {
+     "name": "string",
+     "url": "string"
+    }
+   ],
+   "metadataProfileId": "integer",
+   "monitorNewItems": "string",
+   "monitored": "boolean",
+   "nextAlbum": "null",
+   "path": "string",
+   "qualityProfileId": "integer",
+   "ratings": {
+    "value": "integer",
+    "votes": "integer"
+   },
+   "sortName": "string",
+   "status": "string",
+   "tadbId": "integer",
+   "tags": [
+    "[]",
+    {}
+   ]
+  },
+  "customFormatScore": "integer",
+  "customFormats": [
+   "[]",
+   {}
+  ],
+  "parsedAlbumInfo": {
+   "albumTitle": "string",
+   "artistName": "string",
+   "artistTitleInfo": {
+    "title": "string",
+    "year": "integer"
+   },
+   "discography": "boolean",
+   "discographyEnd": "integer",
+   "discographyStart": "integer",
+   "quality": {
+    "quality": {
+     "id": "integer",
+     "name": "string"
+    },
+    "revision": {
+     "isRepack": "boolean",
+     "real": "integer",
+     "version": "integer"
+    }
+   },
+   "releaseDate": "string",
+   "releaseGroup": "string",
+   "releaseHash": "string",
+   "releaseTitle": "string",
+   "releaseVersion": "string"
+  },
+  "title": "string"
+ },
+ "status": 200
+}

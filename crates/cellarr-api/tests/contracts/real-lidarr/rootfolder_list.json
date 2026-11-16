@@ -1,0 +1,22 @@
+{
+ "shape": [
+  "[]",
+  {
+   "accessible": "boolean",
+   "defaultMetadataProfileId": "integer",
+   "defaultMonitorOption": "string",
+   "defaultNewItemMonitorOption": "string",
+   "defaultQualityProfileId": "integer",
+   "defaultTags": [
+    "[]",
+    {}
+   ],
+   "freeSpace": "integer",
+   "id": "integer",
+   "name": "string",
+   "path": "string",
+   "totalSpace": "integer"
+  }
+ ],
+ "status": 200
+}

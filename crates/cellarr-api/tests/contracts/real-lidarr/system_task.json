@@ -1,0 +1,16 @@
+{
+ "shape": [
+  "[]",
+  {
+   "id": "integer",
+   "interval": "integer",
+   "lastDuration": "string",
+   "lastExecution": "string",
+   "lastStartTime": "string",
+   "name": "string",
+   "nextExecution": "string",
+   "taskName": "string"
+  }
+ ],
+ "status": 200
+}

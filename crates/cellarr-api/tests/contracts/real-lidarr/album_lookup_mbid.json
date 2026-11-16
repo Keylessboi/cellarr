@@ -1,0 +1,125 @@
+{
+ "shape": [
+  "[]",
+  {
+   "albumType": "string",
+   "anyReleaseOk": "boolean",
+   "artist": {
+    "added": "string",
+    "artistName": "string",
+    "artistType": "string",
+    "disambiguation": "string",
+    "discogsId": "integer",
+    "ended": "boolean",
+    "foreignArtistId": "string",
+    "genres": [
+     "[]",
+     "string"
+    ],
+    "images": [
+     "[]",
+     {}
+    ],
+    "lastAlbum": "null",
+    "links": [
+     "[]",
+     {
+      "name": "string",
+      "url": "string"
+     }
+    ],
+    "metadataProfileId": "integer",
+    "monitorNewItems": "string",
+    "monitored": "boolean",
+    "nextAlbum": "null",
+    "qualityProfileId": "integer",
+    "ratings": {
+     "value": "number",
+     "votes": "integer"
+    },
+    "status": "string",
+    "tadbId": "integer",
+    "tags": [
+     "[]",
+     {}
+    ]
+   },
+   "artistId": "integer",
+   "disambiguation": "string",
+   "duration": "integer",
+   "foreignAlbumId": "string",
+   "genres": [
+    "[]",
+    "string"
+   ],
+   "images": [
+    "[]",
+    {
+     "coverType": "string",
+     "extension": "string",
+     "remoteUrl": "string",
+     "url": "string"
+    }
+   ],
+   "links": [
+    "[]",
+    {}
+   ],
+   "media": [
+    "[]",
+    {
+     "mediumFormat": "string",
+     "mediumName": "string",
+     "mediumNumber": "integer"
+    }
+   ],
+   "mediumCount": "integer",
+   "monitored": "boolean",
+   "profileId": "integer",
+   "ratings": {
+    "value": "integer",
+    "votes": "integer"
+   },
+   "releaseDate": "string",
+   "releases": [
+    "[]",
+    {
+     "albumId": "integer",
+     "country": [
+      "[]",
+      "string"
+     ],
+     "disambiguation": "string",
+     "duration": "integer",
+     "foreignReleaseId": "string",
+     "format": "string",
+     "id": "integer",
+     "label": [
+      "[]",
+      "string"
+     ],
+     "media": [
+      "[]",
+      {
+       "mediumFormat": "string",
+       "mediumName": "string",
+       "mediumNumber": "integer"
+      }
+     ],
+     "mediumCount": "integer",
+     "monitored": "boolean",
+     "status": "string",
+     "title": "string",
+     "trackCount": "integer"
+    }
+   ],
+   "remoteCover": "string",
+   "secondaryTypes": [
+    "[]",
+    {}
+   ],
+   "title": "string"
+  }
+ ],
+ "status": 200
+}

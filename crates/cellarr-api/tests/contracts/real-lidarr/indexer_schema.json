@@ -1,0 +1,54 @@
+{
+ "shape": [
+  "[]",
+  {
+   "configContract": "string",
+   "downloadClientId": "integer",
+   "enableAutomaticSearch": "boolean",
+   "enableInteractiveSearch": "boolean",
+   "enableRss": "boolean",
+   "fields": [
+    "[]",
+    {
+     "advanced": "boolean",
+     "helpText": "string",
+     "helpTextWarning": "string",
+     "isFloat": "boolean",
+     "label": "string",
+     "name": "string",
+     "order": "integer",
+     "privacy": "string",
+     "selectOptions": [
+      "[]",
+      {
+       "hint": "string",
+       "name": "string",
+       "order": "integer",
+       "value": "integer"
+      }
+     ],
+     "type": "string",
+     "unit": "string",
+     "value": "string"
+    }
+   ],
+   "implementation": "string",
+   "implementationName": "string",
+   "infoLink": "string",
+   "name": "string",
+   "presets": [
+    "[]",
+    {}
+   ],
+   "priority": "integer",
+   "protocol": "string",
+   "supportsRss": "boolean",
+   "supportsSearch": "boolean",
+   "tags": [
+    "[]",
+    {}
+   ]
+  }
+ ],
+ "status": 200
+}

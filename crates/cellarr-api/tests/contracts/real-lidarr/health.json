@@ -1,0 +1,12 @@
+{
+ "shape": [
+  "[]",
+  {
+   "message": "string",
+   "source": "string",
+   "type": "string",
+   "wikiUrl": "string"
+  }
+ ],
+ "status": 200
+}

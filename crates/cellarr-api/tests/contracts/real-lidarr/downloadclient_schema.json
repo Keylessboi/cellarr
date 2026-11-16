@@ -1,0 +1,44 @@
+{
+ "shape": [
+  "[]",
+  {
+   "configContract": "string",
+   "enable": "boolean",
+   "fields": [
+    "[]",
+    {
+     "advanced": "boolean",
+     "helpText": "string",
+     "isFloat": "boolean",
+     "label": "string",
+     "name": "string",
+     "order": "integer",
+     "privacy": "string",
+     "type": "string",
+     "value": "string"
+    }
+   ],
+   "implementation": "string",
+   "implementationName": "string",
+   "infoLink": "string",
+   "message": {
+    "message": "string",
+    "type": "string"
+   },
+   "name": "string",
+   "presets": [
+    "[]",
+    {}
+   ],
+   "priority": "integer",
+   "protocol": "string",
+   "removeCompletedDownloads": "boolean",
+   "removeFailedDownloads": "boolean",
+   "tags": [
+    "[]",
+    {}
+   ]
+  }
+ ],
+ "status": 200
+}
