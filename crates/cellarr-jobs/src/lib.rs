@@ -32,6 +32,7 @@ pub mod indexers;
 pub mod job;
 pub mod music_import;
 pub mod music_lookup;
+pub mod music_sync;
 pub mod notify;
 pub mod runner;
 pub mod scheduler;

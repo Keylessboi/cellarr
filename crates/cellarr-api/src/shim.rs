@@ -53,6 +53,11 @@ pub enum Face {
     Sonarr,
     /// The Radarr face: movie resources, Radarr v5 identity.
     Radarr,
+    /// The Lidarr face: music resources, Lidarr identity. Unlike the other
+    /// faces it speaks API **v1**, and is built by `crate::lidarr` rather than
+    /// by [`router`]; it reuses this module's handlers for the resources the
+    /// *arr apps share (indexers, download clients, tags, root folders, …).
+    Lidarr,
 }
 
 /// A current Sonarr v4 version string. Chosen to land tools in their "supported
@@ -63,6 +68,10 @@ const SONARR_VERSION: &str = "4.0.17.2952";
 /// Radarr; the live image was a v6 build, but v5 is the published "current" line
 /// tools gate on and the captured response surface is identical).
 const RADARR_VERSION: &str = "5.27.5.10198";
+/// The Lidarr version cellarr presents: the build its reference install runs.
+/// Clients gate on the major/minor of this (Prowlarr, Octo), so it must be a
+/// real Lidarr 3.x release string.
+pub(crate) const LIDARR_VERSION: &str = "3.1.3.4987";
 
 impl Face {
     /// The `appName` for the surface this face presents for `media`. The Cellarr
@@ -72,6 +81,7 @@ impl Face {
         match self {
             Face::Sonarr => "Sonarr",
             Face::Radarr => "Radarr",
+            Face::Lidarr => "Lidarr",
             Face::Cellarr => match media {
                 MediaType::Tv => "Sonarr",
                 _ => "Radarr",
@@ -85,6 +95,7 @@ impl Face {
         match self {
             Face::Sonarr => SONARR_VERSION,
             Face::Radarr => RADARR_VERSION,
+            Face::Lidarr => LIDARR_VERSION,
             Face::Cellarr => match media {
                 MediaType::Tv => SONARR_VERSION,
                 _ => RADARR_VERSION,
@@ -99,6 +110,7 @@ impl Face {
         match self {
             Face::Sonarr => Some(MediaType::Tv),
             Face::Radarr => Some(MediaType::Movie),
+            Face::Lidarr => Some(MediaType::Music),
             Face::Cellarr => None,
         }
     }
@@ -359,16 +371,16 @@ pub fn router(state: AppState, face: Face) -> Router {
 }
 
 /// The 404 JSON handler for unknown `/api/v3/*` paths.
-async fn not_found() -> ApiError {
+pub(crate) async fn not_found() -> ApiError {
     ApiError::NotFound("unknown api endpoint".into())
 }
 
 /// Per-face handler state: the shared [`AppState`] plus which [`Face`] this mount
 /// presents.
 #[derive(Clone)]
-struct FaceState {
-    state: AppState,
-    face: Face,
+pub(crate) struct FaceState {
+    pub(crate) state: AppState,
+    pub(crate) face: Face,
 }
 
 // --- cross-cutting: config-managed signal ----------------------------------
@@ -409,7 +421,7 @@ mod managed_kind {
 /// as text (matching the entity's `.id.to_string()` / canonical-name form). A read
 /// failure degrades to "nothing managed" rather than failing the request: the
 /// managed flag is an advisory UI signal, never load-bearing for correctness.
-async fn managed_ids(db: &cellarr_db::Database, kind: &str) -> std::collections::HashSet<String> {
+pub(crate) async fn managed_ids(db: &cellarr_db::Database, kind: &str) -> std::collections::HashSet<String> {
     db.managed_config()
         .list_kind(kind)
         .await
@@ -419,14 +431,14 @@ async fn managed_ids(db: &cellarr_db::Database, kind: &str) -> std::collections:
 
 /// Whether a single entity (by its text id) is currently config-managed for a
 /// ledger `kind`. The single-resource counterpart of [`managed_ids`].
-async fn is_managed(db: &cellarr_db::Database, kind: &str, entity_id: &str) -> bool {
+pub(crate) async fn is_managed(db: &cellarr_db::Database, kind: &str, entity_id: &str) -> bool {
     managed_ids(db, kind).await.contains(entity_id)
 }
 
 /// Insert the additive read-only `managed` boolean into a v3 resource object. A
 /// non-object value (it should always be an object) is returned unchanged.
 #[must_use]
-fn with_managed(mut value: Value, managed: bool) -> Value {
+pub(crate) fn with_managed(mut value: Value, managed: bool) -> Value {
     if let Some(obj) = value.as_object_mut() {
         obj.insert("managed".to_string(), Value::Bool(managed));
     }
@@ -439,7 +451,7 @@ fn with_managed(mut value: Value, managed: bool) -> Value {
 /// the face's emulated version, resolved from a `libraryId`/`movieId`/`seriesId`
 /// hint when present (so the Cellarr face advertises the right app per request),
 /// else the face's default identity.
-async fn version_header(
+pub(crate) async fn version_header(
     State(fs): State<FaceState>,
     req: Request<axum::body::Body>,
     next: Next,
@@ -462,7 +474,7 @@ async fn version_header(
 /// Resolve which app surface to present for a body handler. A dedicated face is
 /// pinned to its media type; the Cellarr face uses the `libraryId` hint or the
 /// first configured library, defaulting to Movie (the most common target).
-async fn surface_for(fs: &FaceState, hint: Option<LibraryId>) -> ApiResult<MediaType> {
+pub(crate) async fn surface_for(fs: &FaceState, hint: Option<LibraryId>) -> ApiResult<MediaType> {
     if let Some(media) = fs.face.fixed_media() {
         return Ok(media);
     }
@@ -479,7 +491,7 @@ async fn surface_for(fs: &FaceState, hint: Option<LibraryId>) -> ApiResult<Media
 }
 
 /// Parse an optional `libraryId` query parameter into a typed id.
-fn library_hint(raw: Option<&str>) -> ApiResult<Option<LibraryId>> {
+pub(crate) fn library_hint(raw: Option<&str>) -> ApiResult<Option<LibraryId>> {
     raw.filter(|s| !s.is_empty())
         .map(|s| {
             s.parse::<uuid::Uuid>()
@@ -492,7 +504,7 @@ fn library_hint(raw: Option<&str>) -> ApiResult<Option<LibraryId>> {
 // --- ping ------------------------------------------------------------------
 
 /// The unauthenticated liveness probe every *arr tool hits first.
-async fn ping() -> Json<Value> {
+pub(crate) async fn ping() -> Json<Value> {
     Json(json!({ "status": "OK" }))
 }
 
@@ -504,7 +516,7 @@ struct StatusQuery {
     library_id: Option<String>,
 }
 
-async fn system_status(
+pub(crate) async fn system_status(
     State(fs): State<FaceState>,
     Query(q): Query<StatusQuery>,
 ) -> ApiResult<Json<Value>> {
@@ -572,7 +584,7 @@ async fn system_status(
 /// execution-completed timestamp or duration yet — that is the small DEFERRED
 /// part (`lastDuration` is reported as `00:00:00`). Next-run + interval + status
 /// are real, which is what the countdown + "Run now" UI needs.
-async fn system_tasks(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
+pub(crate) async fn system_tasks(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
     let jobs = commands::list_jobs(&fs.state.scheduler)
         .await
         .map_err(ApiError::Command)?;
@@ -581,7 +593,7 @@ async fn system_tasks(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>
 }
 
 /// v3 `system/task/{id}` — one scheduled task by its (numeric-projected) id.
-async fn system_task(
+pub(crate) async fn system_task(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
@@ -599,7 +611,7 @@ async fn system_task(
 /// Render a recurring scheduler [`Job`](cellarr_jobs::Job) into the v3 task shape.
 /// Returns `None` for a one-shot (`Once`) job — those are commands, not scheduled
 /// tasks, and belong on the `command`/`queue` surface.
-fn v3_task(job: &cellarr_jobs::Job) -> Option<Value> {
+pub(crate) fn v3_task(job: &cellarr_jobs::Job) -> Option<Value> {
     use cellarr_jobs::Schedule;
     let (interval_secs, next) = match job.schedule {
         Schedule::Every {
@@ -631,7 +643,7 @@ fn v3_task(job: &cellarr_jobs::Job) -> Option<Value> {
 }
 
 /// Map a job lifecycle state to the last-status string the UI shows.
-fn task_status(state: cellarr_jobs::JobState) -> &'static str {
+pub(crate) fn task_status(state: cellarr_jobs::JobState) -> &'static str {
     use cellarr_jobs::JobState;
     match state {
         JobState::Done => "completed",
@@ -645,7 +657,7 @@ fn task_status(state: cellarr_jobs::JobState) -> &'static str {
 /// Format a unix timestamp (seconds) as an RFC 3339 / ISO-8601 UTC string for the
 /// v3 date fields. A timestamp the clock cannot represent falls back to the v3
 /// zero date the *arr apps use for "never".
-fn unix_to_iso(secs: u64) -> String {
+pub(crate) fn unix_to_iso(secs: u64) -> String {
     use time::format_description::well_known::Rfc3339;
     i64::try_from(secs)
         .ok()
@@ -663,7 +675,7 @@ fn unix_to_iso(secs: u64) -> String {
 /// root-folder-unwritable / no-indexer / no-download-client / no-recent-backup /
 /// database-ok), plus the loud cross-filesystem hardlink-fallback warning folded
 /// in from [`crate::fs_health`].
-async fn health(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
+pub(crate) async fn health(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
     let backup = fs.state.backup.as_deref();
     let probe = fs.state.download_client_probe.as_deref();
     let checks = crate::health::run_all(&fs.state.db, backup, probe).await?;
@@ -693,7 +705,7 @@ async fn health(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
 /// The engine, or a structured 503-ish error when no backup wiring is attached
 /// (the offline/test default). We use [`ApiError::Internal`] so the body is the
 /// standard `{ code, message }`.
-fn backup_engine(fs: &FaceState) -> ApiResult<&crate::backup::BackupEngine> {
+pub(crate) fn backup_engine(fs: &FaceState) -> ApiResult<&crate::backup::BackupEngine> {
     fs.state
         .backup
         .as_deref()
@@ -701,7 +713,7 @@ fn backup_engine(fs: &FaceState) -> ApiResult<&crate::backup::BackupEngine> {
 }
 
 /// Map a [`crate::backup::BackupError`] onto the API error surface.
-fn map_backup_err(e: crate::backup::BackupError) -> ApiError {
+pub(crate) fn map_backup_err(e: crate::backup::BackupError) -> ApiError {
     use crate::backup::BackupError as B;
     match e {
         B::NotFound(id) => ApiError::NotFound(format!("backup {id} not found")),
@@ -714,7 +726,7 @@ fn map_backup_err(e: crate::backup::BackupError) -> ApiError {
 
 /// Render a [`crate::backup::BackupInfo`] into the v3 backup-list shape
 /// (`{ id, name, type, time, size }`), mirroring the originals' `system/backup`.
-fn v3_backup(info: &crate::backup::BackupInfo) -> Value {
+pub(crate) fn v3_backup(info: &crate::backup::BackupInfo) -> Value {
     json!({
         "id": rpm_numeric_id(&info.id),
         "backupId": info.id,
@@ -728,7 +740,7 @@ fn v3_backup(info: &crate::backup::BackupInfo) -> Value {
 }
 
 /// v3 `GET /system/backup` — list backups, newest first.
-async fn list_backups(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
+pub(crate) async fn list_backups(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
     let eng = backup_engine(&fs)?;
     let backups = eng.list().map_err(map_backup_err)?;
     Ok(Json(backups.iter().map(v3_backup).collect()))
@@ -744,7 +756,7 @@ struct BackupCreateBody {
 }
 
 /// v3 `POST /system/backup` — take a manual backup now, returning its listing.
-async fn create_backup(
+pub(crate) async fn create_backup(
     State(fs): State<FaceState>,
     body: Option<Json<BackupCreateBody>>,
 ) -> ApiResult<Json<Value>> {
@@ -761,7 +773,7 @@ async fn create_backup(
 ///
 /// The `{id}` may be the numeric-projected id (the v3 `id` field) or the real
 /// backup id string; we resolve a numeric id back to its string by listing.
-async fn download_backup(
+pub(crate) async fn download_backup(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
 ) -> ApiResult<Response> {
@@ -782,7 +794,7 @@ async fn download_backup(
 }
 
 /// v3 `DELETE /system/backup/{id}` — remove a backup. Idempotent.
-async fn delete_backup(
+pub(crate) async fn delete_backup(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
@@ -795,7 +807,7 @@ async fn delete_backup(
 
 /// v3 `POST /system/backup/restore/{id}` — restore from an existing backup id.
 /// Takes an automatic pre-restore safety backup, validates, and atomically swaps.
-async fn restore_backup_id(
+pub(crate) async fn restore_backup_id(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
@@ -812,7 +824,7 @@ async fn restore_backup_id(
 
 /// v3 `POST /system/backup/restore/upload` — restore from an uploaded bundle (the
 /// raw bundle bytes as the request body). Same safety flow as the id path.
-async fn restore_backup_upload(
+pub(crate) async fn restore_backup_upload(
     State(fs): State<FaceState>,
     body: axum::body::Bytes,
 ) -> ApiResult<Json<Value>> {
@@ -833,7 +845,7 @@ async fn restore_backup_upload(
 
 /// Resolve a v3 backup path id (either the numeric projection or the real id
 /// string) back to the real backup id, erroring if it matches nothing.
-fn resolve_backup_id(eng: &crate::backup::BackupEngine, id: &str) -> ApiResult<String> {
+pub(crate) fn resolve_backup_id(eng: &crate::backup::BackupEngine, id: &str) -> ApiResult<String> {
     let list = eng.list().map_err(map_backup_err)?;
     // Exact string match first (the UI round-trips the real id).
     if list.iter().any(|b| b.id == id) {
@@ -851,7 +863,7 @@ fn resolve_backup_id(eng: &crate::backup::BackupEngine, id: &str) -> ApiResult<S
 // --- log/file --------------------------------------------------------------
 
 /// The log reader, or a structured error when no log wiring is attached.
-fn log_files(fs: &FaceState) -> ApiResult<&crate::logfile::LogFiles> {
+pub(crate) fn log_files(fs: &FaceState) -> ApiResult<&crate::logfile::LogFiles> {
     fs.state
         .log_files
         .as_deref()
@@ -859,7 +871,7 @@ fn log_files(fs: &FaceState) -> ApiResult<&crate::logfile::LogFiles> {
 }
 
 /// v3 `GET /log/file` — list the daemon's on-disk log files.
-async fn list_log_files(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
+pub(crate) async fn list_log_files(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
     let lf = log_files(&fs)?;
     let files = lf
         .list()
@@ -891,7 +903,7 @@ struct LogTailQuery {
 /// v3 `GET /log/file/{name}` — read the tail of a named log file. The originals
 /// return the raw file body; we return the recent lines (capped) as plain text so
 /// the operator sees the same content, with path-traversal on `name` rejected.
-async fn read_log_file(
+pub(crate) async fn read_log_file(
     State(fs): State<FaceState>,
     Path(name): Path<String>,
     Query(q): Query<LogTailQuery>,
@@ -915,7 +927,7 @@ async fn read_log_file(
 /// v3 root folders — `{ id, path, accessible, freeSpace, unmappedFolders }`.
 /// cellarr derives them from the configured libraries' root folders (the v3
 /// model is a flat list; libraries carry the same paths).
-async fn root_folders(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
+pub(crate) async fn root_folders(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
     let cfg = fs.state.db.config();
     let surface = fs.face.fixed_media();
     let mut seen = std::collections::BTreeSet::new();
@@ -961,7 +973,7 @@ async fn root_folders(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>
 /// Render a standalone [`RootFolder`] into the v3 root-folder shape, with its id
 /// projected to the stable integer the v3 `id` field requires (so it round-trips
 /// through `DELETE /rootfolder/{id}`).
-fn v3_root_folder(rf: &cellarr_core::RootFolder) -> Value {
+pub(crate) fn v3_root_folder(rf: &cellarr_core::RootFolder) -> Value {
     json!({
         "id": rpm_numeric_id(&rf.id),
         "path": rf.path,
@@ -983,7 +995,7 @@ struct RootFolderBody {
 /// v3 `POST /rootfolder` — add a standalone root folder. The Settings UI adds
 /// importable roots here; they live in the `root_folder` config table (distinct
 /// from a library's own `root_folders`, which are managed via the library).
-async fn create_root_folder(
+pub(crate) async fn create_root_folder(
     State(fs): State<FaceState>,
     Json(body): Json<RootFolderBody>,
 ) -> ApiResult<Json<Value>> {
@@ -1006,7 +1018,7 @@ async fn create_root_folder(
 /// v3 `DELETE /rootfolder/{id}` — remove a standalone root folder by its
 /// (numeric-projected) id. Idempotent: a missing id still returns 200, matching
 /// the *arr clients' expectation that delete succeeds on a re-issued delete.
-async fn delete_root_folder(
+pub(crate) async fn delete_root_folder(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
@@ -1028,11 +1040,11 @@ async fn delete_root_folder(
 // --- tag -------------------------------------------------------------------
 
 /// Render a tag as the v3 `{ id, label }` shape.
-fn v3_tag(tag: &cellarr_core::Tag) -> Value {
+pub(crate) fn v3_tag(tag: &cellarr_core::Tag) -> Value {
     json!({ "id": tag.id, "label": tag.label })
 }
 
-async fn list_tags(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
+pub(crate) async fn list_tags(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
     let tags = fs.state.db.tags().list().await?;
     let managed = managed_ids(&fs.state.db, managed_kind::TAG).await;
     Ok(Json(
@@ -1042,7 +1054,7 @@ async fn list_tags(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
     ))
 }
 
-async fn get_tag(State(fs): State<FaceState>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
+pub(crate) async fn get_tag(State(fs): State<FaceState>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
     let id = parse_u32(&id, "tag")?;
     let managed = is_managed(&fs.state.db, managed_kind::TAG, &id.to_string()).await;
     fs.state
@@ -1059,7 +1071,7 @@ struct TagBody {
     label: String,
 }
 
-async fn create_tag(
+pub(crate) async fn create_tag(
     State(fs): State<FaceState>,
     Json(body): Json<TagBody>,
 ) -> ApiResult<Json<Value>> {
@@ -1071,7 +1083,7 @@ async fn create_tag(
     )))
 }
 
-async fn update_tag(
+pub(crate) async fn update_tag(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
     Json(body): Json<TagBody>,
@@ -1086,7 +1098,7 @@ async fn update_tag(
         .ok_or_else(|| ApiError::NotFound(format!("tag {id} not found")))
 }
 
-async fn delete_tag(State(fs): State<FaceState>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
+pub(crate) async fn delete_tag(State(fs): State<FaceState>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
     let id = parse_u32(&id, "tag")?;
     if fs.state.db.tags().delete(id).await? {
         Ok(Json(json!({})))
@@ -1100,7 +1112,7 @@ async fn delete_tag(State(fs): State<FaceState>, Path(id): Path<String>) -> ApiR
 /// v3 quality profiles. cellarr's profiles are surfaced in the v3 list shape the
 /// ecosystem reads, now including `formatItems[]` (CF id→score) and
 /// `minUpgradeFormatScore` so Recyclarr/Configarr can sync custom-format scores.
-async fn quality_profiles(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
+pub(crate) async fn quality_profiles(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
     let repo = fs.state.db.profiles();
     let formats = repo.custom_formats().await?;
     // List every stored profile (not just the libraries' defaults) so a profile
@@ -1124,7 +1136,7 @@ async fn quality_profiles(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Val
 /// `formatItems` entry for every known custom format (score defaults to 0 — the
 /// score lives on the [`CustomFormat`] in cellarr, which Recyclarr reads back via
 /// the customformat resource). The Radarr face additionally carries `language`.
-fn v3_quality_profile(
+pub(crate) fn v3_quality_profile(
     p: &cellarr_core::QualityProfile,
     formats: &[cellarr_core::CustomFormat],
     face: Face,
@@ -1173,7 +1185,7 @@ fn v3_quality_profile(
 /// v3 `qualityprofile/schema` — the template a fresh profile is built from. We
 /// return cellarr's default quality ranking as allowed items plus the
 /// format-score scaffold, which is what Recyclarr reads to build a profile.
-async fn quality_profile_schema(State(fs): State<FaceState>) -> Json<Value> {
+pub(crate) async fn quality_profile_schema(State(fs): State<FaceState>) -> Json<Value> {
     let ranking = cellarr_core::QualityRanking::default();
     let items: Vec<Value> = ranking
         .qualities
@@ -1247,7 +1259,7 @@ struct ProfileQualityBody {
 }
 
 /// Collect the allowed quality ranks from a (possibly nested) `items[]` tree.
-fn collect_allowed_ranks(items: &[ProfileItemBody], out: &mut Vec<u32>) {
+pub(crate) fn collect_allowed_ranks(items: &[ProfileItemBody], out: &mut Vec<u32>) {
     for item in items {
         if item.allowed {
             if let Some(rank) = item.quality.as_ref().and_then(|q| q.id) {
@@ -1263,7 +1275,7 @@ fn collect_allowed_ranks(items: &[ProfileItemBody], out: &mut Vec<u32>) {
 /// Build a cellarr [`QualityProfile`] from a v3 write body, preserving `id` and
 /// (on update) the prior `required_languages` cellarr models but v3 does not
 /// carry in this shape.
-fn profile_from_body(
+pub(crate) fn profile_from_body(
     body: &QualityProfileBody,
     id: cellarr_core::QualityProfileId,
     required_languages: Vec<String>,
@@ -1295,7 +1307,7 @@ fn profile_from_body(
     }
 }
 
-async fn create_quality_profile(
+pub(crate) async fn create_quality_profile(
     State(fs): State<FaceState>,
     Json(body): Json<QualityProfileBody>,
 ) -> ApiResult<Json<Value>> {
@@ -1316,7 +1328,7 @@ async fn create_quality_profile(
     )))
 }
 
-async fn update_quality_profile(
+pub(crate) async fn update_quality_profile(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
     Json(body): Json<QualityProfileBody>,
@@ -1339,7 +1351,7 @@ async fn update_quality_profile(
     )))
 }
 
-async fn delete_quality_profile(
+pub(crate) async fn delete_quality_profile(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
@@ -1352,7 +1364,7 @@ async fn delete_quality_profile(
 
 /// Parse a v3 quality-profile path id (the profile's uuid string) into a typed
 /// [`QualityProfileId`], mapping a malformed id to a structured 400.
-fn parse_profile_id(raw: &str) -> ApiResult<cellarr_core::QualityProfileId> {
+pub(crate) fn parse_profile_id(raw: &str) -> ApiResult<cellarr_core::QualityProfileId> {
     raw.parse::<uuid::Uuid>()
         .map(cellarr_core::QualityProfileId::from_uuid)
         .map_err(|_| ApiError::BadRequest(format!("invalid qualityprofile id: {raw}")))
@@ -1366,7 +1378,7 @@ fn parse_profile_id(raw: &str) -> ApiResult<cellarr_core::QualityProfileId> {
 /// internal name), Radarr says `Remux-1080p` / `Remux-2160p`. Every other bucket
 /// shares one name across both apps, so this only rewrites the two remux tiers
 /// on the Radarr face. The Cellarr face mirrors Radarr (its default surface).
-fn face_quality_name<'a>(canonical: &'a str, face: Face) -> std::borrow::Cow<'a, str> {
+pub(crate) fn face_quality_name<'a>(canonical: &'a str, face: Face) -> std::borrow::Cow<'a, str> {
     use std::borrow::Cow;
     if !face_is_radarr(face) {
         return Cow::Borrowed(canonical);
@@ -1386,7 +1398,7 @@ fn face_quality_name<'a>(canonical: &'a str, face: Face) -> std::borrow::Cow<'a,
 ///
 /// `quality.name` carries the canonical (face-spelled) bucket name; `title` is the
 /// editable display title, which defaults to that name until overridden.
-async fn quality_definitions(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
+pub(crate) async fn quality_definitions(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
     let ranking = fs.state.db.profiles().quality_ranking().await?;
     // A quality definition's ledger id is its canonical name (the override key), so
     // a quality whose size/title edit is config-managed carries `managed: true`.
@@ -1434,7 +1446,7 @@ struct QualityDefinitionBody {
 /// Resolve the canonical [`cellarr_core::QualityDefinition::name`] a v3 id (which
 /// the GET renders as `rank + 1`) addresses, against the current ranking. A
 /// `rank + 1` of 0, or an id past the catalogue, is a structured 404.
-fn quality_name_for_id(ranking: &cellarr_core::QualityRanking, id: u32) -> ApiResult<String> {
+pub(crate) fn quality_name_for_id(ranking: &cellarr_core::QualityRanking, id: u32) -> ApiResult<String> {
     let rank = id
         .checked_sub(1)
         .ok_or_else(|| ApiError::NotFound(format!("quality definition {id} not found")))?;
@@ -1453,7 +1465,7 @@ fn quality_name_for_id(ranking: &cellarr_core::QualityRanking, id: u32) -> ApiRe
 /// canonical name, persists as "unset" (so the GET shows the canonical name and
 /// the row stays clean). A `minSize` of `0` is the originals' "no minimum"
 /// sentinel and persists as unset. Negative or non-finite sizes are rejected.
-fn apply_definition_edits(
+pub(crate) fn apply_definition_edits(
     current: &cellarr_core::QualityDefinition,
     body: &QualityDefinitionBody,
 ) -> ApiResult<cellarr_core::QualityDefinition> {
@@ -1490,7 +1502,7 @@ fn apply_definition_edits(
 /// `PUT /qualitydefinition/{id}` — update one quality's editable knobs (title +
 /// min/max/preferred size-per-minute). `id` is the GET's `rank + 1`. The merged
 /// definition is persisted; subsequent GETs and decisions read it back.
-async fn update_quality_definition(
+pub(crate) async fn update_quality_definition(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
     Json(body): Json<QualityDefinitionBody>,
@@ -1514,7 +1526,7 @@ async fn update_quality_definition(
 /// `PUT /qualitydefinition/update` — the originals' bulk "update many" endpoint,
 /// taking an array of definition bodies (each carrying its own `id`). Each is
 /// applied; the updated list is returned.
-async fn update_quality_definitions(
+pub(crate) async fn update_quality_definitions(
     State(fs): State<FaceState>,
     Json(bodies): Json<Vec<QualityDefinitionBody>>,
 ) -> ApiResult<Json<Vec<Value>>> {
@@ -1544,7 +1556,7 @@ async fn update_quality_definitions(
 
 /// Render a single [`cellarr_core::QualityDefinition`] in the v3 shape (the same
 /// shape a list element of [`quality_definitions`] has), for a PUT response.
-fn definition_view(def: &cellarr_core::QualityDefinition, face: Face) -> Value {
+pub(crate) fn definition_view(def: &cellarr_core::QualityDefinition, face: Face) -> Value {
     let name = face_quality_name(&def.name, face);
     let title = face_quality_name(def.display_title(), face);
     json!({
@@ -1568,7 +1580,7 @@ fn definition_view(def: &cellarr_core::QualityDefinition, face: Face) -> Value {
 /// "English"), which is all Prowlarr needs to complete the handshake. On the
 /// Radarr face the resource stays absent (returns an empty list) so the surface
 /// matches the real app it emulates.
-async fn language_profiles(State(fs): State<FaceState>) -> Json<Vec<Value>> {
+pub(crate) async fn language_profiles(State(fs): State<FaceState>) -> Json<Vec<Value>> {
     if !matches!(fs.face.fixed_media(), Some(MediaType::Tv) | None) {
         return Json(Vec::new());
     }
@@ -1591,7 +1603,7 @@ async fn language_profiles(State(fs): State<FaceState>) -> Json<Vec<Value>> {
 /// The v3 custom-format specification implementation name for a cellarr
 /// condition kind. These are the implementation strings the ecosystem (Recyclarr)
 /// round-trips through `customformat/schema`.
-fn spec_implementation(kind: &cellarr_core::ConditionKind) -> &'static str {
+pub(crate) fn spec_implementation(kind: &cellarr_core::ConditionKind) -> &'static str {
     use cellarr_core::ConditionKind as K;
     match kind {
         K::ReleaseTitle { .. } => "ReleaseTitleSpecification",
@@ -1615,7 +1627,7 @@ fn spec_implementation(kind: &cellarr_core::ConditionKind) -> &'static str {
 /// their serde token (e.g. a `Source::WebDl` becomes `"web-dl"`), so the value
 /// round-trips losslessly through `condition_from_spec`. Size carries a `{min,max}`
 /// object the apps model the same way.
-fn spec_value(kind: &cellarr_core::ConditionKind) -> Value {
+pub(crate) fn spec_value(kind: &cellarr_core::ConditionKind) -> Value {
     use cellarr_core::ConditionKind as K;
     /// The bare serde token a single-field enum serializes to (e.g. `Source` ->
     /// `"web-dl"`). The enums derive a plain string for their variants.
@@ -1641,7 +1653,7 @@ fn spec_value(kind: &cellarr_core::ConditionKind) -> Value {
 
 /// The conventional `<height>p` token for a resolution (e.g. `1080p`), the wire
 /// form the CF editor and ecosystem use (the serde token is `r1080p`).
-fn resolution_token(r: cellarr_core::Resolution) -> &'static str {
+pub(crate) fn resolution_token(r: cellarr_core::Resolution) -> &'static str {
     use cellarr_core::Resolution as R;
     match r {
         R::R480p => "480p",
@@ -1653,7 +1665,7 @@ fn resolution_token(r: cellarr_core::Resolution) -> &'static str {
 }
 
 /// Parse a `<height>p` resolution token back into a [`Resolution`].
-fn resolution_from_token(token: &str) -> Option<cellarr_core::Resolution> {
+pub(crate) fn resolution_from_token(token: &str) -> Option<cellarr_core::Resolution> {
     use cellarr_core::Resolution as R;
     match token.trim().to_ascii_lowercase().as_str() {
         "480p" | "480" => Some(R::R480p),
@@ -1668,7 +1680,7 @@ fn resolution_from_token(token: &str) -> Option<cellarr_core::Resolution> {
 /// Render a cellarr [`CustomFormat`] into the v3 customformat shape with its
 /// `specifications[]` (one per condition). Recyclarr round-trips this exact
 /// shape, so each spec carries `name`/`implementation`/`negate`/`required`/`fields`.
-fn v3_custom_format(cf: &cellarr_core::CustomFormat) -> Value {
+pub(crate) fn v3_custom_format(cf: &cellarr_core::CustomFormat) -> Value {
     let specs: Vec<Value> = cf
         .conditions
         .iter()
@@ -1691,7 +1703,7 @@ fn v3_custom_format(cf: &cellarr_core::CustomFormat) -> Value {
     })
 }
 
-async fn list_custom_formats(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
+pub(crate) async fn list_custom_formats(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
     let formats = fs.state.db.profiles().custom_formats().await?;
     let managed = managed_ids(&fs.state.db, managed_kind::CUSTOM_FORMAT).await;
     Ok(Json(
@@ -1704,7 +1716,7 @@ async fn list_custom_formats(State(fs): State<FaceState>) -> ApiResult<Json<Vec<
 
 /// v3 `customformat/schema` — the catalogue of specification templates a custom
 /// format is built from. Recyclarr reads it to validate the specs it pushes.
-async fn custom_format_schema() -> Json<Vec<Value>> {
+pub(crate) async fn custom_format_schema() -> Json<Vec<Value>> {
     // A free-text spec: one `value` textbox (a regex, group name, language code,
     // or indexer flag).
     let text_spec = |impl_name: &str, label: &str| {
@@ -1848,7 +1860,7 @@ struct FieldBody {
 /// models maps to its typed [`ConditionKind`]; a typed-enum value that does not
 /// parse (or an unmodeled implementation) degrades to a release-title regex so the
 /// round-trip never loses a format.
-fn condition_from_spec(spec: &SpecBody) -> cellarr_core::Condition {
+pub(crate) fn condition_from_spec(spec: &SpecBody) -> cellarr_core::Condition {
     use cellarr_core::ConditionKind as K;
     let value = spec
         .fields
@@ -1911,7 +1923,7 @@ fn condition_from_spec(spec: &SpecBody) -> cellarr_core::Condition {
     }
 }
 
-async fn create_custom_format(
+pub(crate) async fn create_custom_format(
     State(fs): State<FaceState>,
     Json(body): Json<CustomFormatBody>,
 ) -> ApiResult<Json<Value>> {
@@ -1935,7 +1947,7 @@ async fn create_custom_format(
     Ok(Json(with_managed(v3_custom_format(&cf), managed)))
 }
 
-async fn update_custom_format(
+pub(crate) async fn update_custom_format(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
     Json(body): Json<CustomFormatBody>,
@@ -1973,7 +1985,7 @@ async fn update_custom_format(
 }
 
 /// `GET /customformat/{id}` — one custom format in the v3 shape.
-async fn get_custom_format(
+pub(crate) async fn get_custom_format(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
@@ -1987,7 +1999,7 @@ async fn get_custom_format(
     Ok(Json(with_managed(v3_custom_format(&cf), managed)))
 }
 
-async fn delete_custom_format(
+pub(crate) async fn delete_custom_format(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
@@ -2011,7 +2023,7 @@ async fn delete_custom_format(
 
 /// Resolve a v3 numeric customformat id back to its cellarr [`CustomFormat`],
 /// 404ing when no format projects onto it.
-async fn find_custom_format_by_numeric(
+pub(crate) async fn find_custom_format_by_numeric(
     fs: &FaceState,
     id: &str,
 ) -> ApiResult<cellarr_core::CustomFormat> {
@@ -2053,7 +2065,7 @@ struct CustomFormatTestBody {
 /// title (plus optional parsed-field / flag / size overrides), for the editor's
 /// live preview. Each entry carries the format id, name, whether it matched, and
 /// its score, mirroring the apps' CF-test response.
-async fn custom_format_test(
+pub(crate) async fn custom_format_test(
     State(fs): State<FaceState>,
     Json(body): Json<CustomFormatTestBody>,
 ) -> ApiResult<Json<Vec<Value>>> {
@@ -2117,7 +2129,7 @@ async fn custom_format_test(
 /// Apply editor-supplied parsed-field overrides onto a parse. Only the fields the
 /// CF matcher reads are honored; an absent or unrecognized field leaves the parse
 /// value from the title in place.
-fn apply_parsed_overrides(parsed: &mut cellarr_core::ParsedRelease, over: &Value) {
+pub(crate) fn apply_parsed_overrides(parsed: &mut cellarr_core::ParsedRelease, over: &Value) {
     let Some(obj) = over.as_object() else {
         return;
     };
@@ -2153,7 +2165,7 @@ fn apply_parsed_overrides(parsed: &mut cellarr_core::ParsedRelease, over: &Value
 /// Render a cellarr [`DelayProfile`](cellarr_core::DelayProfile) into the v3
 /// delay-profile shape the ecosystem reads back. Mirrors Sonarr/Radarr's fields
 /// (`preferredProtocol`, the per-protocol delays, the bypass flag, tags, order).
-fn v3_delay_profile(dp: &cellarr_core::DelayProfile) -> Value {
+pub(crate) fn v3_delay_profile(dp: &cellarr_core::DelayProfile) -> Value {
     use cellarr_core::PreferredProtocol as P;
     let preferred = match dp.preferred_protocol {
         P::Usenet => "usenet",
@@ -2197,7 +2209,7 @@ struct DelayProfileBody {
 
 /// Build a cellarr [`DelayProfile`](cellarr_core::DelayProfile) from a write body,
 /// preserving `id` (for updates) or minting a fresh one (for creates).
-fn delay_profile_from_body(
+pub(crate) fn delay_profile_from_body(
     id: cellarr_core::DelayProfileId,
     body: &DelayProfileBody,
 ) -> cellarr_core::DelayProfile {
@@ -2219,7 +2231,7 @@ fn delay_profile_from_body(
     }
 }
 
-async fn list_delay_profiles(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
+pub(crate) async fn list_delay_profiles(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
     let profiles = fs.state.db.profiles().list_delay_profiles().await?;
     let managed = managed_ids(&fs.state.db, managed_kind::DELAY_PROFILE).await;
     Ok(Json(
@@ -2230,7 +2242,7 @@ async fn list_delay_profiles(State(fs): State<FaceState>) -> ApiResult<Json<Vec<
     ))
 }
 
-async fn get_delay_profile(
+pub(crate) async fn get_delay_profile(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
@@ -2244,7 +2256,7 @@ async fn get_delay_profile(
     Ok(Json(with_managed(v3_delay_profile(&dp), managed)))
 }
 
-async fn create_delay_profile(
+pub(crate) async fn create_delay_profile(
     State(fs): State<FaceState>,
     Json(body): Json<DelayProfileBody>,
 ) -> ApiResult<Json<Value>> {
@@ -2259,7 +2271,7 @@ async fn create_delay_profile(
     Ok(Json(with_managed(v3_delay_profile(&dp), managed)))
 }
 
-async fn update_delay_profile(
+pub(crate) async fn update_delay_profile(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
     Json(body): Json<DelayProfileBody>,
@@ -2276,7 +2288,7 @@ async fn update_delay_profile(
     Ok(Json(with_managed(v3_delay_profile(&dp), managed)))
 }
 
-async fn delete_delay_profile(
+pub(crate) async fn delete_delay_profile(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
@@ -2297,7 +2309,7 @@ async fn delete_delay_profile(
 
 /// Resolve a v3 numeric delayprofile id back to its cellarr
 /// [`DelayProfile`](cellarr_core::DelayProfile), 404ing when none projects onto it.
-async fn find_delay_profile_by_numeric(
+pub(crate) async fn find_delay_profile_by_numeric(
     fs: &FaceState,
     id: &str,
 ) -> ApiResult<cellarr_core::DelayProfile> {
@@ -2318,7 +2330,7 @@ async fn find_delay_profile_by_numeric(
 /// release-profile shape the ecosystem reads back. Mirrors Sonarr's fields:
 /// `name`, `enabled`, `required`/`ignored` term arrays, the `preferred` list of
 /// `{key, value}` (term + score), and the integer `tags`.
-fn v3_release_profile(rp: &cellarr_core::ReleaseProfile) -> Value {
+pub(crate) fn v3_release_profile(rp: &cellarr_core::ReleaseProfile) -> Value {
     let preferred: Vec<Value> = rp
         .preferred
         .iter()
@@ -2370,7 +2382,7 @@ struct ReleaseProfileBody {
 
 /// Build a cellarr [`ReleaseProfile`](cellarr_core::ReleaseProfile) from a write
 /// body, preserving `id` (updates) or minting a fresh one (creates).
-fn release_profile_from_body(
+pub(crate) fn release_profile_from_body(
     id: cellarr_core::ReleaseProfileId,
     body: &ReleaseProfileBody,
 ) -> cellarr_core::ReleaseProfile {
@@ -2392,7 +2404,7 @@ fn release_profile_from_body(
     }
 }
 
-async fn list_release_profiles(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
+pub(crate) async fn list_release_profiles(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
     let profiles = fs.state.db.profiles().list_release_profiles().await?;
     let managed = managed_ids(&fs.state.db, managed_kind::RELEASE_PROFILE).await;
     Ok(Json(
@@ -2403,7 +2415,7 @@ async fn list_release_profiles(State(fs): State<FaceState>) -> ApiResult<Json<Ve
     ))
 }
 
-async fn get_release_profile(
+pub(crate) async fn get_release_profile(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
@@ -2417,7 +2429,7 @@ async fn get_release_profile(
     Ok(Json(with_managed(v3_release_profile(&rp), managed)))
 }
 
-async fn create_release_profile(
+pub(crate) async fn create_release_profile(
     State(fs): State<FaceState>,
     Json(body): Json<ReleaseProfileBody>,
 ) -> ApiResult<Json<Value>> {
@@ -2432,7 +2444,7 @@ async fn create_release_profile(
     Ok(Json(with_managed(v3_release_profile(&rp), managed)))
 }
 
-async fn update_release_profile(
+pub(crate) async fn update_release_profile(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
     Json(body): Json<ReleaseProfileBody>,
@@ -2449,7 +2461,7 @@ async fn update_release_profile(
     Ok(Json(with_managed(v3_release_profile(&rp), managed)))
 }
 
-async fn delete_release_profile(
+pub(crate) async fn delete_release_profile(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
@@ -2471,7 +2483,7 @@ async fn delete_release_profile(
 /// Resolve a v3 numeric releaseprofile id back to its cellarr
 /// [`ReleaseProfile`](cellarr_core::ReleaseProfile), 404ing when none projects
 /// onto it.
-async fn find_release_profile_by_numeric(
+pub(crate) async fn find_release_profile_by_numeric(
     fs: &FaceState,
     id: &str,
 ) -> ApiResult<cellarr_core::ReleaseProfile> {
@@ -2489,7 +2501,7 @@ async fn find_release_profile_by_numeric(
 /// v3 `releaseprofile/schema` — the spec of a release profile's editable fields,
 /// so a client can render the editor (the required/ignored term lists, the
 /// preferred `{key, value}` list, the enabled flag, and tags).
-async fn release_profile_schema() -> Json<Value> {
+pub(crate) async fn release_profile_schema() -> Json<Value> {
     Json(json!({
         "enabled": true,
         "required": [],
@@ -2518,7 +2530,7 @@ async fn release_profile_schema() -> Json<Value> {
 
 /// Render a cellarr [`IndexerConfig`] into the v3 indexer shape Prowlarr reads
 /// back after a push: identity + flags + a `fields[]` projection of `settings`.
-fn v3_indexer(ix: &cellarr_core::IndexerConfig) -> Value {
+pub(crate) fn v3_indexer(ix: &cellarr_core::IndexerConfig) -> Value {
     let mut fields: Vec<Value> = ix
         .settings
         .as_object()
@@ -2571,7 +2583,7 @@ fn v3_indexer(ix: &cellarr_core::IndexerConfig) -> Value {
     })
 }
 
-async fn list_indexers(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
+pub(crate) async fn list_indexers(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
     let indexers = fs.state.db.config().list_indexers().await?;
     let managed = managed_ids(&fs.state.db, managed_kind::INDEXER).await;
     Ok(Json(
@@ -2595,7 +2607,7 @@ async fn list_indexers(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>
 /// Sonarr" during the app-add test. So each template must carry the full field set
 /// the real app exposes for its protocol, gated by face (Sonarr ships the anime
 /// fields; Radarr ships `multiLanguages`/`removeYear`).
-async fn indexer_schema(State(fs): State<FaceState>) -> Json<Vec<Value>> {
+pub(crate) async fn indexer_schema(State(fs): State<FaceState>) -> Json<Vec<Value>> {
     // The torrent-only fields both apps hard-deref when building a torrent
     // indexer (seed criteria + minimum seeders). Always present on the Torznab
     // template; harmless on Newznab.
@@ -2737,7 +2749,7 @@ struct ForceSaveQuery {
     force_save: Option<bool>,
 }
 
-fn indexer_from_body(
+pub(crate) fn indexer_from_body(
     body: &IndexerBody,
     id: cellarr_core::IndexerId,
 ) -> cellarr_core::IndexerConfig {
@@ -2801,27 +2813,27 @@ fn indexer_from_body(
 
 /// Read a numeric v3 field `value` that may arrive as a JSON number or a stringy
 /// number (Prowlarr/Recyclarr serialize some fields as strings), as a `u32`.
-fn field_u32(v: &Value) -> Option<u32> {
+pub(crate) fn field_u32(v: &Value) -> Option<u32> {
     v.as_u64()
         .or_else(|| v.as_str().and_then(|s| s.trim().parse().ok()))
         .map(|n| n.min(u64::from(u32::MAX)) as u32)
 }
 
 /// Read a numeric v3 field `value` (number or stringy number) as a `u64`.
-fn field_u64(v: &Value) -> Option<u64> {
+pub(crate) fn field_u64(v: &Value) -> Option<u64> {
     v.as_u64()
         .or_else(|| v.as_str().and_then(|s| s.trim().parse().ok()))
 }
 
 /// Read a numeric v3 field `value` (number or stringy number) as an `f64`.
-fn field_f64(v: &Value) -> Option<f64> {
+pub(crate) fn field_f64(v: &Value) -> Option<f64> {
     v.as_f64()
         .or_else(|| v.as_str().and_then(|s| s.trim().parse().ok()))
 }
 
 /// Read a `requiredFlags` field `value` into a lowercase flag list. Accepts a
 /// JSON array of strings or a comma-separated string; empty/blank entries dropped.
-fn field_flag_list(v: &Value) -> Vec<String> {
+pub(crate) fn field_flag_list(v: &Value) -> Vec<String> {
     match v {
         Value::Array(items) => items
             .iter()
@@ -2838,7 +2850,7 @@ fn field_flag_list(v: &Value) -> Vec<String> {
     }
 }
 
-async fn create_indexer(
+pub(crate) async fn create_indexer(
     State(fs): State<FaceState>,
     Query(q): Query<ForceSaveQuery>,
     Json(body): Json<IndexerBody>,
@@ -2865,7 +2877,7 @@ async fn create_indexer(
 /// the path existed for PUT and DELETE only, so the GET fell through to a bare
 /// `405 Method Not Allowed` — which the sync reports as the whole application
 /// being unreachable, not as one missing verb.
-async fn get_indexer(
+pub(crate) async fn get_indexer(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
@@ -2886,7 +2898,7 @@ async fn get_indexer(
     )))
 }
 
-async fn update_indexer(
+pub(crate) async fn update_indexer(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
     Query(q): Query<ForceSaveQuery>,
@@ -2914,7 +2926,7 @@ async fn update_indexer(
     )))
 }
 
-async fn delete_indexer(
+pub(crate) async fn delete_indexer(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
@@ -2939,7 +2951,7 @@ async fn delete_indexer(
 /// v3 `indexer/test` — Prowlarr posts the indexer body to validate it. cellarr
 /// accepts a well-formed body (the shim does no live connectivity check), which
 /// is the success contract Prowlarr needs to proceed with the push.
-async fn test_indexer(Json(body): Json<IndexerBody>) -> ApiResult<Json<Value>> {
+pub(crate) async fn test_indexer(Json(body): Json<IndexerBody>) -> ApiResult<Json<Value>> {
     use cellarr_core::Indexer as _;
 
     let field_str = |name: &str| {
@@ -3041,7 +3053,7 @@ async fn test_indexer(Json(body): Json<IndexerBody>) -> ApiResult<Json<Value>> {
 
 /// A v3 indexer-test failure result carrying a human-readable message (the shape
 /// Radarr/Prowlarr render in the "Test" dialog).
-fn test_failure(message: String) -> Value {
+pub(crate) fn test_failure(message: String) -> Value {
     json!({ "isValid": false, "validationFailures": [{ "errorMessage": message }] })
 }
 
@@ -3051,7 +3063,7 @@ fn test_failure(message: String) -> Value {
 /// ecosystem reads back after a push: identity + a `fields[]` projection of
 /// `settings`, plus `category` surfaced as the `category`/`tvCategory`/
 /// `movieCategory` field clients hard-deref.
-fn v3_download_client(dc: &cellarr_core::DownloadClientConfig) -> Value {
+pub(crate) fn v3_download_client(dc: &cellarr_core::DownloadClientConfig) -> Value {
     let mut fields: Vec<Value> = dc
         .settings
         .as_object()
@@ -3082,7 +3094,7 @@ fn v3_download_client(dc: &cellarr_core::DownloadClientConfig) -> Value {
 /// The v3 `implementation` string for a cellarr download-client kind. The
 /// blackhole splits by protocol into the two implementations the ecosystem knows
 /// (`TorrentBlackhole` / `UsenetBlackhole`); other kinds map by name.
-fn dc_implementation(kind: &str, protocol: cellarr_core::Protocol) -> &'static str {
+pub(crate) fn dc_implementation(kind: &str, protocol: cellarr_core::Protocol) -> &'static str {
     match kind {
         "blackhole" | "torrentblackhole" | "usenetblackhole" => match protocol {
             cellarr_core::Protocol::Torrent => "TorrentBlackhole",
@@ -3098,7 +3110,7 @@ fn dc_implementation(kind: &str, protocol: cellarr_core::Protocol) -> &'static s
     }
 }
 
-async fn list_download_clients(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
+pub(crate) async fn list_download_clients(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
     let clients = fs.state.db.config().list_download_clients().await?;
     let managed = managed_ids(&fs.state.db, managed_kind::DOWNLOAD_CLIENT).await;
     Ok(Json(
@@ -3116,7 +3128,7 @@ async fn list_download_clients(State(fs): State<FaceState>) -> ApiResult<Json<Ve
 /// `Deluge`, `RTorrent`) carrying the host / port / urlBase / credential / category
 /// fields each client takes. Each template carries the `category` field the apps
 /// hard-deref.
-async fn download_client_schema() -> Json<Vec<Value>> {
+pub(crate) async fn download_client_schema() -> Json<Vec<Value>> {
     let blackhole = |impl_name: &str, protocol: &str| {
         json!({
             "name": "",
@@ -3241,7 +3253,7 @@ struct DownloadClientBody {
     fields: Vec<FieldBody>,
 }
 
-fn download_client_from_body(
+pub(crate) fn download_client_from_body(
     body: &DownloadClientBody,
     id: cellarr_core::DownloadClientId,
 ) -> cellarr_core::DownloadClientConfig {
@@ -3288,7 +3300,7 @@ fn download_client_from_body(
     }
 }
 
-async fn create_download_client(
+pub(crate) async fn create_download_client(
     State(fs): State<FaceState>,
     Query(q): Query<ForceSaveQuery>,
     Json(body): Json<DownloadClientBody>,
@@ -3307,7 +3319,7 @@ async fn create_download_client(
     Ok(Json(with_managed(v3_download_client(&dc), managed)))
 }
 
-async fn update_download_client(
+pub(crate) async fn update_download_client(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
     Query(q): Query<ForceSaveQuery>,
@@ -3337,7 +3349,7 @@ async fn update_download_client(
     Ok(Json(with_managed(v3_download_client(&dc), managed)))
 }
 
-async fn delete_download_client(
+pub(crate) async fn delete_download_client(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
@@ -3359,7 +3371,7 @@ async fn delete_download_client(
 /// v3 `downloadclient/test` — accepts a well-formed body. The blackhole only
 /// needs a watch folder; we validate that one field is present, matching the
 /// success contract the apps expect before saving.
-async fn test_download_client(Json(body): Json<DownloadClientBody>) -> ApiResult<Json<Value>> {
+pub(crate) async fn test_download_client(Json(body): Json<DownloadClientBody>) -> ApiResult<Json<Value>> {
     let has_watch = body
         .fields
         .iter()
@@ -3383,7 +3395,7 @@ async fn test_download_client(Json(body): Json<DownloadClientBody>) -> ApiResult
 // --- remote path mapping ---------------------------------------------------
 
 /// Render a cellarr [`RemotePathMapping`] into the v3 shape Recyclarr/UoMi read.
-fn v3_remote_path_mapping(m: &cellarr_core::RemotePathMapping) -> Value {
+pub(crate) fn v3_remote_path_mapping(m: &cellarr_core::RemotePathMapping) -> Value {
     json!({
         "id": rpm_numeric_id(&m.id),
         "host": m.host,
@@ -3392,7 +3404,7 @@ fn v3_remote_path_mapping(m: &cellarr_core::RemotePathMapping) -> Value {
     })
 }
 
-async fn list_remote_path_mappings(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
+pub(crate) async fn list_remote_path_mappings(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
     let mappings = fs.state.db.config().list_remote_path_mappings().await?;
     let managed = managed_ids(&fs.state.db, managed_kind::REMOTE_PATH_MAPPING).await;
     Ok(Json(
@@ -3414,7 +3426,7 @@ struct RemotePathMappingBody {
     local_path: Option<String>,
 }
 
-async fn create_remote_path_mapping(
+pub(crate) async fn create_remote_path_mapping(
     State(fs): State<FaceState>,
     Json(body): Json<RemotePathMappingBody>,
 ) -> ApiResult<Json<Value>> {
@@ -3446,7 +3458,7 @@ async fn create_remote_path_mapping(
     )))
 }
 
-async fn update_remote_path_mapping(
+pub(crate) async fn update_remote_path_mapping(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
     Json(body): Json<RemotePathMappingBody>,
@@ -3487,7 +3499,7 @@ async fn update_remote_path_mapping(
     )))
 }
 
-async fn delete_remote_path_mapping(
+pub(crate) async fn delete_remote_path_mapping(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
@@ -3514,7 +3526,7 @@ async fn delete_remote_path_mapping(
 
 /// Render the persisted naming formats into the v3 naming-config payload: the four
 /// configurable formats keyed by target, plus whether season folders are used.
-fn v3_naming_config(naming: &cellarr_core::NamingFormats) -> Value {
+pub(crate) fn v3_naming_config(naming: &cellarr_core::NamingFormats) -> Value {
     json!({
         "movieFileFormat": naming.movie_file_format,
         "seriesFolderFormat": naming.series_folder_format,
@@ -3528,7 +3540,7 @@ fn v3_naming_config(naming: &cellarr_core::NamingFormats) -> Value {
 }
 
 /// `GET /config/naming` — the persisted per-media-type naming formats.
-async fn get_naming_config(State(fs): State<FaceState>) -> ApiResult<Json<Value>> {
+pub(crate) async fn get_naming_config(State(fs): State<FaceState>) -> ApiResult<Json<Value>> {
     let mm = fs.state.db.config().get_media_management().await?;
     Ok(Json(v3_naming_config(&mm.naming)))
 }
@@ -3553,7 +3565,7 @@ struct NamingConfigBody {
 /// validated against its target's sample context before it is persisted, so an
 /// invalid format (an unterminated token, a missing *required* token) is rejected
 /// with `400` rather than silently saved and only failing at import time.
-async fn update_naming_config(
+pub(crate) async fn update_naming_config(
     State(fs): State<FaceState>,
     Json(body): Json<NamingConfigBody>,
 ) -> ApiResult<Json<Value>> {
@@ -3600,7 +3612,7 @@ async fn update_naming_config(
 /// `GET /config/naming/tokens` — the available naming-token vocabulary per name
 /// target, so the UI can offer an insertable token palette with required/optional
 /// markers and example values.
-async fn get_naming_tokens() -> Json<Value> {
+pub(crate) async fn get_naming_tokens() -> Json<Value> {
     use cellarr_core::NameTarget;
     let render_target = |target: NameTarget| {
         let tokens: Vec<Value> = cellarr_fs::token_vocabulary(target)
@@ -3639,7 +3651,7 @@ struct NamingPreviewBody {
 /// context and return the example string, so the UI shows a live preview as the
 /// user edits a naming format. Required-token strictness and graceful optional-token
 /// behavior are exactly those of the import-time rename engine.
-async fn preview_naming(Json(body): Json<NamingPreviewBody>) -> ApiResult<Json<Value>> {
+pub(crate) async fn preview_naming(Json(body): Json<NamingPreviewBody>) -> ApiResult<Json<Value>> {
     use cellarr_core::{MediaType, NameTarget};
 
     // Resolve the name target from an explicit `target`, else the `mediaType`.
@@ -3685,7 +3697,7 @@ async fn preview_naming(Json(body): Json<NamingPreviewBody>) -> ApiResult<Json<V
 /// bin, naming formats, the post-commit permission policy, and the extra-file import
 /// policy). Serialized exactly as [`MediaManagement`](cellarr_core::MediaManagement)
 /// so it round-trips through the matching PUT.
-async fn get_media_management(State(fs): State<FaceState>) -> ApiResult<Json<Value>> {
+pub(crate) async fn get_media_management(State(fs): State<FaceState>) -> ApiResult<Json<Value>> {
     let mm = fs.state.db.config().get_media_management().await?;
     Ok(Json(serde_json::to_value(&mm).map_err(|e| {
         ApiError::Internal(format!("serializing media-management settings: {e}"))
@@ -3716,7 +3728,7 @@ struct MediaManagementBody {
 /// applied **after** a media commit and never roll the imported media back on
 /// failure (that contract lives in the import path) — persisting them here is pure
 /// config.
-async fn update_media_management(
+pub(crate) async fn update_media_management(
     State(fs): State<FaceState>,
     Json(body): Json<MediaManagementBody>,
 ) -> ApiResult<Json<Value>> {
@@ -3764,7 +3776,7 @@ async fn update_media_management(
 /// triggers + a `fields[]` projection of `settings`. cellarr ships the **Webhook**
 /// implementation (the Connect push Bazarr-push/Notifiarr consume); other
 /// connector kinds round-trip their fields unchanged.
-fn v3_notification(n: &NotificationConfig) -> Value {
+pub(crate) fn v3_notification(n: &NotificationConfig) -> Value {
     let fields: Vec<Value> = n
         .settings
         .as_object()
@@ -3804,14 +3816,14 @@ fn v3_notification(n: &NotificationConfig) -> Value {
 }
 
 /// Whether notification `n` is subscribed to `event` (empty `on_events` = all).
-fn on_event(n: &NotificationConfig, event: &str) -> bool {
+pub(crate) fn on_event(n: &NotificationConfig, event: &str) -> bool {
     n.on_events.is_empty() || n.on_events.iter().any(|e| e.eq_ignore_ascii_case(event))
 }
 
 /// The v3 `implementation` string for a cellarr notification kind. cellarr ships
 /// the broadened provider set; each kind maps to the implementation name the
 /// ecosystem round-trips (and which `notification/schema` advertises).
-fn notification_implementation(kind: &str) -> &'static str {
+pub(crate) fn notification_implementation(kind: &str) -> &'static str {
     use cellarr_core::notification::kind as k;
     match kind.to_ascii_lowercase().as_str() {
         k::DISCORD => "Discord",
@@ -3828,7 +3840,7 @@ fn notification_implementation(kind: &str) -> &'static str {
 /// The cellarr notification `kind` for a v3 `implementation` string — the inverse
 /// of [`notification_implementation`], used when a write body names an
 /// implementation. An unknown implementation falls back to the generic webhook.
-fn notification_kind_for_implementation(implementation: &str) -> String {
+pub(crate) fn notification_kind_for_implementation(implementation: &str) -> String {
     use cellarr_core::notification::kind as k;
     match implementation.to_ascii_lowercase().as_str() {
         "discord" => k::DISCORD,
@@ -3843,7 +3855,7 @@ fn notification_kind_for_implementation(implementation: &str) -> String {
     .to_string()
 }
 
-async fn list_notifications(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
+pub(crate) async fn list_notifications(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
     let notifications = fs.state.db.config().list_notifications().await?;
     let managed = managed_ids(&fs.state.db, managed_kind::NOTIFICATION).await;
     Ok(Json(
@@ -3854,7 +3866,7 @@ async fn list_notifications(State(fs): State<FaceState>) -> ApiResult<Json<Vec<V
     ))
 }
 
-async fn get_notification(
+pub(crate) async fn get_notification(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
@@ -3877,7 +3889,7 @@ async fn get_notification(
 /// the media-server rescan providers **Plex**, **Jellyfin**, **Emby**. Each
 /// template carries the `on*` event toggles plus its provider-specific fields the
 /// UI renders, so a notification of any kind round-trips through create/update.
-async fn notification_schema() -> Json<Vec<Value>> {
+pub(crate) async fn notification_schema() -> Json<Vec<Value>> {
     // A template carrying the standard event toggles + a provider's fields.
     let template = |implementation: &str, fields: Vec<Value>| {
         json!({
@@ -3999,7 +4011,7 @@ struct NotificationBody {
     fields: Vec<FieldBody>,
 }
 
-fn notification_from_body(body: &NotificationBody, id: String) -> NotificationConfig {
+pub(crate) fn notification_from_body(body: &NotificationBody, id: String) -> NotificationConfig {
     let mut settings = serde_json::Map::new();
     for f in &body.fields {
         if let Some(name) = &f.name {
@@ -4040,7 +4052,7 @@ fn notification_from_body(body: &NotificationBody, id: String) -> NotificationCo
     }
 }
 
-async fn create_notification(
+pub(crate) async fn create_notification(
     State(fs): State<FaceState>,
     Json(body): Json<NotificationBody>,
 ) -> ApiResult<Json<Value>> {
@@ -4050,7 +4062,7 @@ async fn create_notification(
     Ok(Json(with_managed(v3_notification(&n), managed)))
 }
 
-async fn update_notification(
+pub(crate) async fn update_notification(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
     Json(body): Json<NotificationBody>,
@@ -4071,7 +4083,7 @@ async fn update_notification(
     Ok(Json(with_managed(v3_notification(&n), managed)))
 }
 
-async fn delete_notification(
+pub(crate) async fn delete_notification(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
@@ -4099,7 +4111,7 @@ async fn delete_notification(
 /// (a Discord/Telegram message, an SMTP send, a script run, or a media-server
 /// liveness ping). A malformed/missing setting is reported as a validation
 /// failure, never a 500.
-async fn test_notification(
+pub(crate) async fn test_notification(
     State(fs): State<FaceState>,
     Json(body): Json<NotificationBody>,
 ) -> ApiResult<Json<Value>> {
@@ -4148,7 +4160,7 @@ async fn test_notification(
 /// Render a cellarr [`ImportListConfig`](cellarr_core::ImportListConfig) into the
 /// v3 import-list shape the ecosystem reads back after a push: identity + flags +
 /// the safeguard's `last_successful_sync` + a `fields[]` projection of `settings`.
-fn v3_import_list(l: &cellarr_core::ImportListConfig) -> Value {
+pub(crate) fn v3_import_list(l: &cellarr_core::ImportListConfig) -> Value {
     let mut fields: Vec<Value> = l
         .settings
         .as_object()
@@ -4188,7 +4200,7 @@ fn v3_import_list(l: &cellarr_core::ImportListConfig) -> Value {
 }
 
 /// The v3 `implementation` string for a cellarr import-list kind.
-fn import_list_implementation(kind: &str) -> &'static str {
+pub(crate) fn import_list_implementation(kind: &str) -> &'static str {
     match kind.to_ascii_lowercase().as_str() {
         "trakt" => "TraktList",
         "tmdb" => "TMDbListImport",
@@ -4201,7 +4213,7 @@ fn import_list_implementation(kind: &str) -> &'static str {
 
 /// The cellarr import-list kind for a v3 implementation string (the inverse of
 /// [`import_list_implementation`]).
-fn import_list_kind(implementation: Option<&str>) -> String {
+pub(crate) fn import_list_kind(implementation: Option<&str>) -> String {
     match implementation.map(|s| s.to_ascii_lowercase()) {
         Some(i) if i.contains("trakt") => "trakt".into(),
         // A TMDb *collection* import is its own source kind (auto-add-the-rest);
@@ -4215,7 +4227,7 @@ fn import_list_kind(implementation: Option<&str>) -> String {
 }
 
 /// The v3 `cleanLibraryLevel` string for a cellarr [`CleanAction`].
-fn clean_action_str(action: cellarr_core::CleanAction) -> &'static str {
+pub(crate) fn clean_action_str(action: cellarr_core::CleanAction) -> &'static str {
     match action {
         cellarr_core::CleanAction::None => "disabled",
         cellarr_core::CleanAction::Unmonitor => "logOnly",
@@ -4226,7 +4238,7 @@ fn clean_action_str(action: cellarr_core::CleanAction) -> &'static str {
 /// Parse a v3 `cleanLibraryLevel` string into a cellarr [`CleanAction`]. Anything
 /// unrecognized — including the absence of the field — maps to the safe
 /// [`CleanAction::None`] (never a destructive default).
-fn clean_action_from_str(raw: Option<&str>) -> cellarr_core::CleanAction {
+pub(crate) fn clean_action_from_str(raw: Option<&str>) -> cellarr_core::CleanAction {
     match raw.map(|s| s.to_ascii_lowercase()) {
         Some(s) if s == "logonly" || s == "unmonitor" => cellarr_core::CleanAction::Unmonitor,
         Some(s) if s.starts_with("remove") || s == "removeandkeep" || s == "removeanddelete" => {
@@ -4237,7 +4249,7 @@ fn clean_action_from_str(raw: Option<&str>) -> cellarr_core::CleanAction {
     }
 }
 
-async fn list_import_lists(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
+pub(crate) async fn list_import_lists(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
     use cellarr_core::ImportListRepository;
     let surface = fs.face.fixed_media();
     let lists = ImportListRepository::list(&fs.state.db.import_lists()).await?;
@@ -4250,7 +4262,7 @@ async fn list_import_lists(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Va
     Ok(Json(out))
 }
 
-async fn get_import_list(
+pub(crate) async fn get_import_list(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
@@ -4269,7 +4281,7 @@ async fn get_import_list(
 /// cellarr advertises the Trakt/TMDb/Plex sources (credential-gated) plus the
 /// custom source, each with its source-specific credential fields and the
 /// `cleanLibraryLevel` toggle (which defaults to the safe "disabled").
-async fn import_list_schema(State(fs): State<FaceState>) -> Json<Vec<Value>> {
+pub(crate) async fn import_list_schema(State(fs): State<FaceState>) -> Json<Vec<Value>> {
     let monitor_field = json!({ "order": 0, "name": "shouldMonitor", "label": "Monitor", "type": "checkbox", "value": true, "advanced": false });
     let clean_field = json!({ "order": 1, "name": "cleanLibraryLevel", "label": "Clean Library", "helpText": "Action for items no longer on the list. Defaults to disabled; a destructive action only ever runs after a confirmed-good fetch.", "type": "select", "value": "disabled", "advanced": false });
     let entry = |impl_name: &str, extra: Vec<Value>| {
@@ -4364,7 +4376,7 @@ struct ImportListBody {
     fields: Vec<FieldBody>,
 }
 
-fn import_list_from_body(
+pub(crate) fn import_list_from_body(
     fs: &FaceState,
     body: &ImportListBody,
     id: String,
@@ -4414,7 +4426,7 @@ fn import_list_from_body(
     }
 }
 
-async fn create_import_list(
+pub(crate) async fn create_import_list(
     State(fs): State<FaceState>,
     Json(body): Json<ImportListBody>,
 ) -> ApiResult<Json<Value>> {
@@ -4425,7 +4437,7 @@ async fn create_import_list(
     Ok(Json(with_managed(v3_import_list(&l), managed)))
 }
 
-async fn update_import_list(
+pub(crate) async fn update_import_list(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
     Json(body): Json<ImportListBody>,
@@ -4443,7 +4455,7 @@ async fn update_import_list(
     Ok(Json(with_managed(v3_import_list(&l), managed)))
 }
 
-async fn delete_import_list(
+pub(crate) async fn delete_import_list(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
@@ -4463,7 +4475,7 @@ async fn delete_import_list(
 /// cellarr accepts a well-formed body (a credential-gated source is allowed to be
 /// saved without creds; it simply reports a graceful failed fetch until they are
 /// supplied). This is the success contract the apps need to proceed with a push.
-async fn test_import_list(Json(body): Json<ImportListBody>) -> ApiResult<Json<Value>> {
+pub(crate) async fn test_import_list(Json(body): Json<ImportListBody>) -> ApiResult<Json<Value>> {
     if body
         .name
         .as_deref()
@@ -4477,7 +4489,7 @@ async fn test_import_list(Json(body): Json<ImportListBody>) -> ApiResult<Json<Va
 
 /// Render one [`ListSyncReport`](crate::import_list_sync::ListSyncReport) into a
 /// small JSON summary the UI/FE reads after a sync trigger.
-fn v3_list_sync_report(r: &crate::import_list_sync::ListSyncReport) -> Value {
+pub(crate) fn v3_list_sync_report(r: &crate::import_list_sync::ListSyncReport) -> Value {
     json!({
         "id": il_numeric_id(&r.list_id),
         "name": r.list_name,
@@ -4500,7 +4512,7 @@ fn v3_list_sync_report(r: &crate::import_list_sync::ListSyncReport) -> Value {
 /// applies the configured clean action and stamps `last_successful_sync`. A failed
 /// fetch changes nothing (the safeguard). With no sync wiring (offline/test) the
 /// trigger is reported accepted-but-unwired rather than erroring.
-async fn sync_import_list_one(
+pub(crate) async fn sync_import_list_one(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
@@ -4545,7 +4557,7 @@ async fn sync_import_list_one(
 ///
 /// Returns the per-list reports as a JSON value the command handler embeds in its
 /// response. With no sync wiring this reports accepted-but-unwired.
-async fn run_import_list_sync_all(state: &AppState) -> ApiResult<Value> {
+pub(crate) async fn run_import_list_sync_all(state: &AppState) -> ApiResult<Value> {
     use crate::import_list_sync::ImportListSyncOutcome;
     let Some(runner) = state.import_list_sync.as_ref() else {
         return Ok(
@@ -4570,7 +4582,7 @@ async fn run_import_list_sync_all(state: &AppState) -> ApiResult<Value> {
 // --- import-list exclusions ------------------------------------------------
 
 /// Render a cellarr [`ImportListExclusion`] into the v3 exclusion shape.
-fn v3_import_list_exclusion(e: &cellarr_core::ImportListExclusion) -> Value {
+pub(crate) fn v3_import_list_exclusion(e: &cellarr_core::ImportListExclusion) -> Value {
     // The ecosystem keys exclusions by the media type's external id field.
     let id_field = match e.id_type.to_ascii_lowercase().as_str() {
         "tvdb" => "tvdbId",
@@ -4584,7 +4596,7 @@ fn v3_import_list_exclusion(e: &cellarr_core::ImportListExclusion) -> Value {
     })
 }
 
-async fn list_import_list_exclusions(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
+pub(crate) async fn list_import_list_exclusions(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
     use cellarr_core::ImportListRepository;
     let exclusions = ImportListRepository::list_exclusions(&fs.state.db.import_lists()).await?;
     Ok(Json(
@@ -4607,7 +4619,7 @@ struct ImportListExclusionBody {
 }
 
 /// Coerce a JSON id value (number or string) to its string form.
-fn id_value_str(v: &Value) -> Option<String> {
+pub(crate) fn id_value_str(v: &Value) -> Option<String> {
     if let Some(s) = v.as_str() {
         (!s.is_empty()).then(|| s.to_string())
     } else {
@@ -4615,7 +4627,7 @@ fn id_value_str(v: &Value) -> Option<String> {
     }
 }
 
-async fn create_import_list_exclusion(
+pub(crate) async fn create_import_list_exclusion(
     State(fs): State<FaceState>,
     Json(body): Json<ImportListExclusionBody>,
 ) -> ApiResult<Json<Value>> {
@@ -4641,7 +4653,7 @@ async fn create_import_list_exclusion(
     Ok(Json(v3_import_list_exclusion(&exclusion)))
 }
 
-async fn delete_import_list_exclusion(
+pub(crate) async fn delete_import_list_exclusion(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
@@ -4661,7 +4673,7 @@ async fn delete_import_list_exclusion(
 
 /// Render a cellarr [`BlocklistEntry`](cellarr_core::BlocklistEntry) into the v3
 /// blocklist record shape dashboards/UIs read.
-fn v3_blocklist_item(e: &cellarr_core::BlocklistEntry) -> Value {
+pub(crate) fn v3_blocklist_item(e: &cellarr_core::BlocklistEntry) -> Value {
     json!({
         "id": blocklist_numeric_id(&e.id),
         "sourceTitle": e.title,
@@ -4673,7 +4685,7 @@ fn v3_blocklist_item(e: &cellarr_core::BlocklistEntry) -> Value {
 }
 
 /// v3 `GET /blocklist` — the paged list of blocklisted (failed) releases.
-async fn list_blocklist(State(fs): State<FaceState>) -> ApiResult<Json<Value>> {
+pub(crate) async fn list_blocklist(State(fs): State<FaceState>) -> ApiResult<Json<Value>> {
     use cellarr_core::BlocklistRepository;
     let entries = BlocklistRepository::list(&fs.state.db.blocklist()).await?;
     let records: Vec<Value> = entries.iter().map(v3_blocklist_item).collect();
@@ -4682,7 +4694,7 @@ async fn list_blocklist(State(fs): State<FaceState>) -> ApiResult<Json<Value>> {
 
 /// v3 `DELETE /blocklist/{id}` — clear one blocklisted release so it can be
 /// grabbed again. Idempotent (a missing id still 200s).
-async fn delete_blocklist_item(
+pub(crate) async fn delete_blocklist_item(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
@@ -4707,7 +4719,7 @@ struct BlocklistBulkBody {
     ids: Vec<i64>,
 }
 
-async fn delete_blocklist_bulk(
+pub(crate) async fn delete_blocklist_bulk(
     State(fs): State<FaceState>,
     Json(body): Json<BlocklistBulkBody>,
 ) -> ApiResult<Json<Value>> {
@@ -4731,21 +4743,21 @@ struct LookupQuery {
     term: Option<String>,
 }
 
-async fn movie_lookup(
+pub(crate) async fn movie_lookup(
     State(fs): State<FaceState>,
     Query(q): Query<LookupQuery>,
 ) -> ApiResult<Json<Vec<Value>>> {
     lookup(&fs.state, q.term.as_deref(), MediaType::Movie).await
 }
 
-async fn series_lookup(
+pub(crate) async fn series_lookup(
     State(fs): State<FaceState>,
     Query(q): Query<LookupQuery>,
 ) -> ApiResult<Json<Vec<Value>>> {
     lookup(&fs.state, q.term.as_deref(), MediaType::Tv).await
 }
 
-async fn lookup(
+pub(crate) async fn lookup(
     state: &AppState,
     term: Option<&str>,
     surface: MediaType,
@@ -4798,7 +4810,7 @@ async fn lookup(
 /// identity (title/year/external ids) without file-state — the shape Overseerr
 /// reads to offer "add". The external ids land in the field the addressed media
 /// type keys on: `tvdbId` for series, `tmdbId`/`imdbId` for movies.
-fn v3_lookup_item(c: &crate::metadata::LookupCandidate) -> Value {
+pub(crate) fn v3_lookup_item(c: &crate::metadata::LookupCandidate) -> Value {
     let mut base = json!({
         "title": c.title,
         "titleSlug": slug(&c.title),
@@ -4851,7 +4863,7 @@ fn v3_lookup_item(c: &crate::metadata::LookupCandidate) -> Value {
 /// Build the full v3 resource for one content node — the shape Overseerr/Bazarr
 /// read for availability: identity + `path`/`rootFolderPath`/`monitored` and the
 /// file-state fields (`hasFile`, `*File.path`, `sizeOnDisk`).
-async fn v3_resource_item(
+pub(crate) async fn v3_resource_item(
     state: &AppState,
     node: &cellarr_core::ContentNode,
     title: &str,
@@ -4893,7 +4905,7 @@ async fn v3_resource_item(
 /// single-item path ([`v3_resource_item`]) fetches then calls this; the list path
 /// ([`list_resources`]) batch-fetches every input once and calls this per node,
 /// so a large library is not an N+1 of per-node queries.
-fn build_resource_json(
+pub(crate) fn build_resource_json(
     node: &cellarr_core::ContentNode,
     title: &str,
     files: &[cellarr_core::MediaFile],
@@ -4978,7 +4990,7 @@ fn build_resource_json(
 /// List the root content nodes of a media type as v3 resources — the series /
 /// movie entries a library lists. A dedicated face is pinned to its media type;
 /// the Cellarr face lists every library's roots.
-async fn list_resources(fs: &FaceState, surface: MediaType) -> ApiResult<Vec<Value>> {
+pub(crate) async fn list_resources(fs: &FaceState, surface: MediaType) -> ApiResult<Vec<Value>> {
     let cfg = fs.state.db.config();
     let content = fs.state.db.content();
     let libs: Vec<_> = cfg
@@ -5056,7 +5068,7 @@ const MAX_PAGE_SIZE: u64 = 1000;
 /// to the requested 1-based page: `page` is clamped to `>= 1`, `pageSize` is clamped
 /// to `1..=MAX_PAGE_SIZE`, and a page past the end yields an empty array. The result
 /// is always a bare array of the same item shape.
-fn paginate(items: Vec<Value>, q: &PageQuery) -> Vec<Value> {
+pub(crate) fn paginate(items: Vec<Value>, q: &PageQuery) -> Vec<Value> {
     // Parse leniently: an unparseable value (a client sending `page=abc`) is treated
     // as absent, not rejected, so these Radarr/Sonarr-compatible endpoints never 400
     // on a malformed query — they fall back to the full array.
@@ -5080,7 +5092,7 @@ fn paginate(items: Vec<Value>, q: &PageQuery) -> Vec<Value> {
     items[start as usize..end as usize].to_vec()
 }
 
-async fn list_series(
+pub(crate) async fn list_series(
     State(fs): State<FaceState>,
     Query(q): Query<PageQuery>,
 ) -> ApiResult<Json<Vec<Value>>> {
@@ -5090,7 +5102,7 @@ async fn list_series(
     )))
 }
 
-async fn list_movies(
+pub(crate) async fn list_movies(
     State(fs): State<FaceState>,
     Query(q): Query<PageQuery>,
 ) -> ApiResult<Json<Vec<Value>>> {
@@ -5126,7 +5138,7 @@ struct EpisodeListQuery {
 /// A missing/invalid `seriesId` yields an empty array (the same benign shape the
 /// originals return for a series with no episodes), never a 404 — the UI then
 /// shows an empty tree rather than an error.
-async fn list_episodes(
+pub(crate) async fn list_episodes(
     State(fs): State<FaceState>,
     Query(q): Query<EpisodeListQuery>,
 ) -> ApiResult<Json<Vec<Value>>> {
@@ -5173,7 +5185,7 @@ async fn list_episodes(
 /// Render one episode [`ContentNode`] as the v3 episode resource the monitor tree
 /// reads. `series_numeric` is the parent series' projected id, carried on every
 /// row as `seriesId`.
-async fn v3_episode(
+pub(crate) async fn v3_episode(
     state: &AppState,
     node: &cellarr_core::ContentNode,
     series_numeric: i64,
@@ -5229,7 +5241,7 @@ async fn v3_episode(
 /// [`ContentNode`], or `None` when nothing matches. The numeric fallback scans the
 /// TV libraries' roots and re-projects each id (the stateless projection the list
 /// endpoints emit).
-async fn resolve_series_node(
+pub(crate) async fn resolve_series_node(
     state: &AppState,
     id: &str,
 ) -> ApiResult<Option<cellarr_core::ContentNode>> {
@@ -5259,7 +5271,7 @@ async fn resolve_series_node(
 
 // --- content detail (GET /movie/{id}, GET /series/{id}) --------------------
 
-async fn get_movie_detail(
+pub(crate) async fn get_movie_detail(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
@@ -5268,7 +5280,7 @@ async fn get_movie_detail(
         .map(Json)
 }
 
-async fn get_series_detail(
+pub(crate) async fn get_series_detail(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
@@ -5287,7 +5299,7 @@ async fn get_series_detail(
 /// (`content_meta`, written at Identify/Refresh): a node that has been identified
 /// surfaces its real facts; one that has not yet falls back to empty/zero. Title,
 /// monitored, file-state, size, and the quality profile are always real.
-async fn content_detail(state: &AppState, id: &str, expected: MediaType) -> ApiResult<Value> {
+pub(crate) async fn content_detail(state: &AppState, id: &str, expected: MediaType) -> ApiResult<Value> {
     let content_id = cellarr_core::ContentId::from_uuid(
         id.parse::<uuid::Uuid>()
             .map_err(|_| ApiError::BadRequest(format!("invalid id: {id}")))?,
@@ -5369,7 +5381,7 @@ async fn content_detail(state: &AppState, id: &str, expected: MediaType) -> ApiR
 /// filesystem per item — an item with no cached-artwork directory (the common case
 /// for a freshly onboarded library) is skipped without any per-item stat, instead
 /// of the up-to-8 `is_file` probes [`artwork_images`] would otherwise run per row.
-fn artwork_present_ids(state: &AppState) -> std::collections::HashSet<String> {
+pub(crate) fn artwork_present_ids(state: &AppState) -> std::collections::HashSet<String> {
     let mut set = std::collections::HashSet::new();
     let Some(dir) = state.artwork_dir.as_deref() else {
         return set;
@@ -5400,7 +5412,7 @@ fn artwork_present_ids(state: &AppState) -> std::collections::HashSet<String> {
 /// concurrent first-requests may each rebuild once, but they converge and never
 /// deadlock or hold the lock across the (slow) `read_dir`. A poisoned lock (a prior
 /// panic while holding it) falls back to a direct read rather than propagating.
-fn artwork_present_ids_cached(state: &AppState) -> std::collections::HashSet<String> {
+pub(crate) fn artwork_present_ids_cached(state: &AppState) -> std::collections::HashSet<String> {
     // Fast path: an in-window snapshot is served straight from memory.
     if let Ok(cache) = state.artwork_cache.read() {
         if !cache.is_stale() {
@@ -5428,7 +5440,7 @@ fn artwork_present_ids_cached(state: &AppState) -> std::collections::HashSet<Str
 /// again. The `mediacover` route validates the exact file per request and 404s a
 /// missing kind/extension, so a client never renders a broken cover — it just
 /// isn't fetched.
-fn artwork_images_present(
+pub(crate) fn artwork_images_present(
     state: &AppState,
     content_id: &str,
     present: &std::collections::HashSet<String>,
@@ -5445,7 +5457,7 @@ fn artwork_images_present(
         .collect()
 }
 
-fn artwork_images(state: &AppState, content_id: &str) -> Vec<Value> {
+pub(crate) fn artwork_images(state: &AppState, content_id: &str) -> Vec<Value> {
     let Some(dir) = state.artwork_dir.as_deref() else {
         return Vec::new();
     };
@@ -5471,7 +5483,7 @@ fn artwork_images(state: &AppState, content_id: &str) -> Vec<Value> {
 /// (`"standard"`/`"daily"`/`"anime"`), the spelling Sonarr uses on a series
 /// resource. Single-sourced from the enum's serde form so the shim never drifts
 /// from the stored value.
-fn series_type_str(series_type: cellarr_core::SeriesType) -> &'static str {
+pub(crate) fn series_type_str(series_type: cellarr_core::SeriesType) -> &'static str {
     match series_type {
         cellarr_core::SeriesType::Standard => "standard",
         cellarr_core::SeriesType::Daily => "daily",
@@ -5483,7 +5495,7 @@ fn series_type_str(series_type: cellarr_core::SeriesType) -> &'static str {
 /// case-insensitively. An unknown/empty value falls back to
 /// [`SeriesType::Standard`](cellarr_core::SeriesType::Standard) — the safe default
 /// that leaves a series on native numbering rather than rejecting the request.
-fn series_type_from_wire(raw: &str) -> cellarr_core::SeriesType {
+pub(crate) fn series_type_from_wire(raw: &str) -> cellarr_core::SeriesType {
     match raw.trim().to_ascii_lowercase().as_str() {
         "anime" => cellarr_core::SeriesType::Anime,
         "daily" => cellarr_core::SeriesType::Daily,
@@ -5491,7 +5503,7 @@ fn series_type_from_wire(raw: &str) -> cellarr_core::SeriesType {
     }
 }
 
-fn iso_to_utc(date: &str) -> String {
+pub(crate) fn iso_to_utc(date: &str) -> String {
     if date.len() == 10 && date.as_bytes()[4] == b'-' {
         format!("{date}T00:00:00Z")
     } else {
@@ -5530,7 +5542,7 @@ struct ContentUpdateBody {
 /// returning the refreshed detail resource. Other fields in the body are accepted
 /// and ignored (cellarr scopes quality profile per library, not per node, and the
 /// remaining v3 fields are projections, not stored per-node).
-async fn update_content(
+pub(crate) async fn update_content(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
     Json(body): Json<ContentUpdateBody>,
@@ -5587,7 +5599,7 @@ struct DeleteContentQuery {
 /// v3 `DELETE /movie/{id}` — remove a movie, optionally its files and re-add
 /// guard. Mirrors Radarr: `deleteFiles` recycles/unlinks the media, and
 /// `addImportExclusion` records an exclusion so an import list cannot re-add it.
-async fn delete_movie(
+pub(crate) async fn delete_movie(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
     Query(q): Query<DeleteContentQuery>,
@@ -5597,7 +5609,7 @@ async fn delete_movie(
 
 /// v3 `DELETE /series/{id}` — remove a series and its whole season/episode
 /// subtree, optionally its files and a re-add guard. Mirrors Sonarr.
-async fn delete_series(
+pub(crate) async fn delete_series(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
     Query(q): Query<DeleteContentQuery>,
@@ -5610,7 +5622,7 @@ async fn delete_series(
 /// expected media type, or `None` when nothing matches. The numeric fallback
 /// scans the library roots of the surface and re-projects each id, the same
 /// stateless projection [`v3_resource_item`] emits.
-async fn resolve_content_node(
+pub(crate) async fn resolve_content_node(
     state: &AppState,
     id: &str,
     expected: MediaType,
@@ -5645,7 +5657,7 @@ async fn resolve_content_node(
 /// the *arr delete contract. The DB record is removed first; a file-removal
 /// failure surfaces as an error *after* the record is gone, never leaving a
 /// dangling record (the library never re-grabs a deleted title).
-async fn delete_content(
+pub(crate) async fn delete_content(
     state: &AppState,
     id: &str,
     surface: MediaType,
@@ -5697,7 +5709,7 @@ async fn delete_content(
 /// Recycle (or unlink) the deleted content's media files, rooted at the node's
 /// library root so the path-escape guard has a boundary. Each file path is the
 /// absolute on-disk path stored on its `media_file` row.
-async fn recycle_content_files(
+pub(crate) async fn recycle_content_files(
     state: &AppState,
     node: &cellarr_core::ContentNode,
     paths: &[String],
@@ -5728,7 +5740,7 @@ async fn recycle_content_files(
 /// future import-list sync skips it. cellarr does not yet resolve a title to a
 /// stable external id at delete time, so the node id is the stable exclusion key
 /// (the same key the title was added under in this library).
-async fn add_content_exclusion(
+pub(crate) async fn add_content_exclusion(
     state: &AppState,
     node: &cellarr_core::ContentNode,
     title: &str,
@@ -5796,14 +5808,14 @@ struct AddOptions {
     monitor: Option<cellarr_core::MonitorOption>,
 }
 
-async fn add_movie(
+pub(crate) async fn add_movie(
     State(fs): State<FaceState>,
     Json(body): Json<AddBody>,
 ) -> ApiResult<Json<Value>> {
     add(&fs.state, body, MediaType::Movie).await
 }
 
-async fn add_series(
+pub(crate) async fn add_series(
     State(fs): State<FaceState>,
     Json(body): Json<AddBody>,
 ) -> ApiResult<Json<Value>> {
@@ -5814,7 +5826,7 @@ async fn add_series(
 /// tmdb/tvdb/imdb id, preferring the namespace its media type primarily keys on
 /// (tvdb for TV, tmdb for movies), then falling back. `None` when the payload has
 /// no id. Shared by the add's dedup check and its identity link so both agree.
-fn add_external_identity(body: &AddBody, surface: MediaType) -> Option<(&'static str, String)> {
+pub(crate) fn add_external_identity(body: &AddBody, surface: MediaType) -> Option<(&'static str, String)> {
     match surface {
         MediaType::Tv => body
             .tvdb_id
@@ -5832,7 +5844,7 @@ fn add_external_identity(body: &AddBody, surface: MediaType) -> Option<(&'static
     }
 }
 
-async fn add(state: &AppState, body: AddBody, surface: MediaType) -> ApiResult<Json<Value>> {
+pub(crate) async fn add(state: &AppState, body: AddBody, surface: MediaType) -> ApiResult<Json<Value>> {
     // Computed before `title` is moved out of `body` below (it borrows the whole
     // body). The title's external identity keys both the dedup check and the link.
     let external = add_external_identity(&body, surface);
@@ -5970,7 +5982,7 @@ async fn add(state: &AppState, body: AddBody, surface: MediaType) -> ApiResult<J
     )))
 }
 
-async fn pick_library(
+pub(crate) async fn pick_library(
     state: &AppState,
     surface: MediaType,
     root_folder_path: Option<&str>,
@@ -6014,7 +6026,7 @@ struct CommandBody {
     series_id: Option<String>,
 }
 
-async fn command(
+pub(crate) async fn command(
     State(fs): State<FaceState>,
     Json(body): Json<CommandBody>,
 ) -> ApiResult<Json<Value>> {
@@ -6053,7 +6065,7 @@ async fn command(
 
 /// v3 `GET /command` — the list of recent/known commands the ecosystem polls.
 /// Backed by the scheduler's jobs.
-async fn list_commands(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
+pub(crate) async fn list_commands(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
     let jobs = commands::list_jobs(&fs.state.scheduler)
         .await
         .map_err(ApiError::Command)?;
@@ -6112,7 +6124,7 @@ struct ReleaseQuery {
 /// the interactive screen degrades to "no releases" rather than breaking.
 ///
 /// [`preview_releases`]: cellarr_jobs::PipelineRunner::preview_releases
-async fn release_search(
+pub(crate) async fn release_search(
     State(fs): State<FaceState>,
     Query(q): Query<ReleaseQuery>,
 ) -> ApiResult<Json<Vec<Value>>> {
@@ -6175,7 +6187,7 @@ async fn release_search(
 }
 
 /// Render one [`ReleaseCandidate`] into the v3 interactive-search release row.
-fn v3_release(
+pub(crate) fn v3_release(
     c: &cellarr_jobs::ReleaseCandidate,
     indexer_name: &dyn Fn(cellarr_core::IndexerId) -> String,
     face: Face,
@@ -6250,7 +6262,7 @@ struct GrabReleaseBody {
 /// reads for its toast). When no pipeline is wired (offline/test) or no
 /// environment is ready, this degrades to a clear `503`-free JSON outcome with
 /// `grabbed: false` rather than erroring, so the screen shows a message.
-async fn grab_release(
+pub(crate) async fn grab_release(
     State(fs): State<FaceState>,
     Json(body): Json<GrabReleaseBody>,
 ) -> ApiResult<Json<Value>> {
@@ -6339,7 +6351,7 @@ struct ManualImportQuery {
 ///
 /// When no pipeline is wired (offline/test) or no library is ready, this returns
 /// an **empty array** rather than erroring — the screen degrades to "no files".
-async fn manual_import_scan(
+pub(crate) async fn manual_import_scan(
     State(fs): State<FaceState>,
     Query(q): Query<ManualImportQuery>,
 ) -> ApiResult<Json<Vec<Value>>> {
@@ -6374,7 +6386,7 @@ async fn manual_import_scan(
 }
 
 /// Render one [`ManualImportCandidate`] into the v3 manual-import row.
-fn v3_manual_import_row(c: &cellarr_jobs::ManualImportCandidate, face: Face) -> Value {
+pub(crate) fn v3_manual_import_row(c: &cellarr_jobs::ManualImportCandidate, face: Face) -> Value {
     let quality_name = face_quality_name(&c.quality.name, face).into_owned();
     let rejections: Vec<Value> = c
         .rejections
@@ -6447,7 +6459,7 @@ struct ManualImportFile {
 /// landed at, `errors[]` for files that could not be placed) the screen shows. When
 /// no pipeline is wired or no library is ready, it degrades to a clear JSON outcome
 /// with `imported: []` rather than erroring.
-async fn manual_import_commit(
+pub(crate) async fn manual_import_commit(
     State(fs): State<FaceState>,
     Json(body): Json<ManualImportCommitBody>,
 ) -> ApiResult<Json<Value>> {
@@ -6540,7 +6552,7 @@ struct EpisodeMonitorBody {
 /// keys on); an id that does not resolve to an episode node is skipped (idempotent
 /// — re-issuing the toggle on a deleted episode still succeeds). Returns the count
 /// of episodes whose flag was persisted.
-async fn episode_monitor(
+pub(crate) async fn episode_monitor(
     State(fs): State<FaceState>,
     Json(body): Json<EpisodeMonitorBody>,
 ) -> ApiResult<Json<Value>> {
@@ -6565,7 +6577,7 @@ async fn episode_monitor(
 /// [`ContentNode`], or `None` when nothing matches an Episode-kind node. The
 /// numeric fallback scans every library's content tree and re-projects each node id
 /// (the same stateless projection the list endpoints emit).
-async fn resolve_episode_node(
+pub(crate) async fn resolve_episode_node(
     state: &AppState,
     id: &str,
 ) -> ApiResult<Option<cellarr_core::ContentNode>> {
@@ -6594,7 +6606,7 @@ async fn resolve_episode_node(
 
 /// Collect every Episode-kind node under a library, walking the series→season→
 /// episode adjacency list. Used by the numeric-id resolution and the season toggle.
-async fn walk_episode_nodes(
+pub(crate) async fn walk_episode_nodes(
     state: &AppState,
     library: LibraryId,
 ) -> ApiResult<Vec<cellarr_core::ContentNode>> {
@@ -6627,7 +6639,7 @@ struct SeasonMonitorBody {
 /// every episode beneath it (the Sonarr behavior: toggling a season monitors/
 /// unmonitors its episodes). Returns the season id and the number of episode nodes
 /// updated.
-async fn season_monitor(
+pub(crate) async fn season_monitor(
     State(fs): State<FaceState>,
     Json(body): Json<SeasonMonitorBody>,
 ) -> ApiResult<Json<Value>> {
@@ -6670,7 +6682,7 @@ async fn season_monitor(
 /// A season is a real content node, so searching one is just searching its id —
 /// this only turns the originals' `(seriesId, seasonNumber)` addressing into that
 /// id.
-async fn season_unit_of(
+pub(crate) async fn season_unit_of(
     state: &AppState,
     series: cellarr_core::ContentId,
     season: i64,
@@ -6692,7 +6704,7 @@ async fn season_unit_of(
 }
 
 /// [`ContentNode`], or `None` when nothing matches.
-async fn resolve_season_node(
+pub(crate) async fn resolve_season_node(
     state: &AppState,
     id: &str,
 ) -> ApiResult<Option<cellarr_core::ContentNode>> {
@@ -6754,7 +6766,7 @@ struct CalendarQuery {
 /// items are not yet identified yields an empty calendar — the dashboard then
 /// shows "Recently added" instead. Bounded by the optional `?start`/`?end` ISO
 /// date window.
-async fn calendar(
+pub(crate) async fn calendar(
     State(fs): State<FaceState>,
     Query(q): Query<CalendarQuery>,
 ) -> ApiResult<Json<Vec<Value>>> {
@@ -6791,7 +6803,7 @@ async fn calendar(
 /// A thin face-state wrapper over [`crate::mediacover::media_cover`] so the
 /// artwork route shares the shim's [`FaceState`] router (it needs only the inner
 /// [`AppState`]).
-async fn media_cover(
+pub(crate) async fn media_cover(
     State(fs): State<FaceState>,
     path: Path<(String, String)>,
 ) -> axum::response::Response {
@@ -6800,7 +6812,7 @@ async fn media_cover(
 
 /// The full v3 paging envelope: `page, pageSize, sortKey, sortDirection,
 /// totalRecords, records`.
-fn paged(records: Vec<Value>, sort_key: &str) -> Value {
+pub(crate) fn paged(records: Vec<Value>, sort_key: &str) -> Value {
     let total = records.len();
     json!({
         "page": 1,
@@ -6819,7 +6831,7 @@ fn paged(records: Vec<Value>, sort_key: &str) -> Value {
 /// backs the queue on the real `grab` rows so the queue-management endpoints
 /// (remove / change-category / grab-from-queue) operate on actual downloads. A
 /// dedicated face only lists items of its own media type.
-async fn queue(State(fs): State<FaceState>) -> ApiResult<Json<Value>> {
+pub(crate) async fn queue(State(fs): State<FaceState>) -> ApiResult<Json<Value>> {
     use cellarr_core::repo::GrabRepository;
     let surface = fs.face.fixed_media();
     let grabs = fs.state.db.grabs().list().await?;
@@ -6875,13 +6887,13 @@ async fn queue(State(fs): State<FaceState>) -> ApiResult<Json<Value>> {
 
 /// Whether a grab's lifecycle state is terminal (so it is no longer a live queue
 /// item). Imported is a success; Failed/Blocklisted are dead releases.
-fn is_terminal_grab(status: cellarr_core::GrabStatus) -> bool {
+pub(crate) fn is_terminal_grab(status: cellarr_core::GrabStatus) -> bool {
     use cellarr_core::GrabStatus as S;
     matches!(status, S::Imported | S::Failed | S::Blocklisted)
 }
 
 /// The v3 `trackedDownloadState`/`status` strings for a grab lifecycle state.
-fn grab_status_strs(status: cellarr_core::GrabStatus) -> (&'static str, &'static str) {
+pub(crate) fn grab_status_strs(status: cellarr_core::GrabStatus) -> (&'static str, &'static str) {
     use cellarr_core::GrabStatus as S;
     // (status, trackedDownloadState) — the two fields *arr clients read.
     match status {
@@ -6899,7 +6911,7 @@ fn grab_status_strs(status: cellarr_core::GrabStatus) -> (&'static str, &'static
 
 /// Render one in-flight [`Grab`](cellarr_core::Grab) into the v3 queue record the
 /// ecosystem reads, keyed by the grab id's numeric projection.
-fn v3_queue_item(g: &cellarr_core::Grab, live: Option<&crate::queue::QueueItemProgress>) -> Value {
+pub(crate) fn v3_queue_item(g: &cellarr_core::Grab, live: Option<&crate::queue::QueueItemProgress>) -> Value {
     use crate::queue::QueueDownloadState;
     // Prefer the client's LIVE state over the stored grab lifecycle so the row is
     // real-time; fall back to the stored status when there is no live data.
@@ -6954,7 +6966,7 @@ fn v3_queue_item(g: &cellarr_core::Grab, live: Option<&crate::queue::QueueItemPr
 
 /// Resolve a queue id (the numeric projection of a grab uuid, or the full uuid)
 /// back to its [`Grab`](cellarr_core::Grab).
-async fn resolve_queue_grab(state: &AppState, raw: &str) -> ApiResult<Option<cellarr_core::Grab>> {
+pub(crate) async fn resolve_queue_grab(state: &AppState, raw: &str) -> ApiResult<Option<cellarr_core::Grab>> {
     use cellarr_core::repo::GrabRepository;
     // Full uuid: a direct get.
     if let Ok(uuid) = raw.parse::<uuid::Uuid>() {
@@ -6998,7 +7010,7 @@ struct QueueRemoveQuery {
 ///
 /// Idempotent: a queue id that does not resolve still returns 200 (the *arr
 /// clients expect delete to succeed on a re-issued delete).
-async fn delete_queue_item(
+pub(crate) async fn delete_queue_item(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
     Query(q): Query<QueueRemoveQuery>,
@@ -7067,7 +7079,7 @@ struct QueueCategoryBody {
 ///
 /// Retags the in-flight grab with a new download category (the Sonarr/Radarr
 /// "change category" queue action). Returns the updated queue record.
-async fn update_queue_category(
+pub(crate) async fn update_queue_category(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
     Json(body): Json<QueueCategoryBody>,
@@ -7123,7 +7135,7 @@ struct QueueGrabBody {
 ///
 /// With no import pipeline wired (offline/test), this degrades to a clear JSON
 /// outcome with `imported: false` rather than erroring.
-async fn queue_grab(
+pub(crate) async fn queue_grab(
     State(fs): State<FaceState>,
     Json(body): Json<QueueGrabBody>,
 ) -> ApiResult<Json<Value>> {
@@ -7209,7 +7221,7 @@ async fn queue_grab(
 
 /// Project a grab id (a uuid string) onto a stable positive integer the v3 queue
 /// `id` field requires.
-fn grab_numeric_id(id: &str) -> i64 {
+pub(crate) fn grab_numeric_id(id: &str) -> i64 {
     rpm_numeric_id(id)
 }
 
@@ -7225,7 +7237,7 @@ struct HistoryQuery {
     page_size: Option<u32>,
 }
 
-async fn history(
+pub(crate) async fn history(
     State(fs): State<FaceState>,
     Query(q): Query<HistoryQuery>,
 ) -> ApiResult<Json<Value>> {
@@ -7277,7 +7289,7 @@ async fn history(
 
 /// v3 `wanted/missing` — the paged list of monitored items missing a file, which
 /// dashboards (Homepage/Homarr) read for "missing" counts.
-async fn wanted_missing(State(fs): State<FaceState>) -> ApiResult<Json<Value>> {
+pub(crate) async fn wanted_missing(State(fs): State<FaceState>) -> ApiResult<Json<Value>> {
     let content = fs.state.db.content();
     let surface = fs.face.fixed_media();
     let mut records = Vec::new();
@@ -7296,7 +7308,7 @@ async fn wanted_missing(State(fs): State<FaceState>) -> ApiResult<Json<Value>> {
     Ok(Json(paged(records, "airDateUtc")))
 }
 
-fn history_event_type(event: &cellarr_core::HistoryEvent) -> String {
+pub(crate) fn history_event_type(event: &cellarr_core::HistoryEvent) -> String {
     // The HistoryEvent enum is serde-tagged `event` (see cellarr_core::HistoryEvent
     // `#[serde(tag = "event")]`); reading `type` here made every row "unknown".
     serde_json::to_value(event)
@@ -7310,29 +7322,29 @@ fn history_event_type(event: &cellarr_core::HistoryEvent) -> String {
 /// Project a cellarr [`CustomFormatId`] (uuid) onto a stable positive integer the
 /// v3 `format`/`id` fields require — the ecosystem keys CFs by integer id. A
 /// hash of the uuid keeps it stable across requests within a process.
-fn cf_numeric_id(id: cellarr_core::CustomFormatId) -> i64 {
+pub(crate) fn cf_numeric_id(id: cellarr_core::CustomFormatId) -> i64 {
     uuid_to_i64(id.as_uuid())
 }
 
 /// Project a [`DelayProfileId`](cellarr_core::DelayProfileId) onto a stable
 /// positive integer the v3 `id` field requires.
-fn dp_numeric_id(id: cellarr_core::DelayProfileId) -> i64 {
+pub(crate) fn dp_numeric_id(id: cellarr_core::DelayProfileId) -> i64 {
     uuid_to_i64(id.as_uuid())
 }
 
 /// Project a [`ReleaseProfileId`](cellarr_core::ReleaseProfileId) onto a stable
 /// positive integer the v3 `id` field requires.
-fn rp_numeric_id(id: cellarr_core::ReleaseProfileId) -> i64 {
+pub(crate) fn rp_numeric_id(id: cellarr_core::ReleaseProfileId) -> i64 {
     uuid_to_i64(id.as_uuid())
 }
 
 /// Project an [`IndexerId`] (uuid) onto a stable positive integer.
-fn ix_numeric_id(id: cellarr_core::IndexerId) -> i64 {
+pub(crate) fn ix_numeric_id(id: cellarr_core::IndexerId) -> i64 {
     uuid_to_i64(id.as_uuid())
 }
 
 /// Project a [`DownloadClientId`] (uuid) onto a stable positive integer.
-fn dc_numeric_id(id: cellarr_core::DownloadClientId) -> i64 {
+pub(crate) fn dc_numeric_id(id: cellarr_core::DownloadClientId) -> i64 {
     uuid_to_i64(id.as_uuid())
 }
 
@@ -7359,7 +7371,7 @@ fn dc_numeric_id(id: cellarr_core::DownloadClientId) -> i64 {
 /// mapping table, which is the change to make if collisions ever show up.
 const V3_ID_MAX: i64 = i32::MAX as i64;
 
-fn rpm_numeric_id(id: &str) -> i64 {
+pub(crate) fn rpm_numeric_id(id: &str) -> i64 {
     match uuid::Uuid::parse_str(id) {
         Ok(u) => uuid_to_i64(u),
         Err(_) => {
@@ -7374,23 +7386,23 @@ fn rpm_numeric_id(id: &str) -> i64 {
 
 /// Project a notification id (a uuid string) onto a stable positive integer the
 /// v3 `id` field requires.
-fn notif_numeric_id(id: &str) -> i64 {
+pub(crate) fn notif_numeric_id(id: &str) -> i64 {
     rpm_numeric_id(id)
 }
 
 /// Project an import-list (or exclusion) id (a uuid string) onto a stable positive
 /// integer the v3 `id` field requires.
-fn il_numeric_id(id: &str) -> i64 {
+pub(crate) fn il_numeric_id(id: &str) -> i64 {
     rpm_numeric_id(id)
 }
 
 /// Project a blocklist entry id (a uuid string) onto a stable positive integer.
-fn blocklist_numeric_id(id: &str) -> i64 {
+pub(crate) fn blocklist_numeric_id(id: &str) -> i64 {
     rpm_numeric_id(id)
 }
 
 /// Map a uuid to a stable positive `i64` for v3 integer id fields.
-fn uuid_to_i64(id: uuid::Uuid) -> i64 {
+pub(crate) fn uuid_to_i64(id: uuid::Uuid) -> i64 {
     let bytes = id.as_bytes();
     let mut n: i64 = 0;
     for b in &bytes[..8] {
@@ -7399,37 +7411,37 @@ fn uuid_to_i64(id: uuid::Uuid) -> i64 {
     n & V3_ID_MAX
 }
 
-fn protocol_str(p: cellarr_core::Protocol) -> &'static str {
+pub(crate) fn protocol_str(p: cellarr_core::Protocol) -> &'static str {
     match p {
         cellarr_core::Protocol::Torrent => "torrent",
         cellarr_core::Protocol::Usenet => "usenet",
     }
 }
 
-fn face_is_radarr(face: Face) -> bool {
+pub(crate) fn face_is_radarr(face: Face) -> bool {
     matches!(face, Face::Radarr) || matches!(face, Face::Cellarr)
 }
 
 /// Parse a path id into a `u32` (tags), mapping a bad id to a structured 400.
-fn parse_u32(raw: &str, what: &str) -> ApiResult<u32> {
+pub(crate) fn parse_u32(raw: &str, what: &str) -> ApiResult<u32> {
     raw.parse::<u32>()
         .map_err(|_| ApiError::BadRequest(format!("invalid {what} id: {raw}")))
 }
 
 /// Parse a path id into an `i64` (the numeric projection used for CFs/indexers).
-fn parse_i64(raw: &str, what: &str) -> ApiResult<i64> {
+pub(crate) fn parse_i64(raw: &str, what: &str) -> ApiResult<i64> {
     raw.parse::<i64>()
         .map_err(|_| ApiError::BadRequest(format!("invalid {what} id: {raw}")))
 }
 
 /// Shallow-merge object `b` into object `a` (b wins), returning the result.
-fn merge(mut a: Value, b: Value) -> Value {
+pub(crate) fn merge(mut a: Value, b: Value) -> Value {
     merge_into(&mut a, b);
     a
 }
 
 /// Shallow-merge object `b` into `a` in place (b wins).
-fn merge_into(a: &mut Value, b: Value) {
+pub(crate) fn merge_into(a: &mut Value, b: Value) {
     if let (Some(ao), Some(bo)) = (a.as_object_mut(), b.as_object()) {
         for (k, v) in bo {
             ao.insert(k.clone(), v.clone());
@@ -7438,7 +7450,7 @@ fn merge_into(a: &mut Value, b: Value) {
 }
 
 /// A naive title slug for the v3 `titleSlug`/path fields clients key on.
-fn slug(title: &str) -> String {
+pub(crate) fn slug(title: &str) -> String {
     title
         .chars()
         .map(|c| {
@@ -7477,7 +7489,7 @@ struct ParseQuery {
 /// coordinates) carrying the parsed quality / year / season+episode / languages /
 /// edition / release group. When the title carries no path-derived numbering it
 /// still parses (a bare movie title yields `parsedMovieInfo`).
-async fn parse_release(
+pub(crate) async fn parse_release(
     State(fs): State<FaceState>,
     Query(q): Query<ParseQuery>,
 ) -> ApiResult<Json<Value>> {
@@ -7539,7 +7551,7 @@ async fn parse_release(
 /// Build the `parsedMovieInfo` / `parsedEpisodeInfo` block from a parse: the
 /// release title, year, the v3 quality block, languages, edition, release group,
 /// and (for TV) the season/episode numbering.
-fn parsed_info_block(parsed: &cellarr_core::parsed::ParsedRelease, is_tv: bool) -> Value {
+pub(crate) fn parsed_info_block(parsed: &cellarr_core::parsed::ParsedRelease, is_tv: bool) -> Value {
     let release_title = parsed
         .clean_title
         .clone()
@@ -7606,7 +7618,7 @@ fn parsed_info_block(parsed: &cellarr_core::parsed::ParsedRelease, is_tv: bool) 
 /// The v3 `quality` block for a parse: `{ quality: { id, name, source, resolution }, revision }`.
 /// The names are the cleaned, *arr-conventional spellings derived from the parsed
 /// resolution/source; `revision.real`/`isRepack` reflect a parsed proper/repack.
-fn parsed_quality_block(parsed: &cellarr_core::parsed::ParsedRelease) -> Value {
+pub(crate) fn parsed_quality_block(parsed: &cellarr_core::parsed::ParsedRelease) -> Value {
     use cellarr_core::parsed::ProperRepack;
     let resolution = parsed.resolution.map(parsed_resolution_px).unwrap_or(0);
     let source = parsed.source.map(parsed_source_str).unwrap_or("unknown");
@@ -7632,7 +7644,7 @@ fn parsed_quality_block(parsed: &cellarr_core::parsed::ParsedRelease) -> Value {
 
 /// A human `<Source>-<Resolution>` quality name from a parse, e.g. "Bluray-1080p"
 /// or "WEBDL-2160p". Falls back to whichever half is known, or "Unknown".
-fn quality_display_name(parsed: &cellarr_core::parsed::ParsedRelease) -> String {
+pub(crate) fn quality_display_name(parsed: &cellarr_core::parsed::ParsedRelease) -> String {
     let res = parsed.resolution.map(parsed_resolution_label);
     let src = parsed.source.map(parsed_source_label);
     match (src, res) {
@@ -7645,7 +7657,7 @@ fn quality_display_name(parsed: &cellarr_core::parsed::ParsedRelease) -> String 
 
 /// The pixel height the v3 `quality.resolution` field carries for a parsed
 /// resolution bucket.
-fn parsed_resolution_px(r: cellarr_core::parsed::Resolution) -> u32 {
+pub(crate) fn parsed_resolution_px(r: cellarr_core::parsed::Resolution) -> u32 {
     use cellarr_core::parsed::Resolution as R;
     match r {
         R::R480p => 480,
@@ -7657,7 +7669,7 @@ fn parsed_resolution_px(r: cellarr_core::parsed::Resolution) -> u32 {
 }
 
 /// The `<Resolution>` label used in a quality name (e.g. "1080p").
-fn parsed_resolution_label(r: cellarr_core::parsed::Resolution) -> &'static str {
+pub(crate) fn parsed_resolution_label(r: cellarr_core::parsed::Resolution) -> &'static str {
     use cellarr_core::parsed::Resolution as R;
     match r {
         R::R480p => "480p",
@@ -7669,7 +7681,7 @@ fn parsed_resolution_label(r: cellarr_core::parsed::Resolution) -> &'static str 
 }
 
 /// The v3 `quality.source` enum string for a parsed source/medium.
-fn parsed_source_str(s: cellarr_core::parsed::Source) -> &'static str {
+pub(crate) fn parsed_source_str(s: cellarr_core::parsed::Source) -> &'static str {
     use cellarr_core::parsed::Source as S;
     match s {
         S::Workprint | S::Cam | S::Telesync | S::Telecine | S::Regional | S::Dvdscr => "cam",
@@ -7682,7 +7694,7 @@ fn parsed_source_str(s: cellarr_core::parsed::Source) -> &'static str {
 }
 
 /// The `<Source>` label used in a quality name (e.g. "Bluray", "WEBDL").
-fn parsed_source_label(s: cellarr_core::parsed::Source) -> &'static str {
+pub(crate) fn parsed_source_label(s: cellarr_core::parsed::Source) -> &'static str {
     use cellarr_core::parsed::Source as S;
     match s {
         S::Workprint => "WORKPRINT",
@@ -7708,7 +7720,7 @@ fn parsed_source_label(s: cellarr_core::parsed::Source) -> &'static str {
 /// carries language names/codes, not the *arr numeric language ids, so each is
 /// surfaced by name with a `0` id (the originals' "unknown id" sentinel) — enough
 /// for a tool to read the language, without inventing an id mapping.
-fn parsed_languages(parsed: &cellarr_core::parsed::ParsedRelease) -> Vec<Value> {
+pub(crate) fn parsed_languages(parsed: &cellarr_core::parsed::ParsedRelease) -> Vec<Value> {
     parsed
         .languages
         .iter()
@@ -7723,7 +7735,7 @@ fn parsed_languages(parsed: &cellarr_core::parsed::ParsedRelease) -> Vec<Value> 
 /// `dateAdded`. `content_numeric` is the projected id of the owning content node,
 /// surfaced as `seriesId`/`movieId` so a tool can group files by their content.
 /// `root` is the library root the `relativePath` is computed against.
-fn v3_media_file(
+pub(crate) fn v3_media_file(
     file: &cellarr_core::MediaFile,
     content_numeric: i64,
     root: &str,
@@ -7786,7 +7798,7 @@ impl FileListQuery {
 /// linked to any node in its season/episode subtree). Mirrors Sonarr's per-series
 /// file list. Without a `seriesId` it returns an empty array (the *arr clients
 /// always scope the call to a series).
-async fn list_episode_files(
+pub(crate) async fn list_episode_files(
     State(fs): State<FaceState>,
     Query(q): Query<FileListQuery>,
 ) -> ApiResult<Json<Vec<Value>>> {
@@ -7795,7 +7807,7 @@ async fn list_episode_files(
 
 /// v3 `GET /moviefile?movieId=` — the media file(s) for a movie. Mirrors Radarr's
 /// per-movie file list.
-async fn list_movie_files(
+pub(crate) async fn list_movie_files(
     State(fs): State<FaceState>,
     Query(q): Query<FileListQuery>,
 ) -> ApiResult<Json<Vec<Value>>> {
@@ -7806,7 +7818,7 @@ async fn list_movie_files(
 /// files linked anywhere under it (subtree-aware for a series), and render each in
 /// the v3 file shape. An unresolved id yields an empty array (benign, matching the
 /// list endpoints).
-async fn list_content_files_v3(
+pub(crate) async fn list_content_files_v3(
     fs: &FaceState,
     q: &FileListQuery,
     surface: MediaType,
@@ -7848,7 +7860,7 @@ async fn list_content_files_v3(
 /// descendants), walked breadth-first via the adjacency list. For a movie (a leaf
 /// root) this is just `[id]`. Used to gather a series' files across its
 /// season/episode tree.
-async fn subtree_content_ids(
+pub(crate) async fn subtree_content_ids(
     state: &AppState,
     id: cellarr_core::ContentId,
 ) -> ApiResult<Vec<cellarr_core::ContentId>> {
@@ -7868,7 +7880,7 @@ async fn subtree_content_ids(
 }
 
 /// v3 `GET /episodefile/{id}` — one episode file by its (projected) id.
-async fn get_episode_file(
+pub(crate) async fn get_episode_file(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
@@ -7876,7 +7888,7 @@ async fn get_episode_file(
 }
 
 /// v3 `GET /moviefile/{id}` — one movie file by its (projected) id.
-async fn get_movie_file(
+pub(crate) async fn get_movie_file(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
@@ -7885,7 +7897,7 @@ async fn get_movie_file(
 
 /// Shared single-file GET: resolve the file by its projected id, find its owning
 /// content node (for the `seriesId`/`movieId` and the library root), and render it.
-async fn get_media_file_v3(fs: &FaceState, id: &str, surface: MediaType) -> ApiResult<Json<Value>> {
+pub(crate) async fn get_media_file_v3(fs: &FaceState, id: &str, surface: MediaType) -> ApiResult<Json<Value>> {
     let numeric = parse_i64(id, "file")?;
     let Some(file) = resolve_media_file(&fs.state, numeric).await? else {
         return Err(ApiError::NotFound(format!("file {id} not found")));
@@ -7899,7 +7911,7 @@ async fn get_media_file_v3(fs: &FaceState, id: &str, surface: MediaType) -> ApiR
 /// The projection is stateless (re-derived per request); we scan the files of
 /// every content node and match the projection — the same approach the other
 /// numeric-id lookups use. Returns `None` when nothing projects to `numeric`.
-async fn resolve_media_file(
+pub(crate) async fn resolve_media_file(
     state: &AppState,
     numeric: i64,
 ) -> ApiResult<Option<cellarr_core::MediaFile>> {
@@ -7921,7 +7933,7 @@ async fn resolve_media_file(
 
 /// The owning content node's projected id and library root for a media file, via
 /// the reverse `content_file` link. Falls back to `(0, "")` for an unlinked file.
-async fn file_owner(state: &AppState, file: cellarr_core::MediaFileId) -> ApiResult<(i64, String)> {
+pub(crate) async fn file_owner(state: &AppState, file: cellarr_core::MediaFileId) -> ApiResult<(i64, String)> {
     let owners = state.db.media_files().content_ids_for_file(file).await?;
     let Some(content_id) = owners.first().copied() else {
         return Ok((0, String::new()));
@@ -7948,7 +7960,7 @@ async fn file_owner(state: &AppState, file: cellarr_core::MediaFileId) -> ApiRes
 
 /// Walk a node up to its tree root (the series/movie node with no parent), so a
 /// file linked to an inner episode reports the series id its tool expects.
-async fn tree_root_id(
+pub(crate) async fn tree_root_id(
     state: &AppState,
     node: &cellarr_core::ContentNode,
 ) -> ApiResult<cellarr_core::ContentId> {
@@ -7966,7 +7978,7 @@ async fn tree_root_id(
 /// v3 `DELETE /episodefile/{id}` — remove an episode file from disk (recycled when
 /// a bin is configured, else unlinked) via the same crash-safe path the content
 /// delete uses, then drop the `media_file` row. Idempotent on a missing id.
-async fn delete_episode_file(
+pub(crate) async fn delete_episode_file(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
@@ -7975,7 +7987,7 @@ async fn delete_episode_file(
 
 /// v3 `DELETE /moviefile/{id}` — remove a movie file. Same path as the episode
 /// file delete.
-async fn delete_movie_file(
+pub(crate) async fn delete_movie_file(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
@@ -7987,7 +7999,7 @@ async fn delete_movie_file(
 /// (the Pack-3a crash-safe path), then remove the row. The on-disk removal runs
 /// *before* the row is dropped, so a refused escape (out-of-root path) surfaces as
 /// an error and leaves the row intact rather than orphaning a still-present file.
-async fn delete_media_file_v3(state: &AppState, id: &str) -> ApiResult<Json<Value>> {
+pub(crate) async fn delete_media_file_v3(state: &AppState, id: &str) -> ApiResult<Json<Value>> {
     use cellarr_core::repo::MediaFileRepository;
     let numeric = parse_i64(id, "file")?;
     let Some(file) = resolve_media_file(state, numeric).await? else {
@@ -8007,7 +8019,7 @@ async fn delete_media_file_v3(state: &AppState, id: &str) -> ApiResult<Json<Valu
 
 /// The first owning content node for a set of content ids (used to bound a file
 /// recycle to its library root). `None` when the file is unlinked.
-async fn first_owner_node(
+pub(crate) async fn first_owner_node(
     state: &AppState,
     owners: &[cellarr_core::ContentId],
 ) -> ApiResult<Option<cellarr_core::ContentNode>> {
@@ -8021,7 +8033,7 @@ async fn first_owner_node(
 
 /// Project a [`MediaFileId`](cellarr_core::MediaFileId) onto the stable positive
 /// integer the v3 file `id` field requires.
-fn mf_numeric_id(id: cellarr_core::MediaFileId) -> i64 {
+pub(crate) fn mf_numeric_id(id: cellarr_core::MediaFileId) -> i64 {
     uuid_to_i64(id.as_uuid())
 }
 
@@ -8038,7 +8050,7 @@ fn mf_numeric_id(id: cellarr_core::MediaFileId) -> i64 {
 /// added with. This is the honest, derived view — no new store, no migration.
 ///
 /// Collections are a Radarr-only concept; the Sonarr face returns an empty list.
-async fn list_collections(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
+pub(crate) async fn list_collections(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
     if matches!(fs.face.fixed_media(), Some(MediaType::Tv)) {
         return Ok(Json(vec![]));
     }
@@ -8053,7 +8065,7 @@ async fn list_collections(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Val
 }
 
 /// v3 `GET /collection/{id}` — one collection by its (projected) id.
-async fn get_collection(
+pub(crate) async fn get_collection(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
@@ -8079,7 +8091,7 @@ struct CollectionBody {
 /// quality profile. Persists onto the backing import-list config (the
 /// `monitored` flag drives whether new collection members are added; the profile
 /// is the one they are added with), so the change is durable and round-trips.
-async fn update_collection(
+pub(crate) async fn update_collection(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
     Json(body): Json<CollectionBody>,
@@ -8107,7 +8119,7 @@ async fn update_collection(
 }
 
 /// Find the collection import-list whose projected id is `numeric`.
-async fn find_collection_list(
+pub(crate) async fn find_collection_list(
     fs: &FaceState,
     numeric: i64,
 ) -> ApiResult<Option<cellarr_core::ImportListConfig>> {
@@ -8122,7 +8134,7 @@ async fn find_collection_list(
 /// `tmdbId` is the collection id from the list's `collection_id` setting (0 when
 /// unset); `movies` is left empty (cellarr does not enumerate a collection's
 /// members until a sync runs — a // TODO below).
-fn v3_collection(l: &cellarr_core::ImportListConfig) -> Value {
+pub(crate) fn v3_collection(l: &cellarr_core::ImportListConfig) -> Value {
     let tmdb_id = l
         .settings
         .get("collection_id")
@@ -8164,13 +8176,13 @@ const NFO_METADATA_ID: i64 = 1;
 /// settings). cellarr has one: the Kodi/Jellyfin `.nfo` sidecar export, whose
 /// enable flag is the media-management `write_nfo` setting. Returns the single
 /// consumer with its current enabled state.
-async fn list_metadata_consumers(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
+pub(crate) async fn list_metadata_consumers(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
     let enabled = fs.state.db.config().get_media_management().await?.write_nfo;
     Ok(Json(vec![v3_metadata_consumer(enabled)]))
 }
 
 /// v3 `GET /metadata/{id}` — the single metadata consumer by id.
-async fn get_metadata_consumer(
+pub(crate) async fn get_metadata_consumer(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Value>> {
@@ -8195,7 +8207,7 @@ struct MetadataBody {
 
 /// v3 `PUT /metadata/{id}` — enable/disable the `.nfo` consumer. Persists onto the
 /// media-management `write_nfo` setting, so the next import respects it.
-async fn update_metadata_consumer(
+pub(crate) async fn update_metadata_consumer(
     State(fs): State<FaceState>,
     Path(id): Path<String>,
     Json(body): Json<MetadataBody>,
@@ -8218,7 +8230,7 @@ async fn update_metadata_consumer(
 /// Render the `.nfo` metadata consumer in the Sonarr/Radarr metadata-resource
 /// shape: identity + the `enable` flag + the per-artifact `fields[]` (all true:
 /// cellarr writes the movie/series/episode metadata sidecars together).
-fn v3_metadata_consumer(enabled: bool) -> Value {
+pub(crate) fn v3_metadata_consumer(enabled: bool) -> Value {
     json!({
         "id": NFO_METADATA_ID,
         "name": "Kodi (XBMC) / Emby / Jellyfin",
@@ -8246,7 +8258,7 @@ fn v3_metadata_consumer(enabled: bool) -> Value {
 /// response — rather than a 404, so an ecosystem client that polls this endpoint
 /// (e.g. a dashboard's "update available?" check) gets a clean "nothing to update"
 /// instead of an error. The shape is the v3 `UpdateResource` list (empty).
-async fn list_updates() -> Json<Vec<Value>> {
+pub(crate) async fn list_updates() -> Json<Vec<Value>> {
     // No-op stub: cellarr does not self-update. An empty list is the correct
     // "you are up to date / nothing to install" answer for the Updates screen.
     Json(vec![])

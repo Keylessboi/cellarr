@@ -273,3 +273,124 @@ async fn a_download_tagged_as_another_album_is_not_imported() {
     assert!(db.music().track_files_for_album(album.id).await.unwrap().is_empty());
     assert!(!library.path().join("Radiohead").exists(), "nothing was written to the library");
 }
+
+mod catalogue {
+    use super::*;
+    use cellarr_jobs::music_sync::{AddArtist, MonitorMode, MusicCatalogue, MusicSync};
+    use cellarr_meta::{MusicBrainzSource, RecordedFetcher};
+
+    const FIX: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../cellarr-meta/tests/fixtures");
+    const BASE: &str = "https://mb.test/ws/2";
+    const RADIOHEAD: &str = "a74b1b7f-71a5-4011-9441-d0b5e4122711";
+
+    fn fixture(n: &str) -> Vec<u8> {
+        std::fs::read(format!("{FIX}/{n}")).unwrap()
+    }
+
+    fn sync(db: &Database) -> MusicSync<RecordedFetcher> {
+        let fetcher = RecordedFetcher::new()
+            .with_body(&format!("{BASE}/artist/{RADIOHEAD}"), fixture("mb_artist_radiohead.json"))
+            .with_body(&format!("{BASE}/release-group?artist="), fixture("mb_release_groups_radiohead.json"))
+            .with_body(&format!("{BASE}/release?release-group="), fixture("mb_releases_ok_computer.json"));
+        MusicSync::new(db.clone(), MusicBrainzSource::with_base_url(fetcher, BASE))
+    }
+
+    async fn empty_db() -> (Database, LibraryId) {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(dir.keep().join("t.sqlite").to_str().unwrap()).await.unwrap();
+        let lib = LibraryId::new();
+        db.config()
+            .upsert_library(&Library {
+                id: lib,
+                media_type: MediaType::Music,
+                name: "music".into(),
+                root_folders: vec!["/music".into()],
+                default_quality_profile: QualityProfileId::new(),
+            })
+            .await
+            .unwrap();
+        (db, lib)
+    }
+
+    fn req(lib: LibraryId, monitor: MonitorMode) -> AddArtist {
+        AddArtist {
+            library: lib,
+            mbid: RADIOHEAD.into(),
+            path: "/music/Radiohead".into(),
+            quality_profile_id: None,
+            metadata_profile_id: 1,
+            monitored: true,
+            monitor,
+            monitor_new_albums: true,
+        }
+    }
+
+    #[tokio::test]
+    async fn adding_an_artist_keeps_only_the_albums_its_profile_allows() {
+        let (db, lib) = empty_db().await;
+        let artist = sync(&db).add_artist(req(lib, MonitorMode::All)).await.unwrap();
+        assert_eq!(artist.name, "Radiohead");
+        let titles: Vec<String> = db
+            .music()
+            .albums_for_artist(artist.content_id)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|a| a.title)
+            .collect();
+        assert!(titles.contains(&"OK Computer".to_string()));
+        assert!(titles.contains(&"Kid A".to_string()));
+        assert!(!titles.contains(&"Man of War".to_string()), "singles are not kept");
+        assert!(!titles.iter().any(|t| t.contains("Astoria")), "live albums are not kept");
+    }
+
+    #[tokio::test]
+    async fn adding_the_same_artist_twice_is_one_artist() {
+        let (db, lib) = empty_db().await;
+        let a = sync(&db).add_artist(req(lib, MonitorMode::All)).await.unwrap();
+        let b = sync(&db).add_artist(req(lib, MonitorMode::All)).await.unwrap();
+        assert_eq!(a.id, b.id);
+        assert_eq!(db.music().artists().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn monitoring_the_latest_album_monitors_exactly_one() {
+        let (db, lib) = empty_db().await;
+        let a = sync(&db).add_artist(req(lib, MonitorMode::LatestAlbum)).await.unwrap();
+        let monitored: Vec<String> = db
+            .music()
+            .albums_for_artist(a.content_id)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|al| al.monitored)
+            .map(|al| al.title)
+            .collect();
+        assert_eq!(monitored, ["A Moon Shaped Pool"]);
+    }
+
+    #[tokio::test]
+    async fn a_refresh_finds_nothing_new_when_nothing_changed_and_keeps_user_choices() {
+        let (db, lib) = empty_db().await;
+        let s = sync(&db);
+        let a = s.add_artist(req(lib, MonitorMode::All)).await.unwrap();
+        let ok = db.music().album_by_mbid("b1392450-e666-3926-a536-22c65f834433").await.unwrap().unwrap();
+        db.music().set_monitored(vec![ok.content_id], false).await.unwrap();
+        let report = s.refresh_artist(a.content_id).await.unwrap();
+        assert!(report.new_albums.is_empty());
+        assert!(!db.music().album_by_content(ok.content_id).await.unwrap().unwrap().monitored);
+    }
+
+    #[tokio::test]
+    async fn an_albums_tracks_are_fetched_once_from_the_representative_pressing() {
+        let (db, lib) = empty_db().await;
+        let s = sync(&db);
+        s.add_artist(req(lib, MonitorMode::All)).await.unwrap();
+        let ok = db.music().album_by_mbid("b1392450-e666-3926-a536-22c65f834433").await.unwrap().unwrap();
+        let tracks = s.ensure_tracks(ok.content_id).await.unwrap();
+        assert_eq!(tracks.len(), 12);
+        assert_eq!(tracks[0].title, "Airbag");
+        let again = s.ensure_tracks(ok.content_id).await.unwrap();
+        assert_eq!(again.iter().map(|t| t.id).collect::<Vec<_>>(), tracks.iter().map(|t| t.id).collect::<Vec<_>>());
+    }
+}
