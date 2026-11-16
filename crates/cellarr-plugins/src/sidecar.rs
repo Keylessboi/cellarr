@@ -891,19 +891,28 @@ fn status_of(rec: &Value) -> DownloadStatus {
     } else {
         0.0
     };
-    // While the sidecar is staging a finished download it is not done yet; when
-    // it cannot stage it (blocked), cellarr takes it from the download folder.
-    let state = if status == "failed" || tracked.starts_with("failed") {
-        DownloadState::Failed
-    } else if tracked == "importblocked" {
-        DownloadState::Completed
-    } else if status == "completed" {
-        DownloadState::Downloading
-    } else if status == "queued" || status == "delay" || status == "paused" {
-        DownloadState::Queued
-    } else {
-        DownloadState::Downloading
-    };
+    let warned = rec["trackedDownloadStatus"]
+        .as_str()
+        .is_some_and(|s| s.eq_ignore_ascii_case("warning") || s.eq_ignore_ascii_case("error"));
+    // A finished download the sidecar is still staging is not done yet. One it
+    // will not stage (blocked, failed, or pending with a warning, which it
+    // retries forever) is handed to cellarr from the download folder, so
+    // cellarr's own matching decides.
+    let refused = tracked == "importblocked"
+        || tracked == "importfailed"
+        || (tracked == "importpending" && warned);
+    let state =
+        if status == "failed" || tracked.starts_with("downloadfailed") || tracked == "failed" {
+            DownloadState::Failed
+        } else if refused {
+            DownloadState::Completed
+        } else if status == "completed" {
+            DownloadState::Downloading
+        } else if status == "queued" || status == "delay" || status == "paused" {
+            DownloadState::Queued
+        } else {
+            DownloadState::Downloading
+        };
     let messages: Vec<String> = rec["statusMessages"]
         .as_array()
         .map(|a| {
@@ -1189,8 +1198,17 @@ mod tests {
         assert_eq!(s.state, DownloadState::Downloading);
         assert!((s.progress - 0.75).abs() < 1e-6);
         assert!(s.content_path.is_none());
-        let s = status_of(&json!({"status": "warning", "trackedDownloadState": "failedPending"}));
+        let s = status_of(
+            &json!({"status": "warning", "trackedDownloadState": "downloadFailedPending"}),
+        );
         assert_eq!(s.state, DownloadState::Failed);
+        // Refused by the sidecar's importer (it would retry forever): cellarr's turn.
+        let s = status_of(&json!({
+            "status": "completed", "trackedDownloadState": "importPending",
+            "trackedDownloadStatus": "warning", "outputPath": "/downloads/Kid A",
+        }));
+        assert_eq!(s.state, DownloadState::Completed);
+        assert_eq!(s.content_path.as_deref(), Some("/downloads/Kid A"));
     }
 
     #[test]

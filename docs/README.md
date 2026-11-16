@@ -30,6 +30,7 @@ Read top to bottom the first time. After that, jump to the doc you need.
 | 17 | [17-config-as-code.md](17-config-as-code.md) | Declarative managed config: the YAML file, `${ENV}` secrets, safe prune, the `managed-config` CLI. |
 | 18 | [18-observability.md](18-observability.md) | Logging, span catalogue, canonical field names, and the opt-in OpenTelemetry (OTLP) exporter. |
 | 19 | [19-lidarr-compat.md](19-lidarr-compat.md) | Replacing Lidarr: the `/api/v1` face, migrating a Lidarr install, how music works, and **how to stay current as Lidarr changes** (the pinned contract + gaps). |
+| 20 | [20-plugins.md](20-plugins.md) | Plugins: sandboxed WASM indexers and download clients, and native Lidarr plugins through an opt-in Lidarr sidecar. |
 
 ## Specs (the contracts)
 

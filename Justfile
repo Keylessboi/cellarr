@@ -317,3 +317,10 @@ plugin-examples:
       (cd examples/plugins/$dir && cargo build --release --target wasm32-unknown-unknown)
       cp examples/plugins/$dir/target/wasm32-unknown-unknown/release/*.wasm crates/cellarr-plugins/tests/fixtures/$out.wasm
     done
+
+# Run the native-plugin sidecar test against a real Lidarr install (LIDARR_SIDECAR_BIN=<dir>).
+sidecar-test:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    : "${LIDARR_SIDECAR_BIN:?set LIDARR_SIDECAR_BIN to a Lidarr install directory}"
+    cargo test -p cellarr-cli --test lidarr_e2e real_lidarr_sidecar -- --nocapture
