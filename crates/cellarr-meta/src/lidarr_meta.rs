@@ -145,6 +145,8 @@ struct RawArtistAlbum {
     secondary: Vec<String>,
     #[serde(default, rename = "ReleaseDate")]
     date: Option<String>,
+    #[serde(default, rename = "ReleaseStatuses")]
+    statuses: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -172,6 +174,8 @@ struct RawAlbum {
     rating: Option<RawRating>,
     #[serde(default)]
     artists: Vec<RawAlbumArtist>,
+    #[serde(default)]
+    releasestatuses: Vec<String>,
     #[serde(default, rename = "Releases")]
     releases: Vec<RawRelease>,
 }
@@ -285,6 +289,7 @@ fn images_lower(raw: Vec<RawImage>) -> Vec<MbImage> {
 
 fn group_of(a: RawArtistAlbum, artist: &(String, String)) -> MbReleaseGroup {
     MbReleaseGroup {
+        release_statuses: a.statuses,
         releases: Vec::new(),
         overview: None,
         images: Vec::new(),
@@ -305,6 +310,7 @@ impl From<RawAlbum> for MbReleaseGroup {
     fn from(a: RawAlbum) -> Self {
         let artist = a.artists.into_iter().next().map(|x| (x.id, x.artistname));
         MbReleaseGroup {
+            release_statuses: a.releasestatuses,
             releases: a.releases.into_iter().map(MbRelease::from).collect(),
             overview: non_empty(a.overview),
             images: images(a.images),
@@ -445,5 +451,11 @@ impl<F: Fetcher + 'static> MusicMeta for LidarrMetaSource<F> {
         let url = format!("{}/album/{}", self.base_url, encode(release_group_mbid));
         let raw: RawAlbum = self.get_json(&url).await?;
         Ok(raw.releases.into_iter().map(MbRelease::from).collect())
+    }
+
+    async fn release_group(&self, mbid: &str) -> Result<Option<MbReleaseGroup>, MetaError> {
+        let url = format!("{}/album/{}", self.base_url, encode(mbid));
+        let raw: RawAlbum = self.get_json(&url).await?;
+        Ok(Some(MbReleaseGroup::from(raw)))
     }
 }

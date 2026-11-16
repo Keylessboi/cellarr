@@ -391,13 +391,38 @@ const CREATED: &[&str] = &[
 ];
 
 /// Fields cellarr's shared handlers add that Lidarr's resources do not carry.
-const NOT_LIDARR: &[&str] = &["managed", "unmappedFolders"];
+const NOT_LIDARR: &[&str] = &[
+    "managed",
+    "unmappedFolders",
+    // Fields cellarr's resources carry that a real Lidarr never sends.
+    "allMusicId",
+    "cleanTitle",
+    "grabbed",
+    "lastSearchTime",
+    "mbId",
+    "members",
+    "remotePoster",
+    "mediaCount",
+    "selectOptionsProviderAction",
+    "titleWithoutYear",
+];
 
 fn strip_foreign(v: &mut Value) {
     match v {
         Value::Object(m) => {
             for k in NOT_LIDARR {
                 m.remove(*k);
+            }
+            // An artist in the library has a root folder and no `folder`; only a
+            // lookup result (which has no root folder) carries one.
+            if m.contains_key("rootFolderPath") {
+                m.remove("folder");
+            }
+            // An artist embedded in an album carries neither.
+            if let Some(Value::Object(a)) = m.get_mut("artist") {
+                if a.remove("rootFolderPath").is_some() {
+                    a.remove("folder");
+                }
             }
             m.values_mut().for_each(strip_foreign);
         }

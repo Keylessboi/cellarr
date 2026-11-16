@@ -65,6 +65,12 @@
     "SystemResource.packageAuthor": "cellarr is not a distro package; a source install reports no package metadata (real Lidarr serves null for all three).",
     "SystemResource.packageUpdateMechanismMessage": "cellarr is not a distro package; a source install reports no package metadata (real Lidarr serves null for all three).",
     "SystemResource.packageVersion": "cellarr is not a distro package; a source install reports no package metadata (real Lidarr serves null for all three).",
-    "TrackResource.trackFile": "Lidarr omits the nested file from album track lists; clients (Octo) join GET /trackfile?albumId= instead."
+    "TrackResource.trackFile": "Lidarr omits the nested file from album track lists; clients (Octo) join GET /trackfile?albumId= instead.",
+    "ArtistResource.allMusicId": "Declared in Lidarr's schema but left out of its responses when empty (checked against a running Lidarr); cellarr leaves it out too.",
+    "ArtistResource.folder": "Declared in Lidarr's schema but left out of its responses when empty (checked against a running Lidarr); cellarr leaves it out too.",
+    "ArtistResource.mbId": "Declared in Lidarr's schema but left out of its responses when empty (checked against a running Lidarr); cellarr leaves it out too.",
+    "ArtistResource.members": "Declared in Lidarr's schema but left out of its responses when empty (checked against a running Lidarr); cellarr leaves it out too.",
+    "ArtistResource.remotePoster": "Declared in Lidarr's schema but left out of its responses when empty (checked against a running Lidarr); cellarr leaves it out too.",
+    "AlbumResource.lastSearchTime": "Declared in Lidarr's schema but left out of its responses when empty (checked against a running Lidarr); cellarr leaves it out too."
   }
 }

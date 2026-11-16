@@ -123,9 +123,12 @@ async fn attach_neighbours(
         let Some((last, next)) = bounds.get(&artist.content_id) else {
             continue;
         };
+        // Lidarr embeds the album's artist (without its own neighbours) here.
+        let seq = resource["qualityProfileId"].as_i64();
+        let embedded = resources::artist_ref(artist, seq);
         let render = |c: &Option<ContentId>| {
             c.and_then(|c| albums.get(&c))
-                .map(|al| resources::album(al, artist.id, None, None, None, &[]))
+                .map(|al| resources::album(al, artist.id, Some(embedded.clone()), None, None, &[]))
         };
         resource["lastAlbum"] = render(last).unwrap_or(Value::Null);
         resource["nextAlbum"] = render(next).unwrap_or(Value::Null);
@@ -402,10 +405,13 @@ async fn add_artist_from(state: &AppState, body: &Value) -> ApiResult<Artist> {
                 .get("metadataProfileId")
                 .and_then(Value::as_i64)
                 .unwrap_or(1),
-            monitored: body
-                .get("monitored")
-                .and_then(Value::as_bool)
-                .unwrap_or(true),
+            // Lidarr adds an artist asked to monitor no albums as unmonitored,
+            // whatever `monitored` said; every other mode keeps the flag.
+            monitored: monitor != MonitorMode::None
+                && body
+                    .get("monitored")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(true),
             monitor,
             monitor_new_albums: monitor_new,
         })
@@ -1678,8 +1684,8 @@ pub(crate) async fn create_root_folder(
             .unwrap_or(0),
     );
     f.check().map_err(IntoResponse::into_response)?;
-    let body: shim::RootFolderBody =
-        serde_json::from_value(raw).map_err(|e| ApiError::BadRequest(e.to_string()).into_response())?;
+    let body: shim::RootFolderBody = serde_json::from_value(raw)
+        .map_err(|e| ApiError::BadRequest(e.to_string()).into_response())?;
     let Json(v) = shim::create_root_folder(State(fs), Json(body))
         .await
         .map_err(IntoResponse::into_response)?;

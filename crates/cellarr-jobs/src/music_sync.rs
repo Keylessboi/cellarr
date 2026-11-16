@@ -180,8 +180,20 @@ impl<M: MusicMeta> MusicSync<M> {
             .release_groups(artist_mbid, &profile.primary_types)
             .await?
             .into_iter()
-            .filter(|g| profile.allows(&g.primary_type, &g.secondary_types))
+            .filter(|g| {
+                profile.allows(&g.primary_type, &g.secondary_types)
+                    && profile.allows_statuses(&g.release_statuses)
+            })
             .collect();
+        // Some sources list an artist's albums without every release date; the
+        // album's own record has it. Only the kept albums are asked about.
+        for g in groups.iter_mut().filter(|g| g.first_release_date.is_none()) {
+            match self.mb.release_group(&g.mbid).await {
+                Ok(Some(full)) => g.first_release_date = full.first_release_date,
+                Ok(None) => {}
+                Err(e) => tracing::debug!(album = %g.mbid, error = %e, "no release date"),
+            }
+        }
         groups.sort_by(|a, b| {
             a.first_release_date
                 .cmp(&b.first_release_date)

@@ -148,7 +148,10 @@ async fn cellarr_answers_like_the_recorded_real_lidarr() {
     let l = lidarr_common::start(AuthConfig::disabled()).await;
     let root = tempfile::tempdir().unwrap();
     let mut ctx = BTreeMap::new();
-    ctx.insert("root".to_string(), root.path().to_string_lossy().to_string());
+    ctx.insert(
+        "root".to_string(),
+        root.path().to_string_lossy().to_string(),
+    );
 
     let steps: Vec<Value> =
         serde_json::from_slice(&std::fs::read(contracts().join("lidarr-scenario.json")).unwrap())
@@ -170,10 +173,9 @@ async fn cellarr_answers_like_the_recorded_real_lidarr() {
         )
         .unwrap();
 
-        let mut req = l.client.request(
-            method.parse().unwrap(),
-            format!("{}/api/v1{path}", l.base),
-        );
+        let mut req = l
+            .client
+            .request(method.parse().unwrap(), format!("{}/api/v1{path}", l.base));
         let mut send_key = true;
         if let Some(h) = step["headers"].as_object() {
             if h.get("X-Api-Key").is_some_and(Value::is_null) {
@@ -200,7 +202,9 @@ async fn cellarr_answers_like_the_recorded_real_lidarr() {
         {
             // `j['key']`
             let key = from.trim_start_matches("j['").trim_end_matches("']");
-            let v = b.get(key).map(|v| v.to_string().trim_matches('"').to_string());
+            let v = b
+                .get(key)
+                .map(|v| v.to_string().trim_matches('"').to_string());
             ctx.insert(save.to_string(), v.unwrap_or_else(|| "0".into()));
         }
 

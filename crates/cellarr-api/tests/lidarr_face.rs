@@ -53,7 +53,10 @@ async fn an_artist_is_looked_up_added_and_listed_with_statistics() {
 
     let hits = l.get("/artist/lookup?term=radiohead").await;
     assert_eq!(hits[0]["foreignArtistId"], RADIOHEAD);
-    assert!(hits[0].get("id").is_none(), "not in the library yet: Lidarr omits the id");
+    assert!(
+        hits[0].get("id").is_none(),
+        "not in the library yet: Lidarr omits the id"
+    );
 
     let added = l.add_radiohead(profile).await;
     assert_eq!(added["id"], 1);
@@ -298,4 +301,30 @@ async fn an_album_is_added_with_its_artist_the_way_octo_does_it() {
         .map(|a| a["title"].as_str().unwrap())
         .collect();
     assert_eq!(monitored, ["OK Computer"]);
+}
+
+#[tokio::test]
+async fn adding_an_artist_to_monitor_no_albums_leaves_it_unmonitored_like_lidarr() {
+    let l = start(AuthConfig::disabled()).await;
+    let profile = l.flac_profile().await;
+    let hits = l.get("/artist/lookup?term=radiohead").await;
+    let mut payload = hits[0].clone();
+    payload["qualityProfileId"] = json!(profile);
+    payload["metadataProfileId"] = json!(1);
+    payload["rootFolderPath"] = json!("/data/media/music");
+    payload["monitored"] = json!(true);
+    payload["addOptions"] = json!({ "monitor": "none", "searchForMissingAlbums": false });
+    let r = l.send(reqwest::Method::POST, "/artist", &payload).await;
+    assert!(r.status().is_success());
+    let added: Value = r.json().await.unwrap();
+    assert_eq!(
+        added["monitored"], false,
+        "monitor=none adds the artist unmonitored"
+    );
+    let albums = l.get("/album?artistId=1").await;
+    assert!(albums
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|a| a["monitored"] == false));
 }

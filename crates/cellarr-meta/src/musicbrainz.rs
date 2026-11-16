@@ -92,6 +92,9 @@ pub struct MbArtist {
 /// A release group: the abstract album.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MbReleaseGroup {
+    /// The statuses of the group's pressings (`Official`, `Bootleg`, ...), when
+    /// the source reports them; empty when it does not.
+    pub release_statuses: Vec<String>,
     /// Pressings the source returned with the group (a search hit from a source
     /// that embeds them); empty otherwise.
     pub releases: Vec<MbRelease>,
@@ -195,6 +198,12 @@ pub trait MusicMeta: Send + Sync {
     ) -> Result<Vec<MbReleaseGroup>, MetaError>;
     /// The pressings of a release group, with track lists.
     async fn releases(&self, release_group_mbid: &str) -> Result<Vec<MbRelease>, MetaError>;
+
+    /// One release group in full, for a source whose artist listing leaves
+    /// fields (the release date) out. `None` when the listing is already complete.
+    async fn release_group(&self, _mbid: &str) -> Result<Option<MbReleaseGroup>, MetaError> {
+        Ok(None)
+    }
 }
 
 #[async_trait::async_trait]
@@ -276,6 +285,12 @@ impl<A: MusicMeta, B: MusicMeta> MusicMeta for FallbackMeta<A, B> {
     }
     async fn releases(&self, release_group_mbid: &str) -> Result<Vec<MbRelease>, MetaError> {
         try_both!(self, releases(release_group_mbid))
+    }
+    async fn release_group(&self, mbid: &str) -> Result<Option<MbReleaseGroup>, MetaError> {
+        match self.primary.release_group(mbid).await {
+            Ok(v) => Ok(v),
+            Err(_) => self.fallback.release_group(mbid).await,
+        }
     }
 }
 
@@ -676,6 +691,7 @@ struct RawCreditedArtist {
 impl From<RawReleaseGroup> for MbReleaseGroup {
     fn from(raw: RawReleaseGroup) -> Self {
         MbReleaseGroup {
+            release_statuses: Vec::new(),
             releases: Vec::new(),
             overview: None,
             images: Vec::new(),

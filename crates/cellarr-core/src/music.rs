@@ -254,6 +254,19 @@ impl MetadataProfile {
         }
         secondary.iter().all(|s| has(&self.secondary_types, s))
     }
+
+    /// Whether a release group whose pressings have these statuses passes the
+    /// profile: at least one of them must be allowed. A source that does not say
+    /// (an empty list) is not filtered.
+    #[must_use]
+    pub fn allows_statuses(&self, statuses: &[String]) -> bool {
+        statuses.is_empty()
+            || statuses.iter().any(|s| {
+                self.release_statuses
+                    .iter()
+                    .any(|a| a.eq_ignore_ascii_case(s))
+            })
+    }
 }
 
 /// `(cellarr quality name, Lidarr quality id)`.
@@ -347,6 +360,15 @@ pub const RELEASE_STATUSES: &[&str] = &["Official", "Promotion", "Bootleg", "Pse
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_album_passes_the_status_filter_when_any_pressing_is_allowed() {
+        let standard = MetadataProfile::standard();
+        let s = |v: &[&str]| v.iter().map(|x| (*x).to_string()).collect::<Vec<_>>();
+        assert!(standard.allows_statuses(&s(&["Bootleg", "Official"])));
+        assert!(!standard.allows_statuses(&s(&["Bootleg"])), "bootleg-only is dropped");
+        assert!(standard.allows_statuses(&[]), "a source that does not say is not filtered");
+    }
 
     #[test]
     fn a_sequenced_uuid_projects_back_to_its_sequence() {
