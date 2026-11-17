@@ -230,13 +230,6 @@
     "[].fields[].privacy: missing from cellarr (Lidarr: string)",
     "[].presets[]: Lidarr has elements, cellarr has none"
   ],
-  "delayprofile": [
-    "[].bypassIfAboveCustomFormatScore: missing from cellarr (Lidarr: boolean)",
-    "[].minimumCustomFormatScore: missing from cellarr (Lidarr: integer)"
-  ],
-  "delayprofile_get": [
-    "status: Lidarr 200, cellarr 404"
-  ],
   "downloadclient_create_qbit": [
     "status: Lidarr 400, cellarr 201"
   ],

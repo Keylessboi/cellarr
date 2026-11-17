@@ -54,6 +54,10 @@ pub async fn start(auth: AuthConfig) -> Lidarr {
             fixture("mb_release_group_search_ok_computer.json"),
         )
         .with_body(
+            &format!("{BASE}/release-group/"),
+            fixture("mb_release_group_lookup.json"),
+        )
+        .with_body(
             &format!("{BASE}/release?release-group="),
             fixture("mb_releases_ok_computer.json"),
         );
