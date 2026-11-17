@@ -653,6 +653,13 @@ async fn an_album_is_found_grabbed_downloaded_and_imported_through_the_lidarr_ap
         "the indexer was asked for the album: {searches:?}"
     );
     assert_eq!(stub.added.lock().unwrap().len(), 1, "exactly one grab");
+    // A torrent stays in the client after import, still seeding, as Lidarr
+    // leaves it; removing it is the client's or the operator's call.
+    assert!(
+        stub.deleted.lock().unwrap().is_empty(),
+        "the torrent was removed from qBittorrent after import: {:?}",
+        stub.deleted.lock().unwrap()
+    );
 
     // On disk: three files under <library>/Radiohead/..., readable audio, none left staged.
     let mut found = Vec::new();

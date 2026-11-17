@@ -1486,11 +1486,19 @@ impl<E: PipelineEnv> LivePipelineHandler<E> {
             };
             if satisfied {
                 if let Some(dl) = g.download_id.as_deref() {
-                    if let Ok(Some((_, client, _))) = self.env.resolve(&g.request.content_ref).await
-                    {
-                        let _ =
-                            tokio::time::timeout(RECONCILE_POLL_TIMEOUT, client.remove(dl, true))
-                                .await; // best-effort: drop the duplicate
+                    // A redundant torrent stays in the client (it may be seeding,
+                    // and its data may be hardlinked into the library); only a
+                    // Usenet duplicate is removed.
+                    if g.request.release.protocol == cellarr_core::Protocol::Usenet {
+                        if let Ok(Some((_, client, _))) =
+                            self.env.resolve(&g.request.content_ref).await
+                        {
+                            let _ = tokio::time::timeout(
+                                RECONCILE_POLL_TIMEOUT,
+                                client.remove(dl, true),
+                            )
+                            .await; // best-effort: drop the duplicate
+                        }
                     }
                 }
                 if let Err(e) = self.db.grabs().set_status(g.id, GrabStatus::Imported).await {
@@ -1590,11 +1598,20 @@ impl<E: PipelineEnv> LivePipelineHandler<E> {
                                     path: dest.clone(),
                                 });
                             }
-                            let _ = tokio::time::timeout(
-                                RECONCILE_POLL_TIMEOUT,
-                                client.remove(dl, true),
-                            )
-                            .await; // best-effort
+                            // A torrent is left in the client after import, as
+                            // Lidarr leaves it: the files were hardlinked or copied,
+                            // so the torrent keeps seeding, and when to stop (ratio,
+                            // a private tracker's minimum seed time) is the client's
+                            // and the operator's call. Removing it here would break
+                            // hit-and-run rules on private trackers. Usenet does not
+                            // seed, so its finished download goes.
+                            if g.request.release.protocol == cellarr_core::Protocol::Usenet {
+                                let _ = tokio::time::timeout(
+                                    RECONCILE_POLL_TIMEOUT,
+                                    client.remove(dl, true),
+                                )
+                                .await; // best-effort
+                            }
                             let _ = self.db.grabs().clear_download_progress(g.id).await;
                             let _ = self.db.grabs().clear_import_attempts(g.id).await;
                             cleaned += 1;
@@ -1627,11 +1644,18 @@ impl<E: PipelineEnv> LivePipelineHandler<E> {
                                         content_id: cid.to_string(),
                                         path: dest,
                                     });
-                                    let _ = tokio::time::timeout(
-                                        RECONCILE_POLL_TIMEOUT,
-                                        client.remove(dl, true),
-                                    )
-                                    .await; // drop the duplicate
+                                    // A duplicate download is dropped, but a
+                                    // torrent only from the client's list: its
+                                    // data stays, since it may still be seeding.
+                                    let delete_data = g.request.release.protocol
+                                        == cellarr_core::Protocol::Usenet;
+                                    if delete_data {
+                                        let _ = tokio::time::timeout(
+                                            RECONCILE_POLL_TIMEOUT,
+                                            client.remove(dl, true),
+                                        )
+                                        .await; // drop the duplicate
+                                    }
                                     match self
                                         .db
                                         .grabs()
