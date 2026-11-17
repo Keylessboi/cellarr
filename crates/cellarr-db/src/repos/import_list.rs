@@ -8,9 +8,9 @@
 //! calls **only on a confirmed-good fetch** — the persistence side of the
 //! empty-vs-failed safeguard in `cellarr-core::importlist`.
 
+use crate::dialect::{pq, DbPool};
 use async_trait::async_trait;
 use cellarr_core::importlist::{ImportListConfig, ImportListExclusion, ImportListRepository};
-use crate::dialect::{pq, DbPool};
 use sqlx::Row;
 use time::OffsetDateTime;
 
@@ -48,8 +48,7 @@ impl ImportListRepository for ImportListRepo {
         self.writer
             .submit(move |conn| {
                 Box::pin(async move {
-                    sqlx::query(&pq(
-                        "INSERT INTO import_list
+                    sqlx::query(&pq("INSERT INTO import_list
                             (id, name, kind, enabled, media_type, last_synced, body)
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
                          ON CONFLICT(id) DO UPDATE SET
@@ -58,8 +57,7 @@ impl ImportListRepository for ImportListRepo {
                             enabled = excluded.enabled,
                             media_type = excluded.media_type,
                             last_synced = excluded.last_synced,
-                            body = excluded.body"),
-                    )
+                            body = excluded.body"))
                     .bind(id)
                     .bind(name)
                     .bind(kind)
@@ -91,9 +89,11 @@ impl ImportListRepository for ImportListRepo {
     }
 
     async fn list_enabled(&self) -> Result<Vec<ImportListConfig>> {
-        let rows = sqlx::query(&pq("SELECT body FROM import_list WHERE enabled = 1 ORDER BY name ASC"))
-            .fetch_all(&self.pool)
-            .await?;
+        let rows = sqlx::query(&pq(
+            "SELECT body FROM import_list WHERE enabled = 1 ORDER BY name ASC",
+        ))
+        .fetch_all(&self.pool)
+        .await?;
         rows.into_iter().map(row_to_json_body).collect()
     }
 
@@ -121,14 +121,12 @@ impl ImportListRepository for ImportListRepo {
         self.writer
             .submit(move |conn| {
                 Box::pin(async move {
-                    sqlx::query(&pq(
-                        "INSERT INTO import_list_exclusion
+                    sqlx::query(&pq("INSERT INTO import_list_exclusion
                             (id, id_type, id_value, title, body)
                          VALUES (?1, ?2, ?3, ?4, ?5)
                          ON CONFLICT(id_type, id_value) DO UPDATE SET
                             title = excluded.title,
-                            body = excluded.body"),
-                    )
+                            body = excluded.body"))
                     .bind(id)
                     .bind(id_type)
                     .bind(id_value)
@@ -143,9 +141,11 @@ impl ImportListRepository for ImportListRepo {
     }
 
     async fn list_exclusions(&self) -> Result<Vec<ImportListExclusion>> {
-        let rows = sqlx::query(&pq("SELECT body FROM import_list_exclusion ORDER BY title ASC"))
-            .fetch_all(&self.pool)
-            .await?;
+        let rows = sqlx::query(&pq(
+            "SELECT body FROM import_list_exclusion ORDER BY title ASC",
+        ))
+        .fetch_all(&self.pool)
+        .await?;
         rows.into_iter().map(row_to_json_body).collect()
     }
 

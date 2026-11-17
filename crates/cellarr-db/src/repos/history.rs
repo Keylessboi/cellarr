@@ -1,10 +1,10 @@
 //! The append-only `history` repository.
 
+use crate::dialect::{pq, DbPool};
 use async_trait::async_trait;
 use cellarr_core::history::{HistoryEvent, HistoryRecord};
 use cellarr_core::repo::HistoryRepository;
 use cellarr_core::{ContentId, PipelineRunId};
-use crate::dialect::{pq, DbPool};
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -40,8 +40,8 @@ impl HistoryRepository for HistoryRepo {
                 Box::pin(async move {
                     sqlx::query(&pq(
                         "INSERT INTO history (id, at, content_id, run_id, event)
-                         VALUES (?1, ?2, ?3, ?4, ?5)"),
-                    )
+                         VALUES (?1, ?2, ?3, ?4, ?5)",
+                    ))
                     .bind(id)
                     .bind(at)
                     .bind(content_id)
@@ -56,10 +56,8 @@ impl HistoryRepository for HistoryRepo {
     }
 
     async fn for_content(&self, id: ContentId) -> Result<Vec<HistoryRecord>> {
-        let rows = sqlx::query(&pq(
-            "SELECT at, content_id, run_id, event
-             FROM history WHERE content_id = ?1 ORDER BY at ASC, id ASC"),
-        )
+        let rows = sqlx::query(&pq("SELECT at, content_id, run_id, event
+             FROM history WHERE content_id = ?1 ORDER BY at ASC, id ASC"))
         .bind(id.to_string())
         .fetch_all(&self.pool)
         .await?;
@@ -83,10 +81,8 @@ impl HistoryRepository for HistoryRepo {
     async fn recent(&self, limit: u32, offset: u32) -> Result<Vec<HistoryRecord>> {
         // Global feed, newest first. `at` is a zero-padded rfc3339 UTC string, so a
         // lexical sort is chronological; `id` breaks ties within the same instant.
-        let rows = sqlx::query(&pq(
-            "SELECT at, content_id, run_id, event
-             FROM history ORDER BY at DESC, id DESC LIMIT ?1 OFFSET ?2"),
-        )
+        let rows = sqlx::query(&pq("SELECT at, content_id, run_id, event
+             FROM history ORDER BY at DESC, id DESC LIMIT ?1 OFFSET ?2"))
         .bind(i64::from(limit))
         .bind(i64::from(offset))
         .fetch_all(&self.pool)

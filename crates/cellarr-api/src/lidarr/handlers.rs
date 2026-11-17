@@ -178,6 +178,7 @@ impl AlbumRenderer {
         };
         let wanted: Vec<ContentId> = albums.iter().map(|a| a.content_id).collect();
         let stats: HashMap<ContentId, MusicStats> = music.album_stats_for(&wanted).await?;
+        let pressings = music.releases_for_albums(&wanted).await?;
         let mut out = Vec::with_capacity(albums.len());
         for al in albums {
             let artist = self.artists.get(&al.artist_content_id);
@@ -186,14 +187,18 @@ impl AlbumRenderer {
             } else {
                 Vec::new()
             };
-            out.push(resources::album(
+            let mut v = resources::album(
                 al,
                 artist.map_or(0, |a| a.id),
                 artist.map(|a| resources::artist_ref(a, seq_of(a))),
                 Some(stats.get(&al.content_id).copied().unwrap_or_default()),
                 artist.and_then(seq_of),
                 &tracks,
-            ));
+            );
+            if let Some(list) = pressings.get(&al.content_id) {
+                resources::set_releases(&mut v, al, list);
+            }
+            out.push(v);
         }
         Ok(out)
     }
@@ -802,10 +807,64 @@ pub(crate) async fn update_album(
             .set_monitored(vec![al.content_id], m)
             .await?;
     }
+    apply_release_choice(state, &al, &body).await?;
     let fresh = album_or_404(state, id).await?;
     Ok(Json(
         album_resources(state, &[fresh], true).await?.remove(0),
     ))
+}
+
+/// Pin the pressing a PUT marks monitored (and `anyReleaseOk`), switching the
+/// album's track list to it, as Lidarr does when a release is chosen.
+async fn apply_release_choice(state: &AppState, al: &Album, body: &Value) -> ApiResult<()> {
+    let any_ok = body
+        .get("anyReleaseOk")
+        .and_then(Value::as_bool)
+        .unwrap_or(al.any_release_ok);
+    let pressings = state
+        .db
+        .music()
+        .releases_for_albums(&[al.content_id])
+        .await?
+        .remove(&al.content_id)
+        .unwrap_or_default();
+    let wanted = body
+        .get("releases")
+        .and_then(Value::as_array)
+        .and_then(|list| {
+            list.iter()
+                .filter(|r| r["monitored"] == json!(true))
+                .find_map(|r| {
+                    let id = r["id"].as_i64();
+                    let mbid = r["foreignReleaseId"].as_str();
+                    pressings.iter().find(|p| {
+                        Some(p.id) == id || mbid.is_some_and(|m| m.eq_ignore_ascii_case(&p.mbid))
+                    })
+                })
+        })
+        .map(|p| p.mbid.clone());
+    let current = al.release_mbid.clone();
+    match wanted {
+        Some(mbid) if Some(&mbid) != current.as_ref() => {
+            let catalogue = state
+                .music
+                .as_ref()
+                .ok_or_else(|| ApiError::Domain("no music metadata source is configured".into()))?;
+            catalogue
+                .select_release(al.content_id, &mbid, any_ok)
+                .await
+                .map_err(catalogue_error)?;
+        }
+        _ if any_ok != al.any_release_ok => {
+            state
+                .db
+                .music()
+                .pin_release(al.content_id, current, any_ok)
+                .await?;
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 pub(crate) async fn delete_album(
@@ -974,10 +1033,19 @@ pub(crate) async fn album_lookup(
         .music
         .as_ref()
         .ok_or_else(|| ApiError::Domain("no music metadata source is configured".into()))?;
-    let hits = catalogue
-        .search_albums(term)
-        .await
-        .map_err(catalogue_error)?;
+    let hits = match mbid_term(term) {
+        // Lidarr answers `lidarr:<release-group id>` with exactly that album.
+        Some(mbid) => catalogue
+            .lookup_album(mbid)
+            .await
+            .map_err(catalogue_error)?
+            .into_iter()
+            .collect(),
+        None => catalogue
+            .search_albums(term)
+            .await
+            .map_err(catalogue_error)?,
+    };
     let known_albums: HashMap<String, Album> = state
         .db
         .music()
@@ -2150,4 +2218,80 @@ pub(crate) async fn push_release(
     // A pushed release is accepted but not acted on yet: grabbing happens through
     // search, which has the full decision context.
     Ok(Json(Vec::new()))
+}
+
+// --- delay profiles: the catch-all is id 1, as in Lidarr --------------------
+
+/// The shared numeric id of the catch-all delay profile (untagged, last in
+/// order), which Lidarr numbers 1.
+async fn catch_all_delay_id(fs: &FaceState) -> ApiResult<Option<i64>> {
+    let all = fs.state.db.profiles().list_delay_profiles().await?;
+    Ok(all
+        .iter()
+        .filter(|dp| dp.tags.is_empty())
+        .max_by_key(|dp| dp.order)
+        .map(|dp| shim::dp_numeric_id(dp.id)))
+}
+
+fn lidarr_delay(mut v: Value, catch_all: Option<i64>) -> Value {
+    if v["id"].as_i64().is_some() && v["id"].as_i64() == catch_all {
+        v["id"] = json!(1);
+    }
+    if let Some(o) = v.as_object_mut() {
+        o.entry("bypassIfAboveCustomFormatScore")
+            .or_insert(json!(false));
+        o.entry("minimumCustomFormatScore").or_insert(json!(0));
+    }
+    v
+}
+
+/// Lidarr's id for a delay profile back to cellarr's.
+async fn shim_delay_id(fs: &FaceState, id: &str) -> ApiResult<String> {
+    if id == "1" {
+        if let Some(real) = catch_all_delay_id(fs).await? {
+            return Ok(real.to_string());
+        }
+    }
+    Ok(id.to_string())
+}
+
+pub(crate) async fn list_delay_profiles(
+    State(fs): State<FaceState>,
+) -> ApiResult<Json<Vec<Value>>> {
+    let catch_all = catch_all_delay_id(&fs).await?;
+    let Json(all) = shim::list_delay_profiles(State(fs)).await?;
+    Ok(Json(
+        all.into_iter()
+            .map(|v| lidarr_delay(v, catch_all))
+            .collect(),
+    ))
+}
+
+pub(crate) async fn get_delay_profile(
+    State(fs): State<FaceState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Value>> {
+    let catch_all = catch_all_delay_id(&fs).await?;
+    let real = shim_delay_id(&fs, &id).await?;
+    let Json(v) = shim::get_delay_profile(State(fs), Path(real)).await?;
+    Ok(Json(lidarr_delay(v, catch_all)))
+}
+
+pub(crate) async fn update_delay_profile(
+    State(fs): State<FaceState>,
+    Path(id): Path<String>,
+    body: Json<shim::DelayProfileBody>,
+) -> ApiResult<Json<Value>> {
+    let catch_all = catch_all_delay_id(&fs).await?;
+    let real = shim_delay_id(&fs, &id).await?;
+    let Json(v) = shim::update_delay_profile(State(fs), Path(real), body).await?;
+    Ok(Json(lidarr_delay(v, catch_all)))
+}
+
+pub(crate) async fn delete_delay_profile(
+    State(fs): State<FaceState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Value>> {
+    let real = shim_delay_id(&fs, &id).await?;
+    shim::delete_delay_profile(State(fs), Path(real)).await
 }

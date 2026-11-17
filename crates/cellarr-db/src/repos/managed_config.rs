@@ -51,10 +51,8 @@ impl ManagedConfigRepo {
     /// # Errors
     /// Returns a [`DbError`](crate::DbError) on query/decode failure.
     pub async fn list_kind(&self, kind: &str) -> Result<Vec<ManagedEntity>> {
-        let rows = sqlx::query(&pq(
-            "SELECT kind, name, entity_id, content_hash
-             FROM managed_config_entity WHERE kind = ?1 ORDER BY name ASC"),
-        )
+        let rows = sqlx::query(&pq("SELECT kind, name, entity_id, content_hash
+             FROM managed_config_entity WHERE kind = ?1 ORDER BY name ASC"))
         .bind(kind)
         .fetch_all(&self.pool)
         .await?;
@@ -67,10 +65,8 @@ impl ManagedConfigRepo {
     /// # Errors
     /// Returns a [`DbError`](crate::DbError) on query/decode failure.
     pub async fn list_all(&self) -> Result<Vec<ManagedEntity>> {
-        let rows = sqlx::query(&pq(
-            "SELECT kind, name, entity_id, content_hash
-             FROM managed_config_entity ORDER BY kind ASC, name ASC"),
-        )
+        let rows = sqlx::query(&pq("SELECT kind, name, entity_id, content_hash
+             FROM managed_config_entity ORDER BY kind ASC, name ASC"))
         .fetch_all(&self.pool)
         .await?;
         rows.into_iter().map(row_to_entity).collect()
@@ -93,8 +89,8 @@ impl ManagedConfigRepo {
                          VALUES (?1, ?2, ?3, ?4)
                          ON CONFLICT(kind, name) DO UPDATE SET
                             entity_id = excluded.entity_id,
-                            content_hash = excluded.content_hash"),
-                    )
+                            content_hash = excluded.content_hash",
+                    ))
                     .bind(kind)
                     .bind(name)
                     .bind(entity_id)
@@ -124,8 +120,8 @@ impl ManagedConfigRepo {
             .submit(move |conn| {
                 Box::pin(async move {
                     let result = sqlx::query(&pq(
-                        "DELETE FROM managed_config_entity WHERE kind = ?1 AND name = ?2"),
-                    )
+                        "DELETE FROM managed_config_entity WHERE kind = ?1 AND name = ?2",
+                    ))
                     .bind(kind)
                     .bind(name)
                     .execute(&mut *conn)

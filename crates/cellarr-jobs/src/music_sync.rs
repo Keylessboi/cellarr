@@ -134,6 +134,8 @@ pub trait MusicCatalogue: Send + Sync {
     async fn search_artists(&self, term: &str) -> Result<Vec<MbArtist>, CatalogueError>;
     /// Search MusicBrainz for albums by title (optionally `artist - album`).
     async fn search_albums(&self, term: &str) -> Result<Vec<MbReleaseGroup>, CatalogueError>;
+    /// One album by its release-group id, when the source knows it.
+    async fn lookup_album(&self, mbid: &str) -> Result<Option<MbReleaseGroup>, CatalogueError>;
     /// Look up one artist and the albums a metadata profile would keep.
     async fn lookup_artist(
         &self,
@@ -146,6 +148,14 @@ pub trait MusicCatalogue: Send + Sync {
     async fn refresh_artist(&self, artist: ContentId) -> Result<RefreshReport, CatalogueError>;
     /// Make sure an album has its track list, fetching it if it has none.
     async fn ensure_tracks(&self, album: ContentId) -> Result<Vec<Track>, CatalogueError>;
+    /// Pin a pressing (`release_mbid`), switch the album's track list to it, and
+    /// say whether any other pressing is acceptable too.
+    async fn select_release(
+        &self,
+        album: ContentId,
+        release_mbid: &str,
+        any_release_ok: bool,
+    ) -> Result<Vec<Track>, CatalogueError>;
 }
 
 /// The MusicBrainz-backed catalogue.
@@ -167,6 +177,21 @@ impl<M: MusicMeta> MusicSync<M> {
             .metadata_profile(id)
             .await?
             .unwrap_or_else(MetadataProfile::standard))
+    }
+
+    async fn store_releases(
+        &self,
+        album: ContentId,
+        releases: &[cellarr_meta::MbRelease],
+    ) -> Result<(), CatalogueError> {
+        if releases.is_empty() {
+            return Ok(());
+        }
+        self.db
+            .music()
+            .set_album_releases(album, releases.iter().map(release_record).collect())
+            .await?;
+        Ok(())
     }
 
     /// The release groups of `artist_mbid` that `profile` keeps, oldest first.
@@ -214,6 +239,55 @@ fn artist_extras(a: &MbArtist) -> String {
     .to_string()
 }
 
+fn tracks_of(release: &cellarr_meta::MbRelease) -> Vec<NewTrack> {
+    release
+        .media
+        .iter()
+        .flat_map(|m| {
+            m.tracks.iter().map(move |t| NewTrack {
+                id: None,
+                mbid: t.recording_mbid.clone(),
+                title: t.title.clone(),
+                disc: m.position,
+                position: t.position,
+                duration_ms: t.length_ms,
+            })
+        })
+        .collect()
+}
+
+fn release_record(r: &cellarr_meta::MbRelease) -> cellarr_db::NewRelease {
+    cellarr_db::NewRelease {
+        id: None,
+        mbid: r.mbid.clone(),
+        title: r.title.clone(),
+        status: r.status.clone(),
+        release_date: r.date.clone(),
+        disambiguation: None,
+        country: r.country.iter().cloned().collect(),
+        label: Vec::new(),
+        media: r
+            .media
+            .iter()
+            .map(|m| {
+                (
+                    m.position,
+                    String::new(),
+                    m.format.clone().unwrap_or_default(),
+                )
+            })
+            .collect(),
+        track_count: u32::try_from(r.track_count()).unwrap_or(0),
+        duration_ms: r
+            .media
+            .iter()
+            .flat_map(|m| &m.tracks)
+            .filter_map(|t| t.length_ms)
+            .map(u64::from)
+            .sum(),
+    }
+}
+
 fn today() -> String {
     time::OffsetDateTime::now_utc().date().to_string()
 }
@@ -237,6 +311,10 @@ fn new_album(g: &MbReleaseGroup, monitored: bool) -> NewAlbum {
 impl<M: MusicMeta + 'static> MusicCatalogue for MusicSync<M> {
     async fn search_artists(&self, term: &str) -> Result<Vec<MbArtist>, CatalogueError> {
         Ok(self.mb.search_artists(term, 10).await?)
+    }
+
+    async fn lookup_album(&self, mbid: &str) -> Result<Option<MbReleaseGroup>, CatalogueError> {
+        Ok(self.mb.release_group(mbid).await?)
     }
 
     async fn search_albums(&self, term: &str) -> Result<Vec<MbReleaseGroup>, CatalogueError> {
@@ -364,26 +442,58 @@ impl<M: MusicMeta + 'static> MusicCatalogue for MusicSync<M> {
             .await?
             .ok_or_else(|| CatalogueError::NotFound(format!("no album node {album}")))?;
         let releases = self.mb.releases(&stored.mbid).await?;
+        self.store_releases(album, &releases).await?;
+        // A pinned pressing wins; otherwise the representative one.
         let allowed = ["Official".to_string()];
-        let Some(release) = pick_release(&releases, &allowed) else {
+        let release = stored
+            .release_mbid
+            .as_deref()
+            .and_then(|pin| releases.iter().find(|r| r.mbid == pin))
+            .or_else(|| pick_release(&releases, &allowed));
+        let Some(release) = release else {
             return Ok(Vec::new());
         };
-        let tracks: Vec<NewTrack> = release
-            .media
-            .iter()
-            .flat_map(|m| {
-                m.tracks.iter().map(move |t| NewTrack {
-                    id: None,
-                    mbid: t.recording_mbid.clone(),
-                    title: t.title.clone(),
-                    disc: m.position,
-                    position: t.position,
-                    duration_ms: t.length_ms,
-                })
-            })
-            .collect();
         Ok(music
-            .set_album_tracks(node.library_id, album, Some(release.mbid.clone()), tracks)
+            .set_album_tracks(
+                node.library_id,
+                album,
+                Some(release.mbid.clone()),
+                tracks_of(release),
+            )
+            .await?)
+    }
+
+    async fn select_release(
+        &self,
+        album: ContentId,
+        release_mbid: &str,
+        any_release_ok: bool,
+    ) -> Result<Vec<Track>, CatalogueError> {
+        let music = self.db.music();
+        let Some(stored) = music.album_by_content(album).await? else {
+            return Err(CatalogueError::NotFound(format!("no album {album}")));
+        };
+        let node = cellarr_core::repo::ContentRepository::get(&self.db.content(), album)
+            .await?
+            .ok_or_else(|| CatalogueError::NotFound(format!("no album node {album}")))?;
+        let releases = self.mb.releases(&stored.mbid).await?;
+        self.store_releases(album, &releases).await?;
+        let release = releases
+            .iter()
+            .find(|r| r.mbid.eq_ignore_ascii_case(release_mbid))
+            .ok_or_else(|| {
+                CatalogueError::NotFound(format!("album {album} has no pressing {release_mbid}"))
+            })?;
+        music
+            .pin_release(album, Some(release.mbid.clone()), any_release_ok)
+            .await?;
+        Ok(music
+            .set_album_tracks(
+                node.library_id,
+                album,
+                Some(release.mbid.clone()),
+                tracks_of(release),
+            )
             .await?)
     }
 }

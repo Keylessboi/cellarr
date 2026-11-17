@@ -278,11 +278,9 @@ impl MediaFileRepo {
         self.writer
             .submit(move |conn| {
                 Box::pin(async move {
-                    sqlx::query(&pq(
-                        "UPDATE media_file
+                    sqlx::query(&pq("UPDATE media_file
                          SET quality = ?1, quality_rank = ?2, media_info = ?3
-                         WHERE id = ?4",
-                    ))
+                         WHERE id = ?4"))
                     .bind(quality)
                     .bind(rank)
                     .bind(media_info)

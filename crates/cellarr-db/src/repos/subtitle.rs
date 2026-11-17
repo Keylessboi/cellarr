@@ -50,8 +50,7 @@ impl SubtitleRepo {
         self.writer
             .submit(move |conn| {
                 Box::pin(async move {
-                    sqlx::query(&pq(
-                        "INSERT INTO subtitle
+                    sqlx::query(&pq("INSERT INTO subtitle
                             (id, media_file_id, language, path, provider, provider_id,
                              score, forced, hearing_impaired, added_at)
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
@@ -61,8 +60,7 @@ impl SubtitleRepo {
                             provider = excluded.provider,
                             provider_id = excluded.provider_id,
                             score = excluded.score,
-                            added_at = excluded.added_at",
-                    ))
+                            added_at = excluded.added_at"))
                     .bind(id)
                     .bind(media_file_id)
                     .bind(language)

@@ -56,6 +56,47 @@ use crate::state::AppState;
 ///
 /// Every route requires the API key, as in Lidarr itself.
 pub fn router(state: AppState) -> Router {
+    // Lidarr matches routes case-insensitively, and clients rely on it: Octo
+    // and the queue-maintenance script both ask for `/trackFile`. Lower-case the
+    // path before routing (a log file's own name is left as it is).
+    let inner = routes(state);
+    Router::new().fallback_service(
+        tower::ServiceBuilder::new()
+            .map_request(|mut req: Request<axum::body::Body>| {
+                let lowered = lower_path(req.uri());
+                if let Some(uri) = lowered {
+                    *req.uri_mut() = uri;
+                }
+                req
+            })
+            .service(inner),
+    )
+}
+
+/// The request URI with its path lower-cased, or `None` when it already is.
+fn lower_path(uri: &axum::http::Uri) -> Option<axum::http::Uri> {
+    let path = uri.path();
+    let (head, tail) = match path.to_ascii_lowercase().find("/log/file/") {
+        Some(i) => (
+            &path[..i + "/log/file/".len()],
+            &path[i + "/log/file/".len()..],
+        ),
+        None => (path, ""),
+    };
+    if !head.bytes().any(|b| b.is_ascii_uppercase()) {
+        return None;
+    }
+    let mut rebuilt = format!("{}{tail}", head.to_ascii_lowercase());
+    if let Some(q) = uri.query() {
+        rebuilt.push('?');
+        rebuilt.push_str(q);
+    }
+    let mut parts = uri.clone().into_parts();
+    parts.path_and_query = rebuilt.parse().ok();
+    axum::http::Uri::from_parts(parts).ok()
+}
+
+fn routes(state: AppState) -> Router {
     let fs = FaceState {
         state: state.clone(),
         face: Face::Lidarr,
@@ -83,6 +124,7 @@ pub fn router(state: AppState) -> Router {
         .route("/manualimport", get(handlers::empty_list))
         .route("/release/push", post(handlers::push_release))
         .route("/tag/detail", get(handlers::tag_details))
+        .route("/ping", get(ping).head(ping))
         .route("/plugin", get(handlers::list_plugins))
         .route("/system/plugins", get(handlers::system_plugins))
         .route("/log/file", get(shim::list_log_files))
@@ -160,13 +202,13 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/delayprofile",
-            get(shim::list_delay_profiles).post(shim::create_delay_profile),
+            get(handlers::list_delay_profiles).post(shim::create_delay_profile),
         )
         .route(
             "/delayprofile/{id}",
-            get(shim::get_delay_profile)
-                .put(shim::update_delay_profile)
-                .delete(shim::delete_delay_profile),
+            get(handlers::get_delay_profile)
+                .put(handlers::update_delay_profile)
+                .delete(handlers::delete_delay_profile),
         )
         .route(
             "/releaseprofile",

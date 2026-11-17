@@ -8,11 +8,11 @@
 //! mirrored into typed columns; the JSON is the authoritative copy that
 //! round-trips losslessly (including the open-ended `settings`).
 
+use crate::dialect::{pq, DbPool};
 use cellarr_core::{
     DownloadClientConfig, IndexerConfig, Library, LibraryId, MediaManagement, MediaType,
     NotificationConfig, QualityProfileId, RemotePathMapping, RootFolder,
 };
-use crate::dialect::{pq, DbPool};
 use sqlx::Row;
 
 use crate::convert::parse_uuid;
@@ -47,16 +47,14 @@ impl ConfigRepo {
         self.writer
             .submit(move |conn| {
                 Box::pin(async move {
-                    sqlx::query(&pq(
-                        "INSERT INTO library
+                    sqlx::query(&pq("INSERT INTO library
                             (id, media_type, name, root_folders, default_quality_profile)
                          VALUES (?1, ?2, ?3, ?4, ?5)
                          ON CONFLICT(id) DO UPDATE SET
                             media_type = excluded.media_type,
                             name = excluded.name,
                             root_folders = excluded.root_folders,
-                            default_quality_profile = excluded.default_quality_profile"),
-                    )
+                            default_quality_profile = excluded.default_quality_profile"))
                     .bind(id)
                     .bind(media_type)
                     .bind(name)
@@ -77,8 +75,8 @@ impl ConfigRepo {
     pub async fn get_library(&self, id: LibraryId) -> Result<Option<Library>> {
         let row = sqlx::query(&pq(
             "SELECT id, media_type, name, root_folders, default_quality_profile
-             FROM library WHERE id = ?1"),
-        )
+             FROM library WHERE id = ?1",
+        ))
         .bind(id.to_string())
         .fetch_optional(&self.pool)
         .await?;
@@ -92,8 +90,8 @@ impl ConfigRepo {
     pub async fn list_libraries(&self) -> Result<Vec<Library>> {
         let rows = sqlx::query(&pq(
             "SELECT id, media_type, name, root_folders, default_quality_profile
-             FROM library ORDER BY name ASC"),
-        )
+             FROM library ORDER BY name ASC",
+        ))
         .fetch_all(&self.pool)
         .await?;
         rows.into_iter().map(row_to_library).collect()
@@ -149,8 +147,8 @@ impl ConfigRepo {
                             path = excluded.path,
                             name = excluded.name,
                             enabled = excluded.enabled,
-                            body = excluded.body"),
-                    )
+                            body = excluded.body",
+                    ))
                     .bind(id)
                     .bind(path)
                     .bind(name)
@@ -232,8 +230,7 @@ impl ConfigRepo {
         self.writer
             .submit(move |conn| {
                 Box::pin(async move {
-                    sqlx::query(&pq(
-                        "INSERT INTO indexer
+                    sqlx::query(&pq("INSERT INTO indexer
                             (id, name, kind, protocol, enabled, priority, body)
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
                          ON CONFLICT(id) DO UPDATE SET
@@ -242,8 +239,7 @@ impl ConfigRepo {
                             protocol = excluded.protocol,
                             enabled = excluded.enabled,
                             priority = excluded.priority,
-                            body = excluded.body"),
-                    )
+                            body = excluded.body"))
                     .bind(id)
                     .bind(name)
                     .bind(kind)
@@ -290,8 +286,8 @@ impl ConfigRepo {
     /// Returns a [`DbError`] on query/decode failure.
     pub async fn list_enabled_indexers(&self) -> Result<Vec<IndexerConfig>> {
         let rows = sqlx::query(&pq(
-            "SELECT body FROM indexer WHERE enabled = 1 ORDER BY priority ASC, name ASC"),
-        )
+            "SELECT body FROM indexer WHERE enabled = 1 ORDER BY priority ASC, name ASC",
+        ))
         .fetch_all(&self.pool)
         .await?;
         rows.into_iter().map(row_to_json_body).collect()
@@ -342,8 +338,7 @@ impl ConfigRepo {
         self.writer
             .submit(move |conn| {
                 Box::pin(async move {
-                    sqlx::query(&pq(
-                        "INSERT INTO download_client
+                    sqlx::query(&pq("INSERT INTO download_client
                             (id, name, kind, protocol, enabled, priority, category, body)
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
                          ON CONFLICT(id) DO UPDATE SET
@@ -353,8 +348,7 @@ impl ConfigRepo {
                             enabled = excluded.enabled,
                             priority = excluded.priority,
                             category = excluded.category,
-                            body = excluded.body"),
-                    )
+                            body = excluded.body"))
                     .bind(id)
                     .bind(name)
                     .bind(kind)
@@ -446,8 +440,8 @@ impl ConfigRepo {
                             name = excluded.name,
                             kind = excluded.kind,
                             enabled = excluded.enabled,
-                            body = excluded.body"),
-                    )
+                            body = excluded.body",
+                    ))
                     .bind(id)
                     .bind(name)
                     .bind(kind)
@@ -494,10 +488,8 @@ impl ConfigRepo {
         &self,
         kind: &str,
     ) -> Result<Vec<NotificationConfig>> {
-        let rows = sqlx::query(&pq(
-            "SELECT body FROM notification
-             WHERE enabled = 1 AND kind = ?1 ORDER BY name ASC"),
-        )
+        let rows = sqlx::query(&pq("SELECT body FROM notification
+             WHERE enabled = 1 AND kind = ?1 ORDER BY name ASC"))
         .bind(kind)
         .fetch_all(&self.pool)
         .await?;
@@ -547,16 +539,14 @@ impl ConfigRepo {
         self.writer
             .submit(move |conn| {
                 Box::pin(async move {
-                    sqlx::query(&pq(
-                        "INSERT INTO remote_path_mapping
+                    sqlx::query(&pq("INSERT INTO remote_path_mapping
                             (id, host, remote_path, local_path, body)
                          VALUES (?1, ?2, ?3, ?4, ?5)
                          ON CONFLICT(id) DO UPDATE SET
                             host = excluded.host,
                             remote_path = excluded.remote_path,
                             local_path = excluded.local_path,
-                            body = excluded.body"),
-                    )
+                            body = excluded.body"))
                     .bind(id)
                     .bind(host)
                     .bind(remote_path)
@@ -588,10 +578,11 @@ impl ConfigRepo {
     /// # Errors
     /// Returns a [`DbError`] on query/decode failure.
     pub async fn list_remote_path_mappings(&self) -> Result<Vec<RemotePathMapping>> {
-        let rows =
-            sqlx::query(&pq("SELECT body FROM remote_path_mapping ORDER BY host ASC, remote_path ASC"))
-                .fetch_all(&self.pool)
-                .await?;
+        let rows = sqlx::query(&pq(
+            "SELECT body FROM remote_path_mapping ORDER BY host ASC, remote_path ASC",
+        ))
+        .fetch_all(&self.pool)
+        .await?;
         rows.into_iter().map(row_to_json_body).collect()
     }
 
@@ -649,10 +640,8 @@ impl ConfigRepo {
         self.writer
             .submit(move |conn| {
                 Box::pin(async move {
-                    sqlx::query(&pq(
-                        "INSERT INTO media_management (id, body) VALUES (1, ?1)
-                         ON CONFLICT(id) DO UPDATE SET body = excluded.body"),
-                    )
+                    sqlx::query(&pq("INSERT INTO media_management (id, body) VALUES (1, ?1)
+                         ON CONFLICT(id) DO UPDATE SET body = excluded.body"))
                     .bind(body)
                     .execute(&mut *conn)
                     .await?;

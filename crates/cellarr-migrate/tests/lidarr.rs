@@ -308,3 +308,29 @@ async fn the_source_database_is_never_modified() {
     import(&[&src], &db).await.unwrap();
     assert_eq!(std::fs::read(&src).unwrap(), before);
 }
+
+#[tokio::test]
+async fn every_pressing_keeps_its_lidarr_id_and_the_pin_survives() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = lidarr_db(dir.path()).await;
+    let db = dest(dir.path()).await;
+    import(&[&src], &db).await.unwrap();
+    let music = db.music();
+    let album = music.album(30001).await.unwrap().unwrap();
+    assert_eq!(
+        album.release_mbid.as_deref(),
+        Some("rel-b"),
+        "the monitored pressing stays pinned"
+    );
+    let pressings = music
+        .releases_for_albums(&[album.content_id])
+        .await
+        .unwrap()
+        .remove(&album.content_id)
+        .unwrap();
+    let ids: Vec<(i64, &str, u32)> = pressings
+        .iter()
+        .map(|r| (r.id, r.mbid.as_str(), r.track_count))
+        .collect();
+    assert_eq!(ids, [(501, "rel-a", 13), (502, "rel-b", 2)]);
+}

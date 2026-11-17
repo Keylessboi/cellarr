@@ -232,6 +232,18 @@ impl<F: Fetcher + 'static> MusicMeta for MusicBrainzSource<F> {
     async fn releases(&self, release_group_mbid: &str) -> Result<Vec<MbRelease>, MetaError> {
         MusicBrainzSource::releases(self, release_group_mbid).await
     }
+    async fn release_group(&self, mbid: &str) -> Result<Option<MbReleaseGroup>, MetaError> {
+        let url = format!(
+            "{}/release-group/{}?inc=artist-credits&fmt=json",
+            self.base_url,
+            encode(mbid)
+        );
+        match self.get_json::<RawReleaseGroup>(&url).await {
+            Ok(raw) => Ok(Some(MbReleaseGroup::from(raw))),
+            Err(MetaError::Http { status: 404, .. }) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
 }
 
 /// Try `primary`; when it fails for any reason, ask `fallback`. Keeps the

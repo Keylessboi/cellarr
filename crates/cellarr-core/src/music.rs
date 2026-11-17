@@ -155,6 +155,42 @@ pub struct Album {
     pub added_at: String,
     /// When the track list was fetched; `None` means tracks are not yet known.
     pub tracks_fetched_at: Option<String>,
+    /// Whether any pressing will do (`false`: only the pinned `release_mbid`).
+    #[serde(default = "yes")]
+    pub any_release_ok: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// One pressing of an album (a MusicBrainz release).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AlbumRelease {
+    /// The integer id the Lidarr-compatible API shows; stable across refreshes.
+    pub id: i64,
+    /// The album it belongs to.
+    pub album_content_id: ContentId,
+    /// MusicBrainz release id.
+    pub mbid: String,
+    /// Title of this pressing.
+    pub title: String,
+    /// `Official`, `Promotion`, ….
+    pub status: Option<String>,
+    /// Release date.
+    pub release_date: Option<String>,
+    /// Disambiguation comment.
+    pub disambiguation: Option<String>,
+    /// Countries.
+    pub country: Vec<String>,
+    /// Labels.
+    pub label: Vec<String>,
+    /// Discs: `(number, name, format)`.
+    pub media: Vec<(u32, String, String)>,
+    /// Tracks across every disc.
+    pub track_count: u32,
+    /// Total length.
+    pub duration_ms: u64,
 }
 
 impl Album {
@@ -366,8 +402,14 @@ mod tests {
         let standard = MetadataProfile::standard();
         let s = |v: &[&str]| v.iter().map(|x| (*x).to_string()).collect::<Vec<_>>();
         assert!(standard.allows_statuses(&s(&["Bootleg", "Official"])));
-        assert!(!standard.allows_statuses(&s(&["Bootleg"])), "bootleg-only is dropped");
-        assert!(standard.allows_statuses(&[]), "a source that does not say is not filtered");
+        assert!(
+            !standard.allows_statuses(&s(&["Bootleg"])),
+            "bootleg-only is dropped"
+        );
+        assert!(
+            standard.allows_statuses(&[]),
+            "a source that does not say is not filtered"
+        );
     }
 
     #[test]

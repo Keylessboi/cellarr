@@ -16,22 +16,22 @@
 //! Everything engine-specific in the crate keys off the aliases and [`pq`] here,
 //! so the repositories read as one backend-agnostic implementation.
 
-/// The compiled connection pool type.
-#[cfg(not(feature = "postgres"))]
-pub use sqlx::SqlitePool as DbPool;
-/// The compiled row type rows decode from.
-#[cfg(not(feature = "postgres"))]
-pub use sqlx::sqlite::SqliteRow as DbRow;
 /// The compiled single-connection type the writer-actor drives.
 #[cfg(not(feature = "postgres"))]
 pub use sqlx::sqlite::SqliteConnection as DbConnection;
+/// The compiled row type rows decode from.
+#[cfg(not(feature = "postgres"))]
+pub use sqlx::sqlite::SqliteRow as DbRow;
+/// The compiled connection pool type.
+#[cfg(not(feature = "postgres"))]
+pub use sqlx::SqlitePool as DbPool;
 
 #[cfg(feature = "postgres")]
-pub use sqlx::PgPool as DbPool;
+pub use sqlx::postgres::PgConnection as DbConnection;
 #[cfg(feature = "postgres")]
 pub use sqlx::postgres::PgRow as DbRow;
 #[cfg(feature = "postgres")]
-pub use sqlx::postgres::PgConnection as DbConnection;
+pub use sqlx::PgPool as DbPool;
 
 /// Translate a SQL string authored in SQLite's `?N` positional-parameter style
 /// into the compiled backend's placeholder dialect.

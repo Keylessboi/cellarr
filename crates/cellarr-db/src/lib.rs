@@ -39,7 +39,7 @@ pub use error::{DbError, Result};
 pub use repos::{
     AlbumSort, AlbumWithArtist, AuthRepo, AuthSession, BlocklistRepo, CacheRepo, ConfigRepo,
     ContentRepo, DecisionLogRepo, GrabRepo, HistoryRepo, ImportListRepo, ManagedConfigRepo,
-    ManagedEntity, MediaFileRepo, MusicRepo, MusicStats, NewAlbum, NewArtist, NewTrack,
+    ManagedEntity, MediaFileRepo, MusicRepo, MusicStats, NewAlbum, NewArtist, NewRelease, NewTrack,
     PendingRelease, PendingReleaseRepo, ProfileRepo, TagRepo,
 };
 pub use writer::WriterHandle;

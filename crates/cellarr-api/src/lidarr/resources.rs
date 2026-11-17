@@ -218,7 +218,7 @@ pub fn album(
         "artistId": artist_id,
         "foreignAlbumId": al.mbid,
         "monitored": al.monitored,
-        "anyReleaseOk": true,
+        "anyReleaseOk": al.any_release_ok,
         "profileId": profile_seq.unwrap_or(0),
         "duration": duration,
         "albumType": al.album_type,
@@ -249,6 +249,49 @@ pub fn album(
         v["statistics"] = statistics(stats, false);
     }
     v
+}
+
+/// Replace an album resource's releases with every stored pressing. The pinned
+/// one (the album's `release_mbid`) is monitored; with none pinned, the first.
+pub fn set_releases(v: &mut Value, al: &Album, pressings: &[cellarr_core::AlbumRelease]) {
+    if pressings.is_empty() {
+        return;
+    }
+    let pinned = al
+        .release_mbid
+        .as_deref()
+        .filter(|p| pressings.iter().any(|r| r.mbid == *p))
+        .unwrap_or(pressings[0].mbid.as_str());
+    let releases: Vec<Value> = pressings
+        .iter()
+        .map(|r| {
+            let media: Vec<Value> = r
+                .media
+                .iter()
+                .map(|(n, name, format)| {
+                    json!({ "mediumNumber": n, "mediumName": name, "mediumFormat": format })
+                })
+                .collect();
+            json!({
+                "id": r.id,
+                "albumId": al.id,
+                "foreignReleaseId": r.mbid,
+                "title": r.title,
+                "status": r.status.clone().unwrap_or_default(),
+                "duration": r.duration_ms,
+                "trackCount": r.track_count,
+                "media": media,
+                "mediumCount": r.media.len(),
+                "disambiguation": r.disambiguation.clone().unwrap_or_default(),
+                "country": r.country,
+                "label": r.label,
+                "format": r.media.first().map(|m| m.2.clone()).unwrap_or_default(),
+                "monitored": r.mbid == pinned,
+            })
+        })
+        .collect();
+    v["releases"] = Value::Array(releases);
+    v["anyReleaseOk"] = json!(al.any_release_ok);
 }
 
 /// A release date as the ISO timestamp Lidarr serializes. A partial date is

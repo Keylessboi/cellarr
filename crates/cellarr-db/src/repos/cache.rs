@@ -43,8 +43,8 @@ impl CacheRepo {
                     sqlx::query(&pq(
                         "INSERT INTO cache (cache_key, value, expires_at) VALUES (?1, ?2, ?3)
                          ON CONFLICT(cache_key) DO UPDATE SET
-                            value = excluded.value, expires_at = excluded.expires_at"),
-                    )
+                            value = excluded.value, expires_at = excluded.expires_at",
+                    ))
                     .bind(key)
                     .bind(value)
                     .bind(expires_at)
@@ -64,10 +64,8 @@ impl CacheRepo {
         // Compare against now in SQL using string ordering of RFC3339 — only
         // valid because all timestamps are written UTC ('Z') with fixed width.
         let now = format_time(OffsetDateTime::now_utc())?;
-        let row = sqlx::query(&pq(
-            "SELECT value FROM cache
-             WHERE cache_key = ?1 AND (expires_at IS NULL OR expires_at > ?2)"),
-        )
+        let row = sqlx::query(&pq("SELECT value FROM cache
+             WHERE cache_key = ?1 AND (expires_at IS NULL OR expires_at > ?2)"))
         .bind(key)
         .bind(now)
         .fetch_optional(&self.pool)
@@ -88,8 +86,8 @@ impl CacheRepo {
             .submit(move |conn| {
                 Box::pin(async move {
                     sqlx::query(&pq(
-                        "DELETE FROM cache WHERE expires_at IS NOT NULL AND expires_at <= ?1"),
-                    )
+                        "DELETE FROM cache WHERE expires_at IS NOT NULL AND expires_at <= ?1",
+                    ))
                     .bind(now)
                     .execute(&mut *conn)
                     .await?;

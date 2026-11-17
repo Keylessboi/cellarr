@@ -492,6 +492,99 @@ pub(crate) async fn import(pool: &SqlitePool, db: &Database) -> Result<MusicRepo
         }
     }
 
+    // --- every pressing of every album, keeping Lidarr's ids -------------------
+    //
+    // Lidarr-speaking clients list an album's pressings and pin one by id, so the
+    // ids they saw before the move have to be the ids they see after it.
+    {
+        use futures::TryStreamExt;
+        let mut rows = sqlx::query(
+            "SELECT Id, AlbumId, ForeignReleaseId, Title, Status, Duration, Label,
+                    Disambiguation, Country, ReleaseDate, Media, TrackCount
+             FROM AlbumReleases ORDER BY AlbumId ASC, Id ASC",
+        )
+        .fetch(pool);
+        let mut batch: Vec<(ContentId, Vec<cellarr_db::NewRelease>)> = Vec::new();
+        while let Some(row) = rows.try_next().await? {
+            let r = &row;
+            let album: i64 = r.try_get("AlbumId").unwrap_or(0);
+            let Some((content, _, _)) = albums_by_id.get(&album) else {
+                continue;
+            };
+            let strings = |col: &str| -> Vec<String> {
+                parse_json(opt_text(r, col))
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str().map(str::to_string))
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            };
+            let media: Vec<(u32, String, String)> = parse_json(opt_text(r, "Media"))
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .map(|m| {
+                            let get = |k: &str, k2: &str| m.get(k).or_else(|| m.get(k2)).cloned();
+                            (
+                                get("number", "Number")
+                                    .and_then(|v| v.as_u64())
+                                    .unwrap_or(1) as u32,
+                                get("name", "Name")
+                                    .and_then(|v| v.as_str().map(str::to_string))
+                                    .unwrap_or_default(),
+                                get("format", "Format")
+                                    .and_then(|v| v.as_str().map(str::to_string))
+                                    .unwrap_or_default(),
+                            )
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let release = cellarr_db::NewRelease {
+                id: r.try_get::<i64, _>("Id").ok(),
+                mbid: r.try_get("ForeignReleaseId").unwrap_or_default(),
+                title: r.try_get("Title").unwrap_or_default(),
+                status: opt_text(r, "Status"),
+                release_date: date_part(opt_text(r, "ReleaseDate")),
+                disambiguation: opt_text(r, "Disambiguation"),
+                country: strings("Country"),
+                label: strings("Label"),
+                media,
+                track_count: u32::try_from(r.try_get::<i64, _>("TrackCount").unwrap_or(0))
+                    .unwrap_or(0),
+                duration_ms: u64::try_from(r.try_get::<i64, _>("Duration").unwrap_or(0))
+                    .unwrap_or(0),
+            };
+            match batch.last_mut() {
+                Some((c, list)) if c == content => list.push(release),
+                _ => batch.push((*content, vec![release])),
+            }
+            if batch.len() >= 500 {
+                music
+                    .set_many_album_releases(std::mem::take(&mut batch))
+                    .await?;
+            }
+        }
+        if !batch.is_empty() {
+            music.set_many_album_releases(batch).await?;
+        }
+        // An album pinned to one pressing only (AnyReleaseOk = 0). Older
+        // databases may not have the column; then every album takes any.
+        if let Ok(rows) = sqlx::query("SELECT Id FROM Albums WHERE AnyReleaseOk = 0")
+            .fetch_all(pool)
+            .await
+        {
+            for r in rows {
+                let id: i64 = r.try_get("Id").unwrap_or(0);
+                if let Some((content, _, mbid)) = albums_by_id.get(&id) {
+                    music.pin_release(*content, mbid.clone(), false).await?;
+                }
+            }
+        }
+    }
+
     // --- tracks of each album's selected release -------------------------------
     //
     // One ordered pass over the Tracks table, not a query per album: it needs no

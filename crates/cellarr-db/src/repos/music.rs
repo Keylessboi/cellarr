@@ -157,7 +157,7 @@ const ARTIST_COLS: &str = "a.id, a.content_id, a.mbid, a.name, a.sort_name, a.di
 
 const ALBUM_COLS: &str = "al.id, al.content_id, al.artist_content_id, al.mbid, al.title, \
      al.disambiguation, al.album_type, al.secondary_types, al.release_date, al.release_mbid, \
-     al.added_at, al.tracks_fetched_at, c.monitored";
+     al.added_at, al.tracks_fetched_at, al.any_release_ok, c.monitored";
 
 const TRACK_COLS: &str =
     "t.id, t.content_id, t.album_content_id, t.mbid, t.title, t.disc, t.position, t.duration_ms";
@@ -575,6 +575,7 @@ impl MusicRepo {
                         release_mbid: new.release_mbid,
                         added_at,
                         tracks_fetched_at: None,
+                        any_release_ok: true,
                     });
                 }
                 Ok(inserted)
@@ -1432,7 +1433,8 @@ impl MusicRepo {
                 .map(|i| format!("?{i}"))
                 .collect::<Vec<_>>()
                 .join(",");
-            let sql = format!("SELECT content_id, body FROM music_extras WHERE content_id IN ({marks})");
+            let sql =
+                format!("SELECT content_id, body FROM music_extras WHERE content_id IN ({marks})");
             let mut q = sqlx::query(pq(&sql));
             for id in chunk {
                 q = q.bind(id.to_string());
@@ -2054,6 +2056,7 @@ fn row_to_album(row: DbRow) -> Result<Album> {
         release_mbid: row.try_get("release_mbid")?,
         added_at: row.try_get("added_at")?,
         tracks_fetched_at: row.try_get("tracks_fetched_at")?,
+        any_release_ok: row.try_get::<i64, _>("any_release_ok")? != 0,
     })
 }
 
@@ -2102,4 +2105,234 @@ fn row_to_track_file(row: DbRow) -> Result<TrackFile> {
         artist_content_id: content_id(&row, "artist_content_id")?,
         added_at: row.try_get("added_at")?,
     })
+}
+
+// --- album releases (pressings) ----------------------------------------------
+
+/// A pressing to store.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewRelease {
+    /// Keep this id (a migration keeps Lidarr's); `None` assigns the next one.
+    pub id: Option<i64>,
+    /// MusicBrainz release id.
+    pub mbid: String,
+    /// Title.
+    pub title: String,
+    /// Status.
+    pub status: Option<String>,
+    /// Release date.
+    pub release_date: Option<String>,
+    /// Disambiguation.
+    pub disambiguation: Option<String>,
+    /// Countries.
+    pub country: Vec<String>,
+    /// Labels.
+    pub label: Vec<String>,
+    /// Discs: `(number, name, format)`.
+    pub media: Vec<(u32, String, String)>,
+    /// Tracks.
+    pub track_count: u32,
+    /// Length.
+    pub duration_ms: u64,
+}
+
+fn media_json(media: &[(u32, String, String)]) -> String {
+    serde_json::to_string(
+        &media
+            .iter()
+            .map(|(n, name, format)| serde_json::json!({"number": n, "name": name, "format": format}))
+            .collect::<Vec<_>>(),
+    )
+    .unwrap_or_else(|_| "[]".into())
+}
+
+fn row_to_release(row: DbRow) -> Result<cellarr_core::AlbumRelease> {
+    let media: Vec<serde_json::Value> =
+        serde_json::from_str(&row.try_get::<String, _>("media")?).unwrap_or_default();
+    Ok(cellarr_core::AlbumRelease {
+        id: row.try_get("id")?,
+        album_content_id: content_id(&row, "album_content_id")?,
+        mbid: row.try_get("mbid")?,
+        title: row.try_get("title")?,
+        status: row.try_get("status")?,
+        release_date: row.try_get("release_date")?,
+        disambiguation: row.try_get("disambiguation")?,
+        country: json_list(&row, "country")?,
+        label: json_list(&row, "label")?,
+        media: media
+            .iter()
+            .map(|m| {
+                (
+                    m["number"].as_u64().unwrap_or(1) as u32,
+                    m["name"].as_str().unwrap_or_default().to_string(),
+                    m["format"].as_str().unwrap_or_default().to_string(),
+                )
+            })
+            .collect(),
+        track_count: u32::try_from(row.try_get::<i64, _>("track_count")?).unwrap_or(0),
+        duration_ms: u64::try_from(row.try_get::<i64, _>("duration_ms")?).unwrap_or(0),
+    })
+}
+
+/// Upsert pressings of an album by mbid, keeping ids. Pressings no longer
+/// listed are kept unless `prune` (a pinned one is never pruned).
+async fn store_releases(
+    conn: &mut DbConnection,
+    album: ContentId,
+    releases: &[NewRelease],
+    prune: bool,
+) -> Result<()> {
+    let key = album.to_string();
+    for r in releases {
+        let existing: Option<i64> = sqlx::query(pq(
+            "SELECT id FROM album_release WHERE album_content_id = ?1 AND mbid = ?2",
+        ))
+        .bind(&key)
+        .bind(&r.mbid)
+        .fetch_optional(&mut *conn)
+        .await?
+        .map(|row| row.try_get("id"))
+        .transpose()?;
+        let id = match existing {
+            Some(id) => id,
+            None => next_seq(conn, "release", r.id).await?,
+        };
+        sqlx::query(pq(
+            "INSERT INTO album_release (id, album_content_id, mbid, title, status, release_date,
+                 disambiguation, country, label, media, track_count, duration_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+             ON CONFLICT(id) DO UPDATE SET title = excluded.title, status = excluded.status,
+                 release_date = excluded.release_date, disambiguation = excluded.disambiguation,
+                 country = excluded.country, label = excluded.label, media = excluded.media,
+                 track_count = excluded.track_count, duration_ms = excluded.duration_ms",
+        ))
+        .bind(id)
+        .bind(&key)
+        .bind(&r.mbid)
+        .bind(&r.title)
+        .bind(&r.status)
+        .bind(&r.release_date)
+        .bind(&r.disambiguation)
+        .bind(serde_json::to_string(&r.country).unwrap_or_else(|_| "[]".into()))
+        .bind(serde_json::to_string(&r.label).unwrap_or_else(|_| "[]".into()))
+        .bind(media_json(&r.media))
+        .bind(i64::from(r.track_count))
+        .bind(i64::try_from(r.duration_ms).unwrap_or(i64::MAX))
+        .execute(&mut *conn)
+        .await?;
+    }
+    if prune {
+        let keep: Vec<&str> = releases.iter().map(|r| r.mbid.as_str()).collect();
+        let rows = sqlx::query(pq(
+            "SELECT r.id, r.mbid, al.release_mbid FROM album_release r
+             JOIN album_meta al ON al.content_id = r.album_content_id
+             WHERE r.album_content_id = ?1",
+        ))
+        .bind(&key)
+        .fetch_all(&mut *conn)
+        .await?;
+        for row in rows {
+            let mbid: String = row.try_get("mbid")?;
+            let pinned: Option<String> = row.try_get("release_mbid")?;
+            if !keep.contains(&mbid.as_str()) && pinned.as_deref() != Some(mbid.as_str()) {
+                sqlx::query(pq("DELETE FROM album_release WHERE id = ?1"))
+                    .bind(row.try_get::<i64, _>("id")?)
+                    .execute(&mut *conn)
+                    .await?;
+            }
+        }
+    }
+    Ok(())
+}
+
+impl MusicRepo {
+    /// Store an album's pressings (all of them, from a metadata fetch).
+    ///
+    /// # Errors
+    /// Returns a [`DbError`] on write failure.
+    pub async fn set_album_releases(
+        &self,
+        album: ContentId,
+        releases: Vec<NewRelease>,
+    ) -> Result<()> {
+        self.write(move |conn| {
+            Box::pin(async move { store_releases(conn, album, &releases, true).await })
+        })
+        .await
+    }
+
+    /// Store the pressings of many albums in one transaction (a migration),
+    /// keeping their given ids.
+    ///
+    /// # Errors
+    /// Returns a [`DbError`] on write failure.
+    pub async fn set_many_album_releases(
+        &self,
+        batch: Vec<(ContentId, Vec<NewRelease>)>,
+    ) -> Result<()> {
+        self.write(move |conn| {
+            Box::pin(async move {
+                for (album, releases) in &batch {
+                    store_releases(conn, *album, releases, false).await?;
+                }
+                Ok(())
+            })
+        })
+        .await
+    }
+
+    /// The pressings of the given albums, by album.
+    ///
+    /// # Errors
+    /// Returns a [`DbError`] on query failure.
+    pub async fn releases_for_albums(
+        &self,
+        albums: &[ContentId],
+    ) -> Result<HashMap<ContentId, Vec<cellarr_core::AlbumRelease>>> {
+        let mut out: HashMap<ContentId, Vec<cellarr_core::AlbumRelease>> = HashMap::new();
+        for chunk in albums.chunks(400) {
+            let marks = (1..=chunk.len())
+                .map(|i| format!("?{i}"))
+                .collect::<Vec<_>>()
+                .join(",");
+            let sql = format!(
+                "SELECT * FROM album_release WHERE album_content_id IN ({marks}) ORDER BY id"
+            );
+            let mut q = sqlx::query(pq(&sql));
+            for id in chunk {
+                q = q.bind(id.to_string());
+            }
+            for row in q.fetch_all(&self.pool).await? {
+                let r = row_to_release(row)?;
+                out.entry(r.album_content_id).or_default().push(r);
+            }
+        }
+        Ok(out)
+    }
+
+    /// Pin a pressing (or clear the pin with `None`) and say whether only it will do.
+    ///
+    /// # Errors
+    /// Returns a [`DbError`] on write failure.
+    pub async fn pin_release(
+        &self,
+        album: ContentId,
+        release_mbid: Option<String>,
+        any_release_ok: bool,
+    ) -> Result<()> {
+        self.write(move |conn| {
+            Box::pin(async move {
+                sqlx::query(pq(
+                    "UPDATE album_meta SET release_mbid = ?2, any_release_ok = ?3 WHERE content_id = ?1",
+                ))
+                .bind(album.to_string())
+                .bind(release_mbid)
+                .bind(i64::from(any_release_ok))
+                .execute(&mut *conn)
+                .await?;
+                Ok(())
+            })
+        })
+        .await
+    }
 }

@@ -8,8 +8,8 @@
 //! against, so tag ids referenced by content and by tag-scoped config survive a
 //! restart.
 
-use cellarr_core::Tag;
 use crate::dialect::{pq, DbPool};
+use cellarr_core::Tag;
 use sqlx::Row;
 
 use crate::error::Result;
@@ -87,10 +87,11 @@ impl TagRepo {
                         return Ok(());
                     }
                     // Assign the next dense id (MAX + 1, starting at 1).
-                    let next: i64 = sqlx::query(&pq("SELECT COALESCE(MAX(id), 0) + 1 AS next FROM tag"))
-                        .fetch_one(&mut *conn)
-                        .await?
-                        .try_get("next")?;
+                    let next: i64 =
+                        sqlx::query(&pq("SELECT COALESCE(MAX(id), 0) + 1 AS next FROM tag"))
+                            .fetch_one(&mut *conn)
+                            .await?
+                            .try_get("next")?;
                     sqlx::query(&pq("INSERT INTO tag (id, label) VALUES (?1, ?2)"))
                         .bind(next)
                         .bind(&label)
@@ -181,9 +182,10 @@ impl TagRepo {
             .join(",");
         // Own the translated SQL: on SQLite `pq` borrows the `format!` temporary,
         // so `.to_string()` keeps it alive for the `q` borrow below.
-        let sql =
-            pq(&format!("SELECT label FROM tag WHERE id IN ({placeholders}) ORDER BY id ASC"))
-                .to_string();
+        let sql = pq(&format!(
+            "SELECT label FROM tag WHERE id IN ({placeholders}) ORDER BY id ASC"
+        ))
+        .to_string();
         let mut q = sqlx::query(&sql);
         for id in ids {
             q = q.bind(i64::from(*id));

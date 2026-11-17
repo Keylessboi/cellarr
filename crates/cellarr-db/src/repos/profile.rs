@@ -1,12 +1,12 @@
 //! The quality-profile / custom-format repository.
 
+use crate::dialect::{pq, DbPool};
 use async_trait::async_trait;
 use cellarr_core::repo::ProfileRepository;
 use cellarr_core::{
     CustomFormat, CustomFormatId, DelayProfile, DelayProfileId, QualityDefinition, QualityProfile,
     QualityProfileId, QualityRanking, ReleaseProfile, ReleaseProfileId,
 };
-use crate::dialect::{pq, DbPool};
 use sqlx::Row;
 
 use crate::error::{DbError, Result};
@@ -37,8 +37,8 @@ impl ProfileRepo {
                 Box::pin(async move {
                     sqlx::query(&pq(
                         "INSERT INTO quality_profile (id, name, body) VALUES (?1, ?2, ?3)
-                         ON CONFLICT(id) DO UPDATE SET name = excluded.name, body = excluded.body"),
-                    )
+                         ON CONFLICT(id) DO UPDATE SET name = excluded.name, body = excluded.body",
+                    ))
                     .bind(id)
                     .bind(name)
                     .bind(body)
@@ -94,8 +94,8 @@ impl ProfileRepo {
                     sqlx::query(&pq(
                         "INSERT INTO custom_format (id, name, score, body) VALUES (?1, ?2, ?3, ?4)
                          ON CONFLICT(id) DO UPDATE SET
-                            name = excluded.name, score = excluded.score, body = excluded.body"),
-                    )
+                            name = excluded.name, score = excluded.score, body = excluded.body",
+                    ))
                     .bind(id)
                     .bind(name)
                     .bind(score)

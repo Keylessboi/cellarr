@@ -140,6 +140,77 @@ fn ids(body: &Value, key: &str) -> Vec<i64> {
         .unwrap_or_default()
 }
 
+/// How many albums one Search Sniper run searches (`CELLARR_SEARCH_SNIPER_COUNT`).
+fn sniper_count() -> usize {
+    std::env::var("CELLARR_SEARCH_SNIPER_COUNT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .filter(|n: &usize| *n > 0)
+        .unwrap_or(5)
+}
+
+/// Albums Search Sniper picked recently, so consecutive runs spread out.
+static SNIPED: std::sync::Mutex<Vec<(cellarr_core::ContentId, std::time::Instant)>> =
+    std::sync::Mutex::new(Vec::new());
+
+/// `SearchSniper` (a Tubifarry command, which installs often schedule by hand):
+/// search a few randomly chosen wanted albums. Done natively, because it acts
+/// on the library, and the library is cellarr's.
+async fn search_sniper(state: &AppState) -> ApiResult<(Vec<String>, String)> {
+    let today = time::OffsetDateTime::now_utc().date().to_string();
+    let music = state.db.music();
+    let (_, wanted) = music
+        .missing_albums(&today, cellarr_db::AlbumSort::Id, true, 0, 1_000_000)
+        .await?;
+    let day = std::time::Duration::from_secs(24 * 3600);
+    let recent: Vec<cellarr_core::ContentId> = {
+        let mut g = SNIPED
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        g.retain(|(_, at)| at.elapsed() < day);
+        g.iter().map(|(c, _)| *c).collect()
+    };
+    let mut eligible: Vec<_> = wanted
+        .into_iter()
+        .filter(|a| !recent.contains(&a.content_id))
+        .collect();
+    let collected = eligible.len();
+    // A small xorshift from the clock is plenty for picking a few albums.
+    let mut seed = time::OffsetDateTime::now_utc().unix_timestamp_nanos() as u64 | 1;
+    let mut next = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed
+    };
+    let take = sniper_count().min(eligible.len());
+    for i in 0..take {
+        let j = i + (next() as usize) % (eligible.len() - i);
+        eligible.swap(i, j);
+    }
+    let mut jobs = Vec::new();
+    for album in eligible.into_iter().take(take) {
+        jobs.push(
+            queue_job(
+                state,
+                JobKind::ManualSearch {
+                    content_id: album.content_id.to_string(),
+                },
+            )
+            .await?,
+        );
+        SNIPED
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push((album.content_id, std::time::Instant::now()));
+    }
+    let message = format!(
+        "Collected {collected} eligible album(s). Queued {} album(s) for search",
+        jobs.len()
+    );
+    Ok((jobs, message))
+}
+
 /// Turn a command into the jobs that carry it out. `Ok(None)` is a command that
 /// is recognized but has nothing to do.
 async fn jobs_for(state: &AppState, name: &str, body: &Value) -> ApiResult<Option<Vec<String>>> {
@@ -177,6 +248,37 @@ async fn jobs_for(state: &AppState, name: &str, body: &Value) -> ApiResult<Optio
         "missingalbumsearch" | "cutoffunmetalbumsearch" => Ok(Some(vec![
             queue_job(state, JobKind::MissingItemSearch).await?,
         ])),
+        "refreshalbum" => {
+            // An album is refreshed with its artist (that is where its release
+            // groups come from); its track list is filled afresh.
+            let mut ids_wanted = ids(body, "albumIds");
+            if let Some(one) = body.get("albumId").and_then(Value::as_i64) {
+                ids_wanted.push(one);
+            }
+            ids_wanted.sort_unstable();
+            ids_wanted.dedup();
+            let mut jobs = Vec::new();
+            let mut artists = std::collections::BTreeSet::new();
+            for id in ids_wanted {
+                let album = music
+                    .album(id)
+                    .await?
+                    .ok_or_else(|| ApiError::NotFound(format!("album {id} not found")))?;
+                if artists.insert(album.artist_content_id.to_string()) {
+                    jobs.push(
+                        queue_job(
+                            state,
+                            JobKind::RefreshArtist {
+                                content_id: album.artist_content_id.to_string(),
+                            },
+                        )
+                        .await?,
+                    );
+                }
+            }
+            jobs.push(queue_job(state, JobKind::FillTracks).await?);
+            Ok(Some(jobs))
+        }
         "refreshartist" => {
             let jobs = match artist_id {
                 Some(id) => {
@@ -299,7 +401,7 @@ fn resource(id: i64, name: &str, body: &Value, queued: OffsetDateTime, status: &
         "id": id,
         "name": name,
         "commandName": name,
-        "message": "",
+        "message": body.get("completionMessage").and_then(Value::as_str).unwrap_or_default(),
         "body": body,
         "priority": "normal",
         "status": status,
@@ -329,7 +431,16 @@ pub(crate) async fn create(
         .filter(|n| !n.is_empty())
         .ok_or_else(|| ApiError::BadRequest("a command needs a name".into()))?
         .to_string();
-    let jobs = jobs_for(state, &name, &body).await?.unwrap_or_default();
+    let mut body = body;
+    let jobs = if name.eq_ignore_ascii_case("searchsniper") {
+        let (jobs, message) = search_sniper(state).await?;
+        if let Some(o) = body.as_object_mut() {
+            o.insert("completionMessage".into(), json!(message));
+        }
+        jobs
+    } else {
+        jobs_for(state, &name, &body).await?.unwrap_or_default()
+    };
     let id = state
         .lidarr_commands
         .record(&name, body.clone(), jobs.clone());

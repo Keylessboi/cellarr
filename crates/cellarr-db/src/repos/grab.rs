@@ -181,7 +181,9 @@ impl GrabRepo {
         rows.into_iter()
             .map(|r| {
                 let id: String = r.try_get("grab_id")?;
-                Ok(GrabId::from_uuid(crate::convert::parse_uuid("grab_id", &id)?))
+                Ok(GrabId::from_uuid(crate::convert::parse_uuid(
+                    "grab_id", &id,
+                )?))
             })
             .collect()
     }

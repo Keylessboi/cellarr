@@ -1,12 +1,12 @@
 //! The append-only `decision_log` repository.
 
+use crate::dialect::{pq, DbPool};
 use async_trait::async_trait;
 use cellarr_core::decision::Decision;
 use cellarr_core::history::DecisionLogRecord;
 use cellarr_core::pipeline::Transition;
 use cellarr_core::repo::DecisionLogRepository;
 use cellarr_core::PipelineRunId;
-use crate::dialect::{pq, DbPool};
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -31,10 +31,8 @@ impl DecisionLogRepo {
     /// # Errors
     /// Returns a [`DbError`] on query/decode failure.
     pub async fn for_run(&self, run_id: PipelineRunId) -> Result<Vec<DecisionLogRecord>> {
-        let rows = sqlx::query(&pq(
-            "SELECT at, run_id, transition, decision, note
-             FROM decision_log WHERE run_id = ?1 ORDER BY at ASC, id ASC"),
-        )
+        let rows = sqlx::query(&pq("SELECT at, run_id, transition, decision, note
+             FROM decision_log WHERE run_id = ?1 ORDER BY at ASC, id ASC"))
         .bind(run_id.to_string())
         .fetch_all(&self.pool)
         .await?;

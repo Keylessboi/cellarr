@@ -7,8 +7,8 @@
 //! carries the password *hash* only — the plaintext is never modelled, so it can
 //! never reach this layer.
 
-use cellarr_core::AuthConfig;
 use crate::dialect::{pq, DbPool};
+use cellarr_core::AuthConfig;
 use sqlx::Row;
 
 use crate::error::{DbError, Result};
@@ -65,10 +65,8 @@ impl AuthRepo {
         self.writer
             .submit(move |conn| {
                 Box::pin(async move {
-                    sqlx::query(&pq(
-                        "INSERT INTO auth_config (id, body) VALUES (1, ?1)
-                         ON CONFLICT(id) DO UPDATE SET body = excluded.body"),
-                    )
+                    sqlx::query(&pq("INSERT INTO auth_config (id, body) VALUES (1, ?1)
+                         ON CONFLICT(id) DO UPDATE SET body = excluded.body"))
                     .bind(body)
                     .execute(&mut *conn)
                     .await?;
@@ -97,8 +95,8 @@ impl AuthRepo {
                 Box::pin(async move {
                     sqlx::query(&pq(
                         "INSERT INTO auth_session (token, username, created_at, expires_at)
-                         VALUES (?1, ?2, ?3, ?4)"),
-                    )
+                         VALUES (?1, ?2, ?3, ?4)",
+                    ))
                     .bind(token)
                     .bind(username)
                     .bind(created_at)
@@ -118,10 +116,8 @@ impl AuthRepo {
     /// # Errors
     /// Returns a [`DbError`] on query/decode failure.
     pub async fn get_session(&self, token: &str, now: i64) -> Result<Option<AuthSession>> {
-        let row = sqlx::query(&pq(
-            "SELECT username, expires_at FROM auth_session
-             WHERE token = ?1 AND expires_at > ?2"),
-        )
+        let row = sqlx::query(&pq("SELECT username, expires_at FROM auth_session
+             WHERE token = ?1 AND expires_at > ?2"))
         .bind(token)
         .bind(now)
         .fetch_optional(&self.pool)
@@ -198,10 +194,11 @@ impl AuthRepo {
         self.writer
             .submit(move |conn| {
                 Box::pin(async move {
-                    let result = sqlx::query(&pq("DELETE FROM auth_session WHERE expires_at <= ?1"))
-                        .bind(now)
-                        .execute(&mut *conn)
-                        .await?;
+                    let result =
+                        sqlx::query(&pq("DELETE FROM auth_session WHERE expires_at <= ?1"))
+                            .bind(now)
+                            .execute(&mut *conn)
+                            .await?;
                     removed_inner.store(result.rows_affected(), Ordering::SeqCst);
                     Ok(())
                 })

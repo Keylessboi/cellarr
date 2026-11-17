@@ -7,9 +7,9 @@
 //! the same release never resets its clock — and the row is cleared once the
 //! release is grabbed (or the held release vanishes from the indexer).
 
+use crate::dialect::{pq, DbPool};
 use cellarr_core::blocklist::release_key;
 use cellarr_core::{ContentId, Protocol, Release};
-use crate::dialect::{pq, DbPool};
 use sqlx::Row;
 
 use crate::error::Result;
@@ -97,8 +97,8 @@ impl PendingReleaseRepo {
 
         // Read back the effective (possibly earlier) first-seen instant.
         let row = sqlx::query(&pq(
-            "SELECT first_seen_at FROM pending_release WHERE content_id = ?1 AND release_key = ?2"),
-        )
+            "SELECT first_seen_at FROM pending_release WHERE content_id = ?1 AND release_key = ?2",
+        ))
         .bind(&cid)
         .bind(&key)
         .fetch_one(&self.pool)
@@ -114,8 +114,8 @@ impl PendingReleaseRepo {
     pub async fn list_for_content(&self, content_id: ContentId) -> Result<Vec<PendingRelease>> {
         let rows = sqlx::query(&pq(
             "SELECT content_id, release_key, first_seen_at, protocol, title
-             FROM pending_release WHERE content_id = ?1 ORDER BY first_seen_at ASC"),
-        )
+             FROM pending_release WHERE content_id = ?1 ORDER BY first_seen_at ASC",
+        ))
         .bind(content_id.to_string())
         .fetch_all(&self.pool)
         .await?;
@@ -140,8 +140,8 @@ impl PendingReleaseRepo {
             .submit(move |conn| {
                 Box::pin(async move {
                     let result = sqlx::query(&pq(
-                        "DELETE FROM pending_release WHERE content_id = ?1 AND release_key = ?2"),
-                    )
+                        "DELETE FROM pending_release WHERE content_id = ?1 AND release_key = ?2",
+                    ))
                     .bind(cid)
                     .bind(key)
                     .execute(&mut *conn)

@@ -74,8 +74,8 @@ pub use media::{
 };
 pub use monitor::{EpisodeFacts, MonitorOption};
 pub use music::{
-    lidarr_quality_id, lidarr_quality_name, normalize_name, Album, Artist, MetadataProfile, Track,
-    TrackFile,
+    lidarr_quality_id, lidarr_quality_name, normalize_name, Album, AlbumRelease, Artist,
+    MetadataProfile, Track, TrackFile,
 };
 pub use notification::{
     config_accepts, NotificationEvent, NotificationHealth, NotificationMessage,
