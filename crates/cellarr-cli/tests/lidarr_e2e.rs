@@ -1068,3 +1068,330 @@ fn urlencode(s: &str) -> String {
         })
         .collect()
 }
+
+/// A field's type as the production clients parse it. Octo (in particular)
+/// treats a value of the wrong kind as an error, so each must be exactly right.
+#[derive(Clone, Copy, Debug)]
+enum Kind {
+    /// A 32-bit integer (Octo's `Int32`).
+    Int,
+    /// A string.
+    Str,
+    /// A boolean.
+    Bool,
+    /// An RFC 3339 date string.
+    Date,
+    /// An object.
+    Obj,
+    /// An array.
+    Arr,
+}
+
+/// Check `field` of `v` (dotted for nesting) is absent/null-tolerant or of `kind`;
+/// `required` fields must be present and non-null.
+fn check(
+    problems: &mut Vec<String>,
+    what: &str,
+    v: &Value,
+    field: &str,
+    kind: Kind,
+    required: bool,
+) {
+    let mut cur = v;
+    for part in field.split('.') {
+        cur = &cur[part];
+    }
+    let ok = match (cur, kind) {
+        (Value::Null, _) => !required,
+        (Value::Number(n), Kind::Int) => n.as_i64().is_some_and(|i| i32::try_from(i).is_ok()),
+        (Value::String(_), Kind::Str) => true,
+        (Value::String(s), Kind::Date) => {
+            s.len() >= 19 && s.as_bytes()[4] == b'-' && s.contains('T')
+        }
+        (Value::Bool(_), Kind::Bool) => true,
+        (Value::Object(_), Kind::Obj) => true,
+        (Value::Array(_), Kind::Arr) => true,
+        _ => false,
+    };
+    if !ok {
+        problems.push(format!(
+            "{what}: {field} should be {kind:?}{}, is {cur}",
+            if required { " (required)" } else { "" }
+        ));
+    }
+}
+
+#[tokio::test]
+async fn every_field_the_production_clients_read_has_the_type_they_parse() {
+    use Kind::*;
+    let Fixture {
+        api,
+        album_id,
+        stop,
+        serve,
+        _tmp,
+        ..
+    } = fixture_for("Kid A").await;
+    assert!(
+        within(60, || async {
+            api.get(&format!("/trackfile?albumId={album_id}"))
+                .await
+                .as_array()
+                .is_some_and(|f| f.len() == 3)
+        })
+        .await,
+        "the album imports"
+    );
+    let mut p = Vec::new();
+
+    // Octo: get_options, system status.
+    for r in api.get("/rootfolder").await.as_array().unwrap() {
+        check(&mut p, "rootfolder", r, "id", Int, true);
+        check(&mut p, "rootfolder", r, "path", Str, true);
+    }
+    for path in ["/qualityprofile", "/metadataprofile"] {
+        for r in api.get(path).await.as_array().unwrap() {
+            check(&mut p, path, r, "id", Int, true);
+            check(&mut p, path, r, "name", Str, true);
+        }
+    }
+    let status = api.get("/system/status").await;
+    check(&mut p, "system/status", &status, "version", Str, true);
+    for path in [
+        "/config/downloadclient",
+        "/config/metadataprovider",
+        "/config/mediamanagement",
+    ] {
+        let v = api.get(path).await;
+        check(&mut p, path, &v, "id", Int, true);
+    }
+
+    // Octo + on-heart: artists.
+    let artists = api.get("/artist").await;
+    for a in artists.as_array().unwrap() {
+        check(&mut p, "artist", a, "id", Int, true);
+        check(&mut p, "artist", a, "artistName", Str, true);
+        check(&mut p, "artist", a, "foreignArtistId", Str, true);
+        check(&mut p, "artist", a, "path", Str, false);
+        check(&mut p, "artist", a, "monitored", Bool, true);
+        check(&mut p, "artist", a, "monitorNewItems", Str, false);
+        check(&mut p, "artist", a, "added", Date, false);
+        check(&mut p, "artist", a, "statistics.trackFileCount", Int, false);
+    }
+    let lookup = api.get("/artist/lookup?term=radiohead").await;
+    for a in lookup.as_array().unwrap() {
+        check(&mut p, "artist/lookup", a, "foreignArtistId", Str, true);
+        check(&mut p, "artist/lookup", a, "folder", Str, false);
+    }
+
+    // Octo: albums, with pressings and pins.
+    let album = api.get(&format!("/album/{album_id}")).await;
+    for (f, k, req) in [
+        ("id", Int, true),
+        ("foreignAlbumId", Str, true),
+        ("title", Str, true),
+        ("monitored", Bool, true),
+        ("anyReleaseOk", Bool, true),
+        ("artistId", Int, true),
+        ("releases", Arr, true),
+        ("releaseDate", Date, false),
+        ("artist.artistName", Str, true),
+        ("statistics.trackCount", Int, true),
+        ("statistics.trackFileCount", Int, true),
+    ] {
+        check(&mut p, "album", &album, f, k, req);
+    }
+    for r in album["releases"].as_array().unwrap() {
+        check(&mut p, "album.releases", r, "id", Int, true);
+        check(&mut p, "album.releases", r, "foreignReleaseId", Str, true);
+        check(&mut p, "album.releases", r, "title", Str, true);
+        check(&mut p, "album.releases", r, "monitored", Bool, true);
+    }
+    for path in [
+        format!("/album?artistId={}", album["artistId"]),
+        format!("/album?foreignAlbumId={KID_A}"),
+    ] {
+        assert!(
+            !api.get(&path).await.as_array().unwrap().is_empty(),
+            "{path}"
+        );
+    }
+
+    // Octo: tracks and track files (asked for as `trackFile`, too).
+    for t in api
+        .get(&format!("/track?albumId={album_id}"))
+        .await
+        .as_array()
+        .unwrap()
+    {
+        check(&mut p, "track", t, "id", Int, true);
+        check(&mut p, "track", t, "trackFileId", Int, false);
+        check(&mut p, "track", t, "trackNumber", Str, true);
+        check(&mut p, "track", t, "title", Str, true);
+    }
+    for path in [
+        format!("/trackFile?albumId={album_id}"),
+        format!("/trackfile?artistId={}", album["artistId"]),
+    ] {
+        let files = api.get(&path).await;
+        assert!(!files.as_array().unwrap().is_empty(), "{path}");
+        for f in files.as_array().unwrap() {
+            check(&mut p, &path, f, "id", Int, true);
+            check(&mut p, &path, f, "artistId", Int, true);
+            check(&mut p, &path, f, "albumId", Int, true);
+            check(&mut p, &path, f, "path", Str, true);
+            check(&mut p, &path, f, "size", Int, true);
+            check(&mut p, &path, f, "quality.quality.name", Str, true);
+        }
+    }
+
+    // Octo + the maintenance script: history, by album and by artist and event.
+    let page = api
+        .get(&format!(
+            "/history?albumId={album_id}&eventType=1&pageSize=1"
+        ))
+        .await;
+    check(&mut p, "history", &page, "totalRecords", Int, true);
+    check(&mut p, "history", &page, "records", Arr, true);
+    assert!(
+        !page["records"].as_array().unwrap().is_empty(),
+        "eventType=1 finds the grab: {page}"
+    );
+    for r in page["records"].as_array().unwrap() {
+        for (f, k, req) in [
+            ("id", Int, true),
+            ("eventType", Str, true),
+            ("albumId", Int, true),
+            ("artistId", Int, true),
+            ("trackId", Int, false),
+            ("downloadId", Str, false),
+            ("sourceTitle", Str, true),
+            ("date", Date, true),
+            ("data", Obj, false),
+        ] {
+            check(&mut p, "history", r, f, k, req);
+        }
+    }
+    assert!(
+        api.get(&format!(
+            "/history?albumId={album_id}&eventType=8&pageSize=1"
+        ))
+        .await["records"]
+            .as_array()
+            .is_some_and(|r| !r.is_empty()),
+        "eventType=8 (downloadImported) is recorded"
+    );
+    let by_artist = api
+        .get(&format!("/history/artist?artistId={}", album["artistId"]))
+        .await;
+    assert!(by_artist.as_array().is_some(), "history/artist is an array");
+
+    // Octo: queue details; the maintenance script pages the queue.
+    for q in api.get("/queue/details").await.as_array().unwrap() {
+        for (f, k, req) in [
+            ("id", Int, true),
+            ("artistId", Int, false),
+            ("albumId", Int, false),
+            ("downloadId", Str, false),
+            ("title", Str, true),
+            ("status", Str, false),
+            ("trackedDownloadState", Str, false),
+            ("trackedDownloadStatus", Str, false),
+            ("size", Int, false),
+            ("sizeleft", Int, false),
+            ("outputPath", Str, false),
+            ("protocol", Str, false),
+            ("added", Date, false),
+        ] {
+            check(&mut p, "queue/details", q, f, k, req);
+        }
+    }
+    let queue = api.get("/queue?page=1&pageSize=50&includeUnknownArtistItems=true&includeArtist=true&includeAlbum=true").await;
+    check(&mut p, "queue", &queue, "totalRecords", Int, true);
+
+    // Commands, as Octo and the cronjobs poll them.
+    let cmd = api
+        .post_ok(
+            "/command",
+            json!({"name": "RefreshAlbum", "albumId": album_id, "albumIds": [album_id]}),
+        )
+        .await;
+    for (f, k, req) in [
+        ("id", Int, true),
+        ("name", Str, true),
+        ("status", Str, true),
+        ("queued", Date, true),
+        ("started", Date, false),
+        ("ended", Date, false),
+        ("trigger", Str, false),
+        ("body", Obj, true),
+    ] {
+        check(&mut p, "command", &cmd, f, k, req);
+    }
+    let sniper = api
+        .post_ok("/command", json!({"name": "SearchSniper"}))
+        .await;
+    assert!(
+        sniper["message"]
+            .as_str()
+            .is_some_and(|m| m.starts_with("Collected ")),
+        "SearchSniper reports like Tubifarry's: {sniper}"
+    );
+
+    // Octo: health checks.
+    for h in api.get("/health").await.as_array().unwrap() {
+        check(&mut p, "health", h, "source", Str, true);
+        check(&mut p, "health", h, "type", Str, true);
+        check(&mut p, "health", h, "message", Str, true);
+        check(&mut p, "health", h, "wikiUrl", Str, false);
+    }
+
+    // Octo: interactive search results, read field by field.
+    for r in api
+        .get(&format!("/release?albumId={album_id}"))
+        .await
+        .as_array()
+        .unwrap()
+    {
+        for (f, k, req) in [
+            ("guid", Str, true),
+            ("indexerId", Int, true),
+            ("title", Str, true),
+            ("indexer", Str, false),
+            ("quality.quality.name", Str, false),
+            ("size", Int, false),
+            ("seeders", Int, false),
+            ("leechers", Int, false),
+            ("protocol", Str, true),
+            ("rejected", Bool, false),
+        ] {
+            check(&mut p, "release", r, f, k, req);
+        }
+    }
+
+    // The mass search and the maintenance script: wanted, paged.
+    let wanted = api
+        .get("/wanted/missing?page=1&pageSize=1000&sortKey=id&sortDirection=ascending")
+        .await;
+    check(&mut p, "wanted/missing", &wanted, "totalRecords", Int, true);
+    check(&mut p, "wanted/missing", &wanted, "records", Arr, true);
+
+    // Plain liveness, both spellings the cluster uses.
+    assert!(api
+        .http
+        .get(format!("{}/ping", api.base))
+        .send()
+        .await
+        .unwrap()
+        .status()
+        .is_success());
+
+    assert!(
+        p.is_empty(),
+        "{} field(s) would break a production client:\n  {}",
+        p.len(),
+        p.join("\n  ")
+    );
+    stop.send(()).unwrap();
+    serve.await.unwrap().expect("clean shutdown");
+}
