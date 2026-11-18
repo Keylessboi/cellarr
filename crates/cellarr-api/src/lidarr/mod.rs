@@ -451,7 +451,7 @@ const NOT_LIDARR: &[&str] = &[
     "titleWithoutYear",
 ];
 
-fn strip_foreign(v: &mut Value) {
+pub(crate) fn strip_foreign(v: &mut Value) {
     match v {
         Value::Object(m) => {
             for k in NOT_LIDARR {
@@ -513,14 +513,17 @@ async fn compat(req: Request<axum::body::Body>, next: Next) -> Response {
         }
         return Response::from_parts(parts, body);
     }
-    let Ok(bytes) = axum::body::to_bytes(body, 512 * 1024 * 1024).await else {
+    // Streamed bodies (no exact size: the whole-history walks) and large ones
+    // (the album dump) pass through untouched. Their handlers emit Lidarr-shaped
+    // rows themselves, and collecting them here would hold the entire answer,
+    // gigabytes for a big history, in memory.
+    match axum::body::HttpBody::size_hint(&body).exact() {
+        Some(n) if n <= 8 * 1024 * 1024 => {}
+        _ => return Response::from_parts(parts, body),
+    }
+    let Ok(bytes) = axum::body::to_bytes(body, 8 * 1024 * 1024).await else {
         return Response::from_parts(parts, axum::body::Body::empty());
     };
-    // Large list bodies (the album dump) are not rewritten: they carry none of the
-    // fields below, and re-parsing tens of megabytes would defeat the streaming.
-    if bytes.len() > 8 * 1024 * 1024 {
-        return Response::from_parts(parts, axum::body::Body::from(bytes));
-    }
     let Ok(mut value) = serde_json::from_slice::<Value>(&bytes) else {
         return Response::from_parts(parts, axum::body::Body::from(bytes));
     };

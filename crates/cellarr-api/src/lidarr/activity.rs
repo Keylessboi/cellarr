@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use axum::extract::{Path, Query, State};
 use axum::Json;
-use cellarr_core::{Album, Artist, ContentId, HistoryEvent, HistoryRecord};
+use cellarr_core::{Album, Artist, ContentId};
 use cellarr_db::AlbumSort;
 use serde_json::{json, Value};
 
@@ -247,189 +247,6 @@ pub(crate) async fn queue_remove_bulk(
 }
 
 // --- history -------------------------------------------------------------------
-
-/// Lidarr's numeric history event types.
-fn event_kinds(code: &str) -> &'static [&'static str] {
-    match code {
-        "1" | "grabbed" => &["grabbed"],
-        "3" | "trackFileImported" => &["imported", "upgraded"],
-        "4" | "downloadFailed" => &["download_failed"],
-        "5" | "trackFileDeleted" => &["deleted"],
-        "8" | "downloadImported" => &["imported", "upgraded"],
-        _ => &[],
-    }
-}
-
-fn event_name(e: &HistoryEvent) -> (&'static str, u32) {
-    match e {
-        HistoryEvent::Grabbed { .. } => ("grabbed", 1),
-        HistoryEvent::Imported { .. } | HistoryEvent::Upgraded { .. } => ("downloadImported", 8),
-        HistoryEvent::DownloadFailed { .. } => ("downloadFailed", 4),
-        HistoryEvent::Deleted { .. } => ("trackFileDeleted", 5),
-        _ => ("unknown", 0),
-    }
-}
-
-/// A stable id for a history row: the history stream has none of its own, so it
-/// is derived from what makes a row distinct.
-fn history_id(r: &HistoryRecord) -> i64 {
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    let key = format!(
-        "{}|{}|{}",
-        r.run_id,
-        r.at,
-        serde_json::to_string(&r.event).unwrap_or_default()
-    );
-    for b in key.bytes() {
-        h ^= u64::from(b);
-        h = h.wrapping_mul(0x0100_0000_01b3);
-    }
-    i64::try_from(h & 0x7fff_ffff).unwrap_or(0)
-}
-
-fn history_record(r: &HistoryRecord, library: &Library, embed: bool) -> Value {
-    let (name, _) = event_name(&r.event);
-    let at =
-        r.at.format(&time::format_description::well_known::Rfc3339)
-            .unwrap_or_default();
-    let title = library
-        .albums
-        .get(&r.content_id)
-        .map(|al| {
-            let artist = library
-                .artists
-                .get(&al.artist_content_id)
-                .map_or("", |a| a.name.as_str());
-            format!("{artist} - {}", al.title)
-        })
-        .unwrap_or_default();
-    let mut v = json!({
-        "id": history_id(r),
-        "albumId": 0,
-        "artistId": 0,
-        "trackId": 0,
-        "sourceTitle": title,
-        "quality": resources::quality_object("Unknown"),
-        "customFormats": [],
-        "customFormatScore": 0,
-        "qualityCutoffNotMet": false,
-        "date": at,
-        "downloadId": null,
-        "eventType": name,
-        "data": {},
-    });
-    library.attach(&mut v, r.content_id, embed);
-    v
-}
-
-pub(crate) async fn history(
-    State(fs): State<FaceState>,
-    Query(q): Params,
-) -> ApiResult<Json<Value>> {
-    let state = app(&fs);
-    let size = number(&q, "pageSize", 10).clamp(1, 1000);
-    let pg = number(&q, "page", 1).max(1);
-    // An id that names nothing yields an empty page, as in Lidarr, not an error:
-    // clients ask about albums that may have been removed since.
-    let empty = || page(Vec::new(), 0, pg, size, "date", "descending");
-    let album = match param(&q, "albumId")
-        .and_then(|v| v.parse::<i64>().ok())
-        .filter(|i| *i != 0)
-    {
-        Some(id) => match state.db.music().album(id).await? {
-            Some(a) => Some(a.content_id),
-            None => return Ok(Json(empty())),
-        },
-        None => None,
-    };
-    let artist = match param(&q, "artistId")
-        .and_then(|v| v.parse::<i64>().ok())
-        .filter(|i| *i != 0)
-    {
-        Some(id) => match state.db.music().artist(id).await? {
-            Some(a) => Some(a.content_id),
-            None => return Ok(Json(empty())),
-        },
-        None => None,
-    };
-    let kinds: Vec<&str> = q
-        .iter()
-        .filter(|(k, _)| k.eq_ignore_ascii_case("eventType"))
-        .flat_map(|(_, v)| event_kinds(v).iter().copied())
-        .collect();
-    let (total, records) = state
-        .db
-        .music()
-        .history_page(album, artist, &kinds, None, (pg - 1) * size, size)
-        .await?;
-    let ids: Vec<ContentId> = records.iter().map(|r| r.content_id).collect();
-    let library = Library::load(state, &ids).await?;
-    let embed = flag(&q, "includeAlbum") || flag(&q, "includeArtist");
-    Ok(Json(page(
-        records
-            .iter()
-            .map(|r| history_record(r, &library, embed))
-            .collect(),
-        total,
-        pg,
-        size,
-        param(&q, "sortKey").unwrap_or("date"),
-        param(&q, "sortDirection").unwrap_or("descending"),
-    )))
-}
-
-pub(crate) async fn history_since(
-    State(fs): State<FaceState>,
-    Query(q): Params,
-) -> ApiResult<Json<Vec<Value>>> {
-    let state = app(&fs);
-    let since = param(&q, "date").ok_or_else(|| ApiError::BadRequest("date is required".into()))?;
-    let kinds: Vec<&str> = param(&q, "eventType")
-        .map(|c| event_kinds(c).to_vec())
-        .unwrap_or_default();
-    let (_, records) = state
-        .db
-        .music()
-        .history_page(None, None, &kinds, Some(since), 0, 1000)
-        .await?;
-    let ids: Vec<ContentId> = records.iter().map(|r| r.content_id).collect();
-    let library = Library::load(state, &ids).await?;
-    Ok(Json(
-        records
-            .iter()
-            .map(|r| history_record(r, &library, false))
-            .collect(),
-    ))
-}
-
-pub(crate) async fn history_artist(
-    State(fs): State<FaceState>,
-    Query(q): Params,
-) -> ApiResult<Json<Vec<Value>>> {
-    let state = app(&fs);
-    let id = param(&q, "artistId")
-        .and_then(|v| v.parse::<i64>().ok())
-        .ok_or_else(|| ApiError::BadRequest("artistId is required".into()))?;
-    let Some(artist) = state.db.music().artist(id).await? else {
-        return Ok(Json(Vec::new()));
-    };
-    let kinds: Vec<&str> = param(&q, "eventType")
-        .map(|c| event_kinds(c).to_vec())
-        .unwrap_or_default();
-    let (_, records) = state
-        .db
-        .music()
-        .history_page(None, Some(artist.content_id), &kinds, None, 0, 1000)
-        .await?;
-    let ids: Vec<ContentId> = records.iter().map(|r| r.content_id).collect();
-    let library = Library::load(state, &ids).await?;
-    Ok(Json(
-        records
-            .iter()
-            .map(|r| history_record(r, &library, false))
-            .collect(),
-    ))
-}
 
 // --- wanted --------------------------------------------------------------------
 
@@ -745,14 +562,33 @@ async fn render_music_history(
     embed_album: bool,
     embed_artist: bool,
 ) -> ApiResult<Vec<Value>> {
+    render_music_history_cached(
+        state,
+        rows,
+        embed_album,
+        embed_artist,
+        &mut HashMap::new(),
+        &mut HashMap::new(),
+    )
+    .await
+}
+
+/// [`render_music_history`] with the embedded albums and artists kept across
+/// calls, so a walk over many pages renders each album once.
+async fn render_music_history_cached(
+    state: &AppState,
+    rows: &[cellarr_db::MusicHistoryRow],
+    embed_album: bool,
+    embed_artist: bool,
+    albums: &mut HashMap<i64, Value>,
+    artists: &mut HashMap<i64, Value>,
+) -> ApiResult<Vec<Value>> {
     let music = state.db.music();
-    let mut albums: HashMap<i64, Value> = HashMap::new();
-    let mut artists: HashMap<i64, Value> = HashMap::new();
     if embed_album || embed_artist {
         let mut seen = std::collections::BTreeSet::new();
         let mut list = Vec::new();
         for r in rows {
-            if r.album_id > 0 && seen.insert(r.album_id) {
+            if r.album_id > 0 && !albums.contains_key(&r.album_id) && seen.insert(r.album_id) {
                 if let Some(a) = music.album(r.album_id).await? {
                     list.push(a);
                 }
@@ -814,12 +650,14 @@ fn history_filter(
     q: &std::collections::HashMap<String, String>,
     raw: &[(String, String)],
 ) -> cellarr_db::MusicHistoryFilter {
-    let mut f = cellarr_db::MusicHistoryFilter::default();
-    f.album_id = q
-        .get("albumId")
-        .and_then(|v| v.parse::<i64>().ok())
-        .filter(|i| *i != 0);
-    f.download_id = q.get("downloadId").filter(|d| !d.is_empty()).cloned();
+    let mut f = cellarr_db::MusicHistoryFilter {
+        album_id: q
+            .get("albumId")
+            .and_then(|v| v.parse::<i64>().ok())
+            .filter(|i| *i != 0),
+        download_id: q.get("downloadId").filter(|d| !d.is_empty()).cloned(),
+        ..Default::default()
+    };
     for (k, v) in raw {
         if k.eq_ignore_ascii_case("eventType") {
             for part in v.split(',') {
@@ -884,11 +722,125 @@ pub(crate) async fn music_history_page(
     })))
 }
 
+/// Every matching row as one JSON array, streamed to the client a page at a
+/// time. An artist's history can run to hundreds of thousands of rows, and with
+/// `includeAlbum` each carries its album: the whole answer can be gigabytes, so
+/// it is never held in memory. The first page is rendered before the response
+/// starts, so a bad query is still a proper error status; a failure later can
+/// only cut the stream short.
+async fn history_array(
+    state: &AppState,
+    filter: &cellarr_db::MusicHistoryFilter,
+    ascending: bool,
+    embed_album: bool,
+    embed_artist: bool,
+) -> ApiResult<axum::response::Response> {
+    use axum::response::IntoResponse;
+    let mut walk = HistoryWalk {
+        state: state.clone(),
+        filter: filter.clone(),
+        ascending,
+        embed_album,
+        embed_artist,
+        albums: HashMap::new(),
+        artists: HashMap::new(),
+        first: true,
+        done: false,
+    };
+    let head = walk.next_chunk().await?;
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Vec<u8>, std::io::Error>>(2);
+    tokio::spawn(async move {
+        if tx.send(Ok(head)).await.is_err() {
+            return;
+        }
+        while !walk.done {
+            let chunk = walk
+                .next_chunk()
+                .await
+                .map_err(|e| std::io::Error::other(e.to_string()));
+            let failed = chunk.is_err();
+            if tx.send(chunk).await.is_err() || failed {
+                return;
+            }
+        }
+    });
+    let body = axum::body::Body::from_stream(tokio_stream::wrappers::ReceiverStream::new(rx));
+    Ok((
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        body,
+    )
+        .into_response())
+}
+
+/// A keyset walk over music history, rendering one page of JSON at a time.
+struct HistoryWalk {
+    state: AppState,
+    filter: cellarr_db::MusicHistoryFilter,
+    ascending: bool,
+    embed_album: bool,
+    embed_artist: bool,
+    albums: HashMap<i64, Value>,
+    artists: HashMap<i64, Value>,
+    first: bool,
+    done: bool,
+}
+
+impl HistoryWalk {
+    const PAGE: u64 = 2000;
+    /// Embedded albums kept between pages; past this the cache starts over so
+    /// a walk across a whole library stays bounded.
+    const CACHE: usize = 1000;
+
+    async fn next_chunk(&mut self) -> ApiResult<Vec<u8>> {
+        let mut out = Vec::new();
+        if self.first {
+            out.push(b'[');
+        }
+        let (_, rows) = self
+            .state
+            .db
+            .music()
+            .music_history(&self.filter, self.ascending, 0, Self::PAGE)
+            .await?;
+        self.filter.after = rows.last().and_then(|r| Some((r.date.clone(), r.id?)));
+        if self.albums.len() > Self::CACHE {
+            self.albums.clear();
+            self.artists.clear();
+        }
+        let page = render_music_history_cached(
+            &self.state,
+            &rows,
+            self.embed_album,
+            self.embed_artist,
+            &mut self.albums,
+            &mut self.artists,
+        )
+        .await?;
+        for mut v in page {
+            super::strip_foreign(&mut v);
+            if !self.first {
+                out.push(b',');
+            }
+            self.first = false;
+            serde_json::to_writer(&mut out, &v).map_err(|e| ApiError::Internal(e.to_string()))?;
+        }
+        if (rows.len() as u64) < Self::PAGE || self.filter.after.is_none() {
+            if self.first {
+                // No rows at all: the opening bracket went out above.
+                self.first = false;
+            }
+            out.push(b']');
+            self.done = true;
+        }
+        Ok(out)
+    }
+}
+
 /// `GET /history/artist?artistId=[&albumId=][&eventType=]`: every row, newest first.
 pub(crate) async fn music_history_artist(
     State(fs): State<FaceState>,
     axum::extract::RawQuery(raw): axum::extract::RawQuery,
-) -> ApiResult<Json<Vec<Value>>> {
+) -> ApiResult<axum::response::Response> {
     let state = app(&fs);
     let pairs = query_pairs(raw.as_deref());
     let q: std::collections::HashMap<String, String> = pairs.iter().cloned().collect();
@@ -896,48 +848,36 @@ pub(crate) async fn music_history_artist(
     if filter.artist_ids.is_empty() {
         return Err(ApiError::BadRequest("artistId is required".into()));
     }
-    let (_, rows) = state
-        .db
-        .music()
-        .music_history(&filter, false, 0, 100_000)
-        .await?;
     let truthy = |k: &str| q.get(k).is_some_and(|v| v.eq_ignore_ascii_case("true"));
-    Ok(Json(
-        render_music_history(
-            state,
-            &rows,
-            truthy("includeAlbum"),
-            truthy("includeArtist"),
-        )
-        .await?,
-    ))
+    history_array(
+        state,
+        &filter,
+        false,
+        truthy("includeAlbum"),
+        truthy("includeArtist"),
+    )
+    .await
 }
 
 /// `GET /history/since?date=[&eventType=]`: every row on or after `date`, oldest first.
 pub(crate) async fn music_history_since(
     State(fs): State<FaceState>,
     axum::extract::RawQuery(raw): axum::extract::RawQuery,
-) -> ApiResult<Json<Vec<Value>>> {
+) -> ApiResult<axum::response::Response> {
     let state = app(&fs);
     let pairs = query_pairs(raw.as_deref());
     let q: std::collections::HashMap<String, String> = pairs.iter().cloned().collect();
     let mut filter = history_filter(&q, &pairs);
     filter.since = q.get("date").cloned();
-    let (_, rows) = state
-        .db
-        .music()
-        .music_history(&filter, true, 0, 100_000)
-        .await?;
     let truthy = |k: &str| q.get(k).is_some_and(|v| v.eq_ignore_ascii_case("true"));
-    Ok(Json(
-        render_music_history(
-            state,
-            &rows,
-            truthy("includeAlbum"),
-            truthy("includeArtist"),
-        )
-        .await?,
-    ))
+    history_array(
+        state,
+        &filter,
+        true,
+        truthy("includeAlbum"),
+        truthy("includeArtist"),
+    )
+    .await
 }
 
 /// Decode a raw query string into ordered pairs (repeated keys kept).

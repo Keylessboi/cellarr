@@ -2377,6 +2377,10 @@ pub struct MusicHistoryFilter {
     pub download_id: Option<String>,
     /// On or after this RFC 3339 date.
     pub since: Option<String>,
+    /// Keyset cursor: only rows strictly past this `(date, id)` in the
+    /// requested order. Lets a caller walk every row without `OFFSET`, which
+    /// rescans everything skipped and makes a full walk quadratic.
+    pub after: Option<(String, i64)>,
 }
 
 fn row_to_history(row: DbRow) -> Result<MusicHistoryRow> {
@@ -2514,6 +2518,11 @@ impl MusicRepo {
             clauses.push(format!("date >= {}", next()));
             text_binds.push(s.clone());
         }
+        if filter.after.is_some() {
+            let (d, i) = (next(), next());
+            let cmp = if ascending { ">" } else { "<" };
+            clauses.push(format!("(date {cmp} {d} OR (date = {d} AND id {cmp} {i}))"));
+        }
         let wher = if clauses.is_empty() {
             String::new()
         } else {
@@ -2536,6 +2545,17 @@ impl MusicRepo {
         for t in &text_binds {
             count_q = count_q.bind(t.clone());
             page_q = page_q.bind(t.clone());
+        }
+        if let Some((d, i)) = &filter.after {
+            page_q = page_q.bind(d.clone()).bind(*i);
+            // A cursor walk never needs the total: skip the count entirely.
+            let rows = page_q
+                .fetch_all(&self.pool)
+                .await?
+                .into_iter()
+                .map(row_to_history)
+                .collect::<Result<Vec<_>>>()?;
+            return Ok((0, rows));
         }
         let total: i64 = count_q.fetch_one(&self.pool).await?.try_get("n")?;
         let rows = page_q

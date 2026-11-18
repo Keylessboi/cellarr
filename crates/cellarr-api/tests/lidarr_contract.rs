@@ -388,3 +388,66 @@ async fn the_resources_clients_read_carry_every_field_lidarr_sends() {
         problems.join("\n  ")
     );
 }
+
+#[tokio::test]
+async fn whole_history_answers_walk_every_row_across_pages_in_order() {
+    let l = seeded().await;
+    let album_id = l
+        .state
+        .db
+        .music()
+        .album_by_mbid(OK_COMPUTER)
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+    // More than two pages' worth, with runs of rows sharing one timestamp so
+    // the cursor has to break ties by id.
+    let rows: Vec<_> = (0..4500)
+        .map(|i| cellarr_db::MusicHistoryRow {
+            id: None,
+            album_id,
+            artist_id: 7,
+            track_id: 0,
+            source_title: format!("row {i}"),
+            quality: json!({"quality": 6}),
+            date: format!("2026-01-01T00:{:02}:00Z", i / 100),
+            event_type: if i % 3 == 0 { 3 } else { 1 },
+            data: json!({}),
+            download_id: None,
+        })
+        .collect();
+    l.state.db.music().append_music_history(rows).await.unwrap();
+
+    let newest_first = l.get("/history/artist?artistId=7").await;
+    let titles: Vec<&str> = newest_first
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["sourceTitle"].as_str().unwrap())
+        .collect();
+    assert_eq!(titles.len(), 4500, "every row, once");
+    let unique: std::collections::BTreeSet<_> = titles.iter().collect();
+    assert_eq!(unique.len(), 4500, "no row repeated at a page boundary");
+    let dates: Vec<&str> = newest_first
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["date"].as_str().unwrap())
+        .collect();
+    assert!(dates.windows(2).all(|w| w[0] >= w[1]), "newest first");
+
+    let imported = l.get("/history/artist?artistId=7&eventType=3").await;
+    assert_eq!(imported.as_array().unwrap().len(), 1500);
+
+    let since = l
+        .get("/history/since?date=2026-01-01T00:30:00Z&artistId=7")
+        .await;
+    let since = since.as_array().unwrap();
+    assert_eq!(since.len(), 1500, "rows on or after the date");
+    let d: Vec<&str> = since.iter().map(|r| r["date"].as_str().unwrap()).collect();
+    assert!(d.windows(2).all(|w| w[0] <= w[1]), "oldest first");
+
+    let none = l.get("/history/artist?artistId=999").await;
+    assert_eq!(none, json!([]));
+}

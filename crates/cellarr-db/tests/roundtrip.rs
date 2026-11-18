@@ -317,7 +317,10 @@ async fn set_identity_title_reconciles_search_seed_with_resolved_title() {
         .fetch_one(db.pool())
         .await
         .unwrap();
-    assert_eq!(seeded, "キルラキル", "identity seeded from the search title");
+    assert_eq!(
+        seeded, "キルラキル",
+        "identity seeded from the search title"
+    );
 
     // The details resolve reconciles it to the display title.
     content
@@ -329,7 +332,10 @@ async fn set_identity_title_reconciles_search_seed_with_resolved_title() {
             .fetch_one(db.pool())
             .await
             .unwrap();
-    assert_eq!(reconciled, "Kill la Kill", "resolved title replaces the seed");
+    assert_eq!(
+        reconciled, "Kill la Kill",
+        "resolved title replaces the seed"
+    );
 
     // A node with no identity row is a harmless no-op (never errors).
     let orphan = ContentNode {
@@ -567,10 +573,16 @@ async fn monitored_missing_orders_least_recently_searched_first() {
 
     // Search `a`, then `b`: the never-searched `c` must sort ahead of both, and the
     // earlier-searched `a` ahead of the later-searched `b`.
-    content.mark_missing_searched(vec![a.id], &Default::default()).await.unwrap();
+    content
+        .mark_missing_searched(vec![a.id], &Default::default())
+        .await
+        .unwrap();
     // A distinct timestamp for `b` (searched_at has second resolution).
     tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
-    content.mark_missing_searched(vec![b.id], &Default::default()).await.unwrap();
+    content
+        .mark_missing_searched(vec![b.id], &Default::default())
+        .await
+        .unwrap();
 
     let order: Vec<ContentId> = content
         .monitored_missing()
@@ -587,7 +599,10 @@ async fn monitored_missing_orders_least_recently_searched_first() {
 
     // Re-searching `c` moves it to the back (now the most-recently-searched).
     tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
-    content.mark_missing_searched(vec![c.id], &Default::default()).await.unwrap();
+    content
+        .mark_missing_searched(vec![c.id], &Default::default())
+        .await
+        .unwrap();
     let order2: Vec<ContentId> = content
         .monitored_missing()
         .await
@@ -856,7 +871,10 @@ async fn subtitle_upsert_list_and_cascade() {
     let mut listed = subtitles.list_for_file(file.id).await.expect("list");
     assert_eq!(listed.len(), 2, "both languages recorded");
     // Reachable through the content node too (join via content_file).
-    let via_content = subtitles.list_for_content(node.id).await.expect("by content");
+    let via_content = subtitles
+        .list_for_content(node.id)
+        .await
+        .expect("by content");
     assert_eq!(via_content.len(), 2);
 
     // Re-fetching the SAME (file, language, variant) upgrades in place — no dup.
@@ -867,10 +885,16 @@ async fn subtitle_upsert_list_and_cascade() {
         score: Some(99),
         ..en.clone()
     };
-    subtitles.upsert(&en_upgraded).await.expect("upsert-in-place");
+    subtitles
+        .upsert(&en_upgraded)
+        .await
+        .expect("upsert-in-place");
     listed = subtitles.list_for_file(file.id).await.expect("list again");
     assert_eq!(listed.len(), 2, "upsert replaced, did not duplicate");
-    let en_row = listed.iter().find(|s| s.language == "en").expect("en present");
+    let en_row = listed
+        .iter()
+        .find(|s| s.language == "en")
+        .expect("en present");
     assert_eq!(en_row.score, Some(99), "upgraded score persisted");
     assert_eq!(en_row.provider_id.as_deref(), Some("os-999"));
 
@@ -883,7 +907,11 @@ async fn subtitle_upsert_list_and_cascade() {
     };
     subtitles.upsert(&en_hi).await.expect("upsert en-hi");
     assert_eq!(
-        subtitles.list_for_file(file.id).await.expect("list hi").len(),
+        subtitles
+            .list_for_file(file.id)
+            .await
+            .expect("list hi")
+            .len(),
         3,
         "the HI variant is a separate row"
     );
@@ -1420,7 +1448,11 @@ async fn fts_search_matches_special_character_titles() {
             parent_id: None,
             kind: ContentKind::Episode,
             series_type: cellarr_core::SeriesType::Standard,
-            coords: Coordinates::Episode { season: 1, episode: 1, absolute: None },
+            coords: Coordinates::Episode {
+                season: 1,
+                episode: 1,
+                absolute: None,
+            },
             monitored: true,
             title_id: None,
         };
@@ -1434,8 +1466,14 @@ async fn fts_search_matches_special_character_titles() {
     }
 
     // Hyphenated: the raw title (was an FTS5 error) and a normalized form both hit.
-    assert_eq!(content.search("Obi-Wan Kenobi").await.unwrap(), vec![obi_id]);
-    assert_eq!(content.search("obi wan kenobi").await.unwrap(), vec![obi_id]);
+    assert_eq!(
+        content.search("Obi-Wan Kenobi").await.unwrap(),
+        vec![obi_id]
+    );
+    assert_eq!(
+        content.search("obi wan kenobi").await.unwrap(),
+        vec![obi_id]
+    );
     // Dotted: the exact title AND the parser's dots-as-spaces form both hit.
     assert_eq!(content.search("11.22.63").await.unwrap(), vec![six_id]);
     assert_eq!(content.search("11 22 63").await.unwrap(), vec![six_id]);
@@ -1456,19 +1494,28 @@ async fn unmatched_scan_onboard_attempt_lifecycle() {
     assert!(mf.onboard_attempted_paths().await.unwrap().is_empty());
 
     // Stamp `a` attempted: it is skipped, `b` still pending.
-    mf.mark_onboard_attempted(vec!["/tv/a.mkv".into()]).await.unwrap();
+    mf.mark_onboard_attempted(vec!["/tv/a.mkv".into()])
+        .await
+        .unwrap();
     assert_eq!(
         mf.onboard_attempted_paths().await.unwrap(),
         ["/tv/a.mkv".to_string()].into_iter().collect()
     );
-    assert!(mf.has_pending_onboard().await.unwrap(), "b is still pending");
+    assert!(
+        mf.has_pending_onboard().await.unwrap(),
+        "b is still pending"
+    );
 
     // Stamp `b` too → nothing pending; the drain goes idle.
-    mf.mark_onboard_attempted(vec!["/tv/b.mkv".into()]).await.unwrap();
+    mf.mark_onboard_attempted(vec!["/tv/b.mkv".into()])
+        .await
+        .unwrap();
     assert!(!mf.has_pending_onboard().await.unwrap());
 
     // Placing `a` forgets it from the backlog entirely.
-    mf.clear_unmatched_scan(vec!["/tv/a.mkv".into()]).await.unwrap();
+    mf.clear_unmatched_scan(vec!["/tv/a.mkv".into()])
+        .await
+        .unwrap();
     assert_eq!(
         mf.unmatched_scan_paths().await.unwrap(),
         ["/tv/b.mkv".to_string()].into_iter().collect()
@@ -1496,7 +1543,11 @@ async fn series_refresh_rotates_least_recently_refreshed_first() {
         parent_id: None,
         kind: ContentKind::Series,
         series_type: cellarr_core::SeriesType::Standard,
-        coords: Coordinates::Episode { season: 1, episode: 1, absolute: None },
+        coords: Coordinates::Episode {
+            season: 1,
+            episode: 1,
+            absolute: None,
+        },
         monitored: true,
         title_id: None,
     };
@@ -1513,12 +1564,20 @@ async fn series_refresh_rotates_least_recently_refreshed_first() {
         .into_iter()
         .collect();
     assert_eq!(due, [a.id, b.id, c.id].into_iter().collect());
-    assert_eq!(content.series_due_for_refresh(2).await.unwrap().len(), 2, "bound honored");
+    assert_eq!(
+        content.series_due_for_refresh(2).await.unwrap().len(),
+        2,
+        "bound honored"
+    );
 
     // Refresh `a`: it drops to the back, `b` and `c` (never-refreshed) come first.
     content.mark_series_refreshed(a.id).await.unwrap();
     let order = content.series_due_for_refresh(10).await.unwrap();
-    assert_eq!(order.iter().position(|x| *x == a.id).unwrap(), 2, "refreshed sorts last: {order:?}");
+    assert_eq!(
+        order.iter().position(|x| *x == a.id).unwrap(),
+        2,
+        "refreshed sorts last: {order:?}"
+    );
 }
 
 #[tokio::test]
@@ -2023,7 +2082,10 @@ async fn delete_series_removes_whole_subtree() {
         .fetch_one(db.pool())
         .await
         .unwrap();
-    assert_eq!(series_meta_after, 0, "the series identity row was cleaned up");
+    assert_eq!(
+        series_meta_after, 0,
+        "the series identity row was cleaned up"
+    );
 }
 
 #[tokio::test]
@@ -2852,7 +2914,10 @@ async fn a_partly_present_season_is_swept_as_its_missing_episodes_not_as_a_pack(
         "a season that is partly present must not be grabbed as a whole pack"
     );
     let id_of = |want: u32| eps.iter().find(|(e, _)| *e == want).unwrap().1;
-    assert!(!ids.contains(&id_of(1)), "the episode on disk is not missing");
+    assert!(
+        !ids.contains(&id_of(1)),
+        "the episode on disk is not missing"
+    );
     assert!(ids.contains(&id_of(2)), "the gaps are the units");
     assert!(ids.contains(&id_of(3)), "the gaps are the units");
 }
@@ -3043,10 +3108,16 @@ async fn the_search_backoff_grows_and_is_capped_at_a_day() {
     for n in 1..40u32 {
         let w = ContentRepo::search_backoff(n);
         assert!(w >= previous, "attempt {n} went backwards");
-        assert!(w <= time::Duration::hours(24), "attempt {n} exceeded the cap");
+        assert!(
+            w <= time::Duration::hours(24),
+            "attempt {n} exceeded the cap"
+        );
         previous = w;
     }
-    assert_eq!(ContentRepo::search_backoff(u32::MAX), time::Duration::hours(24));
+    assert_eq!(
+        ContentRepo::search_backoff(u32::MAX),
+        time::Duration::hours(24)
+    );
 }
 
 /// "Why is this missing?" has to distinguish situations that look identical in a
@@ -3135,7 +3206,9 @@ async fn missing_reason_separates_never_found_from_dead_torrents_and_quality_blo
         &db.decision_log(),
         &log_reject(
             &blocked,
-            cellarr_core::decision::RejectReason::QualityNotAllowed { quality: "Bluray-720p".to_string() },
+            cellarr_core::decision::RejectReason::QualityNotAllowed {
+                quality: "Bluray-720p".to_string(),
+            },
             "Wanted.Movie.720p.WEB",
         ),
     )
@@ -3174,9 +3247,12 @@ async fn pruning_the_decision_log_drops_only_rows_past_the_window() {
         note: None,
     };
     for age_days in [1_i64, 10, 45, 90] {
-        DecisionLogRepository::append(&db.decision_log(), &write_at(now - time::Duration::days(age_days)))
-            .await
-            .unwrap();
+        DecisionLogRepository::append(
+            &db.decision_log(),
+            &write_at(now - time::Duration::days(age_days)),
+        )
+        .await
+        .unwrap();
     }
 
     let removed = db
@@ -3184,7 +3260,10 @@ async fn pruning_the_decision_log_drops_only_rows_past_the_window() {
         .prune_before(now - time::Duration::days(30))
         .await
         .unwrap();
-    assert_eq!(removed, 2, "only the 45- and 90-day-old rows are past a 30-day window");
+    assert_eq!(
+        removed, 2,
+        "only the 45- and 90-day-old rows are past a 30-day window"
+    );
 
     // Idempotent: a second prune over the same window removes nothing.
     assert_eq!(
@@ -3261,7 +3340,9 @@ async fn the_missing_rollup_ranks_titles_by_how_hopeless_they_are() {
                         indexer_flags: vec![],
                     },
                     verdict: cellarr_core::decision::Verdict::Reject {
-                        reason: cellarr_core::decision::RejectReason::QualityNotAllowed { quality: "Bluray-720p".to_string() },
+                        reason: cellarr_core::decision::RejectReason::QualityNotAllowed {
+                            quality: "Bluray-720p".to_string(),
+                        },
                     },
                 }),
                 note: None,
@@ -3272,7 +3353,10 @@ async fn the_missing_rollup_ranks_titles_by_how_hopeless_they_are() {
     }
 
     let summary = content.missing_summary(10).await.unwrap();
-    assert!(!summary.is_empty(), "titles with missing content are reported");
+    assert!(
+        !summary.is_empty(),
+        "titles with missing content are reported"
+    );
     let worst = &summary[0];
     assert_eq!(
         worst.never_found, 3,
