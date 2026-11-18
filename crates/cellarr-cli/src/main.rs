@@ -43,6 +43,16 @@ enum Command {
         #[arg(required = true, value_name = "SOURCE_DB")]
         sources: Vec<PathBuf>,
     },
+    /// Copy a live Radarr, Sonarr or Lidarr database to DEST as one consistent
+    /// snapshot, read-only, while the app keeps running. Migrate from the copy.
+    Snapshot {
+        /// The live database (opened read-only, never modified).
+        #[arg(value_name = "SOURCE_DB")]
+        source: PathBuf,
+        /// Where to write the copy; must not exist.
+        #[arg(value_name = "DEST")]
+        dest: PathBuf,
+    },
     /// Validate the effective (layered) configuration and print it.
     #[command(name = "config")]
     ConfigCheck,
@@ -151,6 +161,19 @@ async fn real_main() -> Result<ExitCode> {
             run_backfill_quality(&config, dry_run, limit)
                 .await
                 .map(|()| ExitCode::SUCCESS)
+        }
+        Command::Snapshot { source, dest } => {
+            let started = std::time::Instant::now();
+            cellarr_migrate::snapshot(&source.to_string_lossy(), &dest.to_string_lossy())
+                .await
+                .map_err(|e| anyhow::anyhow!(e))?;
+            println!(
+                "snapshot of {} written to {} in {:.0}s",
+                source.display(),
+                dest.display(),
+                started.elapsed().as_secs_f64()
+            );
+            Ok(ExitCode::SUCCESS)
         }
         Command::Version => {
             println!("cellarr {}", env!("CARGO_PKG_VERSION"));

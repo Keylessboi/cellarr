@@ -43,7 +43,7 @@ use cellarr_db::Database;
 pub use error::{MigrationError, Result};
 pub use lidarr::MusicReport;
 pub use model::{ExternalIds, MappedContent, MappedFile, MappedInstall};
-pub use source::SourceKind;
+pub use source::{snapshot, SourceKind};
 
 use source::Source;
 

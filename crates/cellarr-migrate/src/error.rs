@@ -13,6 +13,10 @@ pub enum MigrationError {
     #[error("source database error: {0}")]
     Source(#[from] sqlx::Error),
 
+    /// A snapshot of the source could not be taken.
+    #[error("snapshot: {0}")]
+    Snapshot(String),
+
     /// The source database did not look like any *arr schema we recognize.
     ///
     /// Carries the path so a guided import can tell the user *which* file failed.

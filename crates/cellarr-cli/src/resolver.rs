@@ -27,7 +27,9 @@ use cellarr_core::{
 };
 use cellarr_db::Database;
 use cellarr_media::{ArtworkKind, MetadataResolver, ResolvedMetadata};
-use cellarr_meta::{ChildNode, Fetcher, Image, Metadata, ReqwestFetcher, TheTvdbSource, TmdbSource};
+use cellarr_meta::{
+    ChildNode, Fetcher, Image, Metadata, ReqwestFetcher, TheTvdbSource, TmdbSource,
+};
 
 use crate::config::Config;
 
@@ -198,7 +200,10 @@ impl<F: Fetcher> LiveMetadataResolver<F> {
                 .await
                 .map_err(|e| ResolverError::Repo(e.to_string()))?
             {
-                if let Coordinates::Episode { season, episode, .. } = ep.coords {
+                if let Coordinates::Episode {
+                    season, episode, ..
+                } = ep.coords
+                {
                     present.insert((season, episode));
                 }
             }
@@ -425,7 +430,10 @@ impl<F: Fetcher> MetadataResolver for LiveMetadataResolver<F> {
         // this fires once per series. Best-effort: an expansion failure is logged
         // and never fails the metadata resolve.
         if content.media_type == MediaType::Tv && !meta.children.is_empty() {
-            if let Err(e) = self.expand_series(content, &meta.title, &meta.children).await {
+            if let Err(e) = self
+                .expand_series(content, &meta.title, &meta.children)
+                .await
+            {
                 tracing::warn!(series = %content.id, error = %e, "series expansion failed");
             }
         }
@@ -579,7 +587,9 @@ mod tests {
 
         // 3 real-season episodes + 1 special (season 0).
         let eps = vec![child(1, 1), child(1, 2), child(2, 1), child(0, 1)];
-        r.expand_series(&series, "Breaking Bad", &eps).await.unwrap();
+        r.expand_series(&series, "Breaking Bad", &eps)
+            .await
+            .unwrap();
 
         // monitored_missing (what the pipeline grabs) returns the two real seasons
         // as SEASON PACKS, not their episodes: a freshly expanded series has nothing
@@ -594,10 +604,8 @@ mod tests {
             "seasons 1 and 2 are each one grabbable unit; series/special excluded"
         );
         assert!(
-            missing
-                .iter()
-                .all(|c| c.media_type == MediaType::Tv
-                    && matches!(c.coords, Coordinates::SeasonPack { season } if season > 0)),
+            missing.iter().all(|c| c.media_type == MediaType::Tv
+                && matches!(c.coords, Coordinates::SeasonPack { season } if season > 0)),
             "every grabbable node is a real TV season"
         );
 
@@ -660,6 +668,10 @@ mod tests {
         // Episodes are created (the tree exists) but inherit the series'
         // unmonitored flag, so none are acquisition targets.
         assert!(db.content().monitored_missing().await.unwrap().is_empty());
-        assert_eq!(db.content().children(series.id).await.unwrap().len(), 1, "one season node created");
+        assert_eq!(
+            db.content().children(series.id).await.unwrap().len(),
+            1,
+            "one season node created"
+        );
     }
 }

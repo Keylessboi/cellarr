@@ -355,7 +355,13 @@ async fn missing_item_search_through_scheduler_imports_the_file() {
     scheduler.tick().await.unwrap();
     scheduler.join_in_flight().await;
     assert_eq!(
-        scheduler.store().get(&reconcile).await.unwrap().unwrap().state,
+        scheduler
+            .store()
+            .get(&reconcile)
+            .await
+            .unwrap()
+            .unwrap()
+            .state,
         JobState::Done,
         "the ReconcileDownloads finalized the deferred download"
     );

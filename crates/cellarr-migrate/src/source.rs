@@ -87,6 +87,29 @@ async fn open_readonly(path: &str) -> Result<SqlitePool> {
     Ok(pool)
 }
 
+/// Copy a live *arr database to `dest` as one consistent snapshot.
+///
+/// The app keeps running and writing while a migration reads, and the readers
+/// issue many queries over minutes, so reading the live file directly could see
+/// an album without its tracks, or a file without its album. `VACUUM INTO` runs
+/// in one read transaction on a read-only connection: the copy is the database
+/// as of a single instant, no write lock is taken (in WAL mode the app's writes
+/// carry on), and the source is never modified. `dest` must not exist.
+pub async fn snapshot(source: &str, dest: &str) -> Result<()> {
+    if std::path::Path::new(dest).exists() {
+        return Err(crate::MigrationError::Snapshot(format!(
+            "{dest} already exists; refusing to overwrite it"
+        )));
+    }
+    let pool = open_readonly(source).await?;
+    sqlx::query("VACUUM INTO ?1")
+        .bind(dest)
+        .execute(&pool)
+        .await?;
+    pool.close().await;
+    Ok(())
+}
+
 /// Whether a table exists in the source schema.
 async fn table_exists(pool: &SqlitePool, name: &str) -> Result<bool> {
     let row = sqlx::query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1 LIMIT 1")
