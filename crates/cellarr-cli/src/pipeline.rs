@@ -935,7 +935,7 @@ impl<E: PipelineEnv> LivePipelineHandler<E> {
                     //
                     // Backing these off only delays the retry — the curve caps at
                     // a day, so a release that does appear is still picked up.
-                    if !run.grabbed {
+                    if run.searched && !run.grabbed {
                         fruitless.insert(node.id);
                     }
                 }

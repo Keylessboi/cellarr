@@ -492,3 +492,57 @@ async fn a_node_whose_candidates_are_all_rejected_still_backs_off() {
         "a node whose candidates were all rejected must be counted fruitless, got {counts:?}"
     );
 }
+
+/// An environment with no indexer or client for any node.
+struct UnconfiguredEnv;
+
+#[async_trait]
+impl PipelineEnv for UnconfiguredEnv {
+    type Indexer = FakeIndexer;
+    type Client = FakeClient;
+
+    async fn resolve(
+        &self,
+        _content: &ContentRef,
+    ) -> Result<Option<(Self::Indexer, Self::Client, RunnerConfig)>, String> {
+        Ok(None)
+    }
+}
+
+/// A node the sweep could not search, because nothing is configured to search
+/// with, says nothing about what the indexers carry, so it must not back off:
+/// once an indexer is added it should be searched at full cadence.
+#[tokio::test]
+async fn a_node_with_nothing_configured_to_search_it_does_not_back_off() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = Database::open(tmp.path().join("cellarr.sqlite").to_str().unwrap())
+        .await
+        .unwrap();
+    let node = seed_monitored_movie(&db).await;
+    let handler = Arc::new(LivePipelineHandler::new(
+        db.clone(),
+        Arc::new(movie_registry(&node)),
+        cellarr_api::events::EventBus::default(),
+        UnconfiguredEnv,
+    ));
+    let scheduler = Scheduler::new(
+        Arc::new(SystemClock),
+        Arc::new(MemoryJobStore::new()),
+        handler,
+        ConcurrencyCaps::default(),
+    );
+
+    scheduler
+        .submit_now(JobKind::MissingItemSearch, RetryPolicy::default())
+        .await
+        .unwrap();
+    scheduler.tick().await.unwrap();
+    scheduler.join_in_flight().await;
+
+    let counts = db.content().fruitless_counts().await.unwrap();
+    assert_eq!(
+        counts.get(&node.id.to_string()).copied().unwrap_or(0),
+        0,
+        "an unsearched node must not be counted fruitless, got {counts:?}"
+    );
+}
