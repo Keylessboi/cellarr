@@ -276,6 +276,13 @@ requests identical. The rest are documented differences:
 - **`/parse`.** Embeds the fuller album/artist resources, so it shows the same extras.
 - **System package fields.** `packageVersion`, `packageAuthor` and
   `packageUpdateMechanismMessage` are not served (see `lidarr-gaps.json`).
+- **Unmapped track files.** `GET /trackfile?unmapped=true` always answers `[]`. Lidarr
+  lists audio files it found under a root folder and could not link to a track (`albumId`
+  0). cellarr keeps no such record: its library rescan skips music libraries, the scan only
+  looks at video files, and every track file it stores is attached to a track. Answering
+  honestly needs a scan of the music roots for untracked audio, which is not built; until
+  then a client sees an empty list, never a made-up one. Loose files can still be found and
+  placed through manual import (`GET /manualimport?folder=`).
 
 Download clients use Lidarr's `musicCategory` field name on this face and the shared
 `category` column internally. The indexer and download-client schemas are recorded from a

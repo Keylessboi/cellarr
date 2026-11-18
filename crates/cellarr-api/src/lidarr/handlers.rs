@@ -1340,7 +1340,9 @@ pub(crate) async fn list_track_files(
 ) -> ApiResult<Json<Vec<Value>>> {
     let state = app(&fs);
     let music = state.db.music();
-    // Files here are always attached to a track; "unmapped" files do not exist.
+    // Every stored track file is attached to a track, and nothing records the
+    // audio files a scan could not link to one (the rescan skips music roots),
+    // so there is nothing honest to list. docs/19-lidarr-compat.md has the gap.
     if flag(&q, "unmapped") {
         return Ok(Json(Vec::new()));
     }
