@@ -20,7 +20,9 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  IMAGE: ghcr.io/poiley/cellarr
+  # Published under whoever owns the repository, so a fork's manual build lands
+  # in its own registry namespace (GHCR names are lowercase).
+  IMAGE: ghcr.io/${{ github.repository_owner }}/cellarr
 
 jobs:
   # Detect whether this push actually touched code/build inputs. Manifest- or
@@ -198,7 +200,7 @@ jobs:
         with:
           images: ${{ env.IMAGE }}
           tags: |
-            type=raw,value=latest
+            type=raw,value=latest,enable={{is_default_branch}}
             type=sha,format=long
       - name: Build + push
         uses: docker/build-push-action@v6
@@ -269,7 +271,7 @@ jobs:
         with:
           images: ${{ env.IMAGE }}
           tags: |
-            type=raw,value=postgres
+            type=raw,value=postgres,enable={{is_default_branch}}
             type=sha,format=long,suffix=-postgres
       - name: Build + push
         uses: docker/build-push-action@v6
