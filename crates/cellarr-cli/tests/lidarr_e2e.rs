@@ -1404,6 +1404,29 @@ async fn a_shadow_daemon_reads_but_never_writes_or_acts() {
     };
     config.api.port = 0;
     config.shadow = true;
+    // A plugin sidecar that records every request it gets, with its root folder
+    // outside the data dir: a shadow may read it, never write to it or there.
+    let sidecar_calls: Arc<Mutex<Vec<(String, String)>>> = Arc::default();
+    let sidecar_root = tmp.path().join("sidecar-root");
+    #[cfg(feature = "plugins")]
+    {
+        let calls = Arc::clone(&sidecar_calls);
+        let app = Router::new().fallback(move |req: axum::extract::Request| {
+            let calls = Arc::clone(&calls);
+            async move {
+                calls
+                    .lock()
+                    .unwrap()
+                    .push((req.method().to_string(), req.uri().path().to_string()));
+                json_body("[]".into())
+            }
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        config.plugins.dotnet_sidecar_url =
+            Some(format!("http://{}", listener.local_addr().unwrap()));
+        config.plugins.dotnet_sidecar_root = Some(sidecar_root.clone());
+        tokio::spawn(async move { axum::serve(listener, app).await });
+    }
     let daemon = Daemon::boot(&config).await.expect("daemon boots");
     let addr = daemon.addr();
     let state = daemon.state().clone();
@@ -1459,6 +1482,31 @@ async fn a_shadow_daemon_reads_but_never_writes_or_acts() {
         jobs.is_empty(),
         "no scheduled jobs in shadow mode: {}",
         jobs.len()
+    );
+    #[cfg(feature = "plugins")]
+    {
+        // Discovery still reads the sidecar's catalog.
+        assert!(
+            within(20, || async { !sidecar_calls.lock().unwrap().is_empty() }).await,
+            "the sidecar's catalog is read"
+        );
+        // The sidecar test installs the bridge process-wide; only check when
+        // it is not running beside this one.
+        if std::env::var("LIDARR_SIDECAR_BIN").is_err() {
+            assert!(
+                cellarr_plugins::sidecar::global().is_none(),
+                "no search or grab may go through the sidecar in shadow mode"
+            );
+        }
+    }
+    let calls = sidecar_calls.lock().unwrap().clone();
+    assert!(
+        calls.iter().all(|(m, _)| m == "GET"),
+        "the sidecar only ever sees reads: {calls:?}"
+    );
+    assert!(
+        !sidecar_root.exists(),
+        "nothing is created outside the data dir"
     );
 
     stop.send(()).unwrap();

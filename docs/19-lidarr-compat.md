@@ -65,7 +65,9 @@ The migration is idempotent per database: to redo it, discard cellarr's database
 
 `CELLARR_SHADOW=true` runs cellarr as a read-only rehearsal beside a live Lidarr. It registers
 no scheduled jobs, so there is no RSS sync, search, download-client polling, import or rename.
-It also refuses every non-GET request with 403, on both listeners. Point nothing at it except
+It also refuses every non-GET request with 403, on both listeners. A configured plugin sidecar
+is only read for its catalog: a shadow never mirrors indexers, clients or artists into it, and an
+indexer or client that needs it fails rather than writing there. Point nothing at it except
 `scripts/lidarr-shadow-diff`:
 
 ```sh

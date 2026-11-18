@@ -237,7 +237,6 @@ impl Daemon {
                     .dotnet_sidecar_root
                     .clone()
                     .unwrap_or_else(|| config.data_dir.join("sidecar-root"));
-                let _ = std::fs::create_dir_all(&root);
                 let sidecar = std::sync::Arc::new(cellarr_plugins::sidecar::Sidecar::new(
                     cellarr_plugins::sidecar::SidecarConfig {
                         url,
@@ -250,7 +249,18 @@ impl Daemon {
                         expose_builtins: config.plugins.dotnet_sidecar_expose_builtins,
                     },
                 ));
-                cellarr_plugins::sidecar::install(Some(std::sync::Arc::clone(&sidecar)));
+                // Discovery only reads the sidecar's schemas. Searching or
+                // grabbing through it writes to it (its settings, a root folder,
+                // mirrored indexers and artists), and its root folder may live
+                // outside the data dir, so a shadow reads the catalog and
+                // leaves the bridge uninstalled: an indexer or client that
+                // needs the sidecar fails instead of touching it.
+                if config.shadow {
+                    info!("shadow mode: plugin sidecar read for its catalog only");
+                } else {
+                    let _ = std::fs::create_dir_all(&root);
+                    cellarr_plugins::sidecar::install(Some(std::sync::Arc::clone(&sidecar)));
+                }
                 cellarr_plugins::sidecar::spawn_discovery(sidecar);
             }
         }
