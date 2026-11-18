@@ -40,8 +40,9 @@ pub use sqlx::PgPool as DbPool;
 /// unchanged, so the long-proven SQLite statements are byte-for-byte what they
 /// were. Under Postgres it rewrites each `?N` token to `$N` (Postgres's
 /// positional style). The rewrite is purely lexical and only touches
-/// `?`-followed-by-digits sequences; no query in the crate reuses a numbered
-/// bind, so a straight token swap preserves bind order on both engines.
+/// `?`-followed-by-digits sequences, so a straight token swap preserves bind
+/// numbering on both engines — including a number used more than once, which
+/// both bind to the same value.
 ///
 /// Call sites uniformly pass `&pq("…")`: under SQLite that is `&&str` (deref-
 /// coerced to `&str`), under Postgres `&String` — both satisfy

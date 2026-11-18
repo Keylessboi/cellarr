@@ -167,7 +167,7 @@ impl GrabRepo {
     /// # Errors
     /// Returns a [`DbError`] on query failure.
     pub async fn by_download_id(&self, download_id: &str) -> Result<Option<GrabId>> {
-        let row = sqlx::query(pq(
+        let row = sqlx::query(&pq(
             "SELECT id FROM grab WHERE lower(download_id) = lower(?1)
              ORDER BY created_at DESC LIMIT 1",
         ))
