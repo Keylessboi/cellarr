@@ -121,7 +121,7 @@ fn routes(state: AppState) -> Router {
         .route("/log", get(handlers::log_page))
         .route("/rename", get(handlers::empty_list))
         .route("/retag", get(handlers::empty_list))
-        .route("/manualimport", get(handlers::empty_list))
+        .route("/manualimport", get(handlers::manual_import))
         .route("/release/push", post(handlers::push_release))
         .route("/tag/detail", get(handlers::tag_details))
         .route("/ping", get(ping).head(ping))

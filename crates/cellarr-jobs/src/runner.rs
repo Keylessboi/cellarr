@@ -2167,7 +2167,7 @@ where
             None => None,
         };
         match self
-            .import(grab_id, matched_ref, parsed, &content_path, replaced)
+            .import(grab_id, matched_ref, parsed, &content_path, replaced, None)
             .await
         {
             Ok(destinations) => {
@@ -2527,6 +2527,9 @@ where
         // as a replacement (cellarr-fs swaps in place or removes the old path), and
         // the stale row is dropped after commit so the new quality is recorded.
         replaced: Option<(cellarr_core::MediaFileId, String)>,
+        // An explicit file-to-track mapping (a manual import), used instead of
+        // planning one from the files' tags.
+        placements_override: Option<Vec<(std::path::PathBuf, ContentRef)>>,
     ) -> std::result::Result<Vec<(String, cellarr_core::ContentId)>, ImportFailure> {
         let src = std::path::Path::new(content_path);
         if !src.exists() {
@@ -2562,7 +2565,9 @@ where
         // season carries no `Episode` token, so `{Episode Block}` could not render,
         // and even if it could, every file in the pack would render to the same
         // destination and collide.
-        let placements = if is_music {
+        let placements = if let Some(explicit) = placements_override {
+            explicit
+        } else if is_music {
             let title = self.album_title(matched_ref).await;
             crate::music_import::plan_album_placements(self.db, matched_ref, &title, &sources)
                 .await?
@@ -2776,6 +2781,21 @@ where
         grab: &Grab,
         content_path: &str,
     ) -> std::result::Result<Vec<String>, ImportFailure> {
+        self.import_completed_with(grab, content_path, None).await
+    }
+
+    /// [`import_completed`](Self::import_completed) with the file-to-track mapping
+    /// chosen by hand (Lidarr's ManualImport): the files go exactly where they were
+    /// mapped, through the same staged, verified import, and the grab is finalized.
+    ///
+    /// # Errors
+    /// As [`import_completed`](Self::import_completed).
+    pub async fn import_completed_with(
+        &self,
+        grab: &Grab,
+        content_path: &str,
+        placements_override: Option<Vec<(std::path::PathBuf, ContentRef)>>,
+    ) -> std::result::Result<Vec<String>, ImportFailure> {
         // Re-parse the release title for quality/naming, as the inline Import stage
         // does. But the grab's content_ref is the CONFIRMED target the pipeline
         // already identified — and, for anime, remapped from the absolute number to
@@ -2820,7 +2840,14 @@ where
         // Reconcile finalization is never an upgrade (it imports a completed
         // download onto a node); no file is being replaced.
         let destinations = self
-            .import(grab.id, matched_ref, &parsed, content_path, None)
+            .import(
+                grab.id,
+                matched_ref,
+                &parsed,
+                content_path,
+                None,
+                placements_override,
+            )
             .await?;
         self.persist_imported_files(&parsed, release_type, &destinations)
             .await
@@ -2853,6 +2880,37 @@ where
         self.fire_files_webhook(WebhookEventType::Download, matched_ref, &paths)
             .await;
         Ok(paths)
+    }
+
+    /// Import files mapped by hand onto an album's tracks when no grab owns them
+    /// (a folder dropped by hand). Same staged, verified import; the quality is
+    /// read from the files.
+    ///
+    /// # Errors
+    /// The import failure, per [`ImportFailure`].
+    pub async fn import_music_files(
+        &self,
+        album: &ContentRef,
+        content_path: &str,
+        placements: Vec<(std::path::PathBuf, ContentRef)>,
+    ) -> std::result::Result<Vec<String>, ImportFailure> {
+        let title = self.album_title(album).await;
+        let parsed = cellarr_parse::parse_title_for(album.media_type, &title);
+        let release_type = cellarr_core::ReleaseType::from_parsed(&parsed);
+        let destinations = self
+            .import(
+                GrabId::new(),
+                album,
+                &parsed,
+                content_path,
+                None,
+                Some(placements),
+            )
+            .await?;
+        self.persist_imported_files(&parsed, release_type, &destinations)
+            .await
+            .map_err(|e| format!("persist imported files: {e}"))?;
+        Ok(destinations.into_iter().map(|(p, _)| p).collect())
     }
 
     /// Write the `.nfo` metadata sidecars next to the imported destinations, using

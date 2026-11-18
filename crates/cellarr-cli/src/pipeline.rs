@@ -1555,9 +1555,17 @@ impl<E: PipelineEnv> LivePipelineHandler<E> {
                 // held/failed import, leave the grab for a human (never blocklist a
                 // download whose bytes are on disk).
                 Ok(status) if matches!(status.state, DownloadState::Completed) => {
-                    let Some(path) = status.content_path.as_deref() else {
+                    let Some(reported) = status.content_path.as_deref() else {
                         continue; // completed but no importable path yet — leave
                     };
+                    // The client reports the path from its side; rewrite it to
+                    // where cellarr sees it, as the inline import does.
+                    let mapped = cellarr_core::apply_remote_path_mappings(
+                        &config.remote_path_mappings,
+                        &config.client_host,
+                        reported,
+                    );
+                    let path = mapped.as_str();
                     // A download whose import keeps failing is retried on an
                     // exponential backoff rather than on every cycle. Three grabs
                     // that could never import once turned this sweep into 639
@@ -3184,6 +3192,295 @@ impl cellarr_api::manual_import::ManualImport for LiveManualImport {
             .await
             .map_err(|e| format!("manual import failed: {e}"))?;
         Ok(ManualImportCommitOutcome::Committed { imported, errors })
+    }
+
+    async fn scan_music(
+        &self,
+        req: cellarr_api::manual_import::MusicScanRequest,
+    ) -> Result<Vec<cellarr_api::manual_import::MusicCandidate>, String> {
+        use cellarr_api::manual_import::MusicCandidate;
+        let (folder, grab) = self
+            .music_folder(req.folder.as_deref(), req.download_id.as_deref())
+            .await?;
+        let sources =
+            cellarr_jobs::music_import::collect_audio_sources(std::path::Path::new(&folder))
+                .map_err(|e| format!("cannot read {folder}: {e}"))?;
+        let music = self.db.music();
+
+        // Which album each file belongs to: the grab's, when the files are a
+        // tracked download; otherwise the album their tags name.
+        let mut groups: std::collections::BTreeMap<
+            Option<cellarr_core::ContentId>,
+            Vec<std::path::PathBuf>,
+        > = std::collections::BTreeMap::new();
+        for path in &sources {
+            let album = match &grab {
+                Some(g) => Some(g.request.content_ref.id),
+                None => {
+                    let tags = cellarr_fs::read_audio_tags(path);
+                    let artist = tags
+                        .as_ref()
+                        .and_then(|t| t.album_artist.clone().or_else(|| t.artist.clone()));
+                    let title = tags.as_ref().and_then(|t| t.album.clone());
+                    match (artist, title) {
+                        (Some(a), Some(t)) => music
+                            .albums_named(
+                                &cellarr_core::normalize_name(&a),
+                                &[cellarr_core::normalize_name(&t)],
+                            )
+                            .await
+                            .map_err(|e| format!("album lookup: {e}"))?
+                            .into_iter()
+                            .map(|hit| hit.album)
+                            .find(|al| req.artist.is_none_or(|ar| al.artist_content_id == ar))
+                            .map(|al| al.content_id),
+                        _ => None,
+                    }
+                }
+            };
+            groups.entry(album).or_default().push(path.clone());
+        }
+
+        let download_id = req.download_id.clone();
+        let candidate = |path: &std::path::Path, album, tracks, rejections| MusicCandidate {
+            path: path.to_string_lossy().to_string(),
+            size: std::fs::metadata(path).map(|m| m.len()).unwrap_or(0),
+            album,
+            tracks,
+            quality: cellarr_fs::read_audio_tags(path)
+                .as_ref()
+                .and_then(cellarr_fs::audio_quality_name)
+                .map(str::to_string),
+            download_id: download_id.clone(),
+            rejections,
+        };
+        let mut out = Vec::new();
+        for (album, files) in groups {
+            let Some(album) = album else {
+                for f in &files {
+                    out.push(candidate(
+                        f,
+                        None,
+                        Vec::new(),
+                        vec!["No album in the library matches this file's tags".to_string()],
+                    ));
+                }
+                continue;
+            };
+            let Some(album_ref) = self
+                .db
+                .content()
+                .get(album)
+                .await
+                .map_err(|e| format!("album: {e}"))?
+            else {
+                continue;
+            };
+            let title = music
+                .album_by_content(album)
+                .await
+                .map_err(|e| format!("album: {e}"))?
+                .map(|a| a.title)
+                .unwrap_or_default();
+            match cellarr_jobs::music_import::plan_album_placements(
+                &self.db, &album_ref, &title, &files,
+            )
+            .await
+            {
+                Ok(placed) => {
+                    for f in &files {
+                        let tracks: Vec<cellarr_core::ContentId> = placed
+                            .iter()
+                            .filter(|(p, _)| p == f)
+                            .map(|(_, t)| t.id)
+                            .collect();
+                        let rejections = if tracks.is_empty() {
+                            vec!["Couldn't find a matching track on the album".to_string()]
+                        } else {
+                            Vec::new()
+                        };
+                        out.push(candidate(f, Some(album), tracks, rejections));
+                    }
+                }
+                Err(reason) => {
+                    for f in &files {
+                        out.push(candidate(f, Some(album), Vec::new(), vec![reason.clone()]));
+                    }
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    async fn import_music(
+        &self,
+        files: Vec<cellarr_api::manual_import::MusicImportFile>,
+    ) -> Result<(usize, Vec<String>), String> {
+        use cellarr_core::repo::GrabRepository;
+        let mut by_album: std::collections::BTreeMap<
+            (cellarr_core::ContentId, Option<String>),
+            Vec<cellarr_api::manual_import::MusicImportFile>,
+        > = std::collections::BTreeMap::new();
+        for f in files {
+            by_album
+                .entry((f.album, f.download_id.clone().filter(|d| !d.is_empty())))
+                .or_default()
+                .push(f);
+        }
+        let music = self.db.music();
+        let mut imported = 0;
+        let mut errors = Vec::new();
+        for ((album, download_id), files) in by_album {
+            let Some(album_ref) = self
+                .db
+                .content()
+                .get(album)
+                .await
+                .map_err(|e| format!("album: {e}"))?
+            else {
+                errors.push(format!("album {album} is not in the library"));
+                continue;
+            };
+            // Only this album's tracks may be targets.
+            let tracks: std::collections::HashMap<cellarr_core::ContentId, cellarr_core::Track> =
+                music
+                    .tracks_for_album(album)
+                    .await
+                    .map_err(|e| format!("tracks: {e}"))?
+                    .into_iter()
+                    .map(|t| (t.content_id, t))
+                    .collect();
+            let mut placements = Vec::new();
+            for f in &files {
+                for t in &f.tracks {
+                    match (tracks.get(t), self.db.content().get(*t).await) {
+                        (Some(_), Ok(Some(track_ref))) => {
+                            placements.push((std::path::PathBuf::from(&f.path), track_ref));
+                        }
+                        _ => errors.push(format!("{}: track {t} is not on album {album}", f.path)),
+                    }
+                }
+            }
+            if placements.is_empty() {
+                continue;
+            }
+            let folder = common_folder(&placements);
+            let Some((_, client, config)) = self.env.resolve(&album_ref).await? else {
+                errors.push(format!(
+                    "album {album}: no library configuration to import with"
+                ));
+                continue;
+            };
+            let indexer = DbIndexerSet::new(self.db.clone());
+            let runner = PipelineRunner::new(
+                &indexer,
+                &client,
+                &self.registry,
+                &self.db,
+                &self.clock,
+                &config,
+            );
+            let grab = match download_id.as_deref() {
+                Some(dl) => match self
+                    .db
+                    .grabs()
+                    .by_download_id(dl)
+                    .await
+                    .map_err(|e| e.to_string())?
+                {
+                    Some(id) => self.db.grabs().get(id).await.map_err(|e| e.to_string())?,
+                    None => None,
+                },
+                None => None,
+            };
+            let n = placements.len();
+            let result = match &grab {
+                Some(g) => {
+                    runner
+                        .import_completed_with(g, &folder, Some(placements))
+                        .await
+                }
+                None => {
+                    runner
+                        .import_music_files(&album_ref, &folder, placements)
+                        .await
+                }
+            };
+            match result {
+                Ok(_) => imported += n,
+                Err(e) => errors.push(format!("album {album}: {e}")),
+            }
+        }
+        Ok((imported, errors))
+    }
+}
+
+/// The folder holding every file of a placement list.
+fn common_folder(placements: &[(std::path::PathBuf, ContentRef)]) -> String {
+    let mut parents = placements
+        .iter()
+        .filter_map(|(p, _)| p.parent().map(std::path::Path::to_path_buf));
+    let Some(mut common) = parents.next() else {
+        return String::new();
+    };
+    for p in parents {
+        while !p.starts_with(&common) {
+            match common.parent() {
+                Some(up) => common = up.to_path_buf(),
+                None => break,
+            }
+        }
+    }
+    common.to_string_lossy().to_string()
+}
+
+impl LiveManualImport {
+    /// The folder to scan for a music manual import: the given one, or the
+    /// tracked download's (asked of its client, remapped to cellarr's view).
+    async fn music_folder(
+        &self,
+        folder: Option<&str>,
+        download_id: Option<&str>,
+    ) -> Result<(String, Option<cellarr_core::Grab>), String> {
+        use cellarr_core::repo::GrabRepository;
+        if let Some(f) = folder.filter(|f| !f.trim().is_empty()) {
+            return Ok((f.to_string(), None));
+        }
+        let Some(dl) = download_id.filter(|d| !d.trim().is_empty()) else {
+            return Err("a folder or a downloadId is required".into());
+        };
+        let id = self
+            .db
+            .grabs()
+            .by_download_id(dl)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("no download {dl} is tracked"))?;
+        let grab = self
+            .db
+            .grabs()
+            .get(id)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("no download {dl} is tracked"))?;
+        let (_, client, config) = self
+            .env
+            .resolve(&grab.request.content_ref)
+            .await?
+            .ok_or_else(|| "no download client is configured".to_string())?;
+        let status = client
+            .status(dl)
+            .await
+            .map_err(|e| format!("download client: {e}"))?;
+        let reported = status
+            .content_path
+            .ok_or_else(|| "the download has no files yet".to_string())?;
+        let path = cellarr_core::apply_remote_path_mappings(
+            &config.remote_path_mappings,
+            &config.client_host,
+            &reported,
+        );
+        Ok((path, Some(grab)))
     }
 }
 

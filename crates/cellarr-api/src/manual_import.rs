@@ -88,4 +88,69 @@ pub trait ManualImport: Send + Sync {
         &self,
         items: Vec<ManualImportRequest>,
     ) -> Result<ManualImportCommitOutcome, String>;
+
+    /// Music: what a folder (or a tracked download's folder) would import as, file
+    /// by file, mapped onto an album's tracks when the tags allow. Moves nothing.
+    ///
+    /// # Errors
+    /// A short human string when the folder or download cannot be found.
+    async fn scan_music(&self, _request: MusicScanRequest) -> Result<Vec<MusicCandidate>, String> {
+        Err("music manual import is not available".into())
+    }
+
+    /// Music: import files exactly as mapped, through the staged import, and
+    /// finalize the download they came from. Returns how many files landed and
+    /// what failed.
+    ///
+    /// # Errors
+    /// A short human string for an infrastructure failure.
+    async fn import_music(
+        &self,
+        _files: Vec<MusicImportFile>,
+    ) -> Result<(usize, Vec<String>), String> {
+        Err("music manual import is not available".into())
+    }
+}
+
+/// What to scan for a music manual import.
+#[derive(Debug, Clone, Default)]
+pub struct MusicScanRequest {
+    /// A folder to scan.
+    pub folder: Option<String>,
+    /// A tracked download whose folder to scan.
+    pub download_id: Option<String>,
+    /// Only consider this artist's albums.
+    pub artist: Option<cellarr_core::ContentId>,
+}
+
+/// One file a music manual import would take.
+#[derive(Debug, Clone)]
+pub struct MusicCandidate {
+    /// The file.
+    pub path: String,
+    /// Its size.
+    pub size: u64,
+    /// The album it maps to.
+    pub album: Option<cellarr_core::ContentId>,
+    /// The tracks it maps to.
+    pub tracks: Vec<cellarr_core::ContentId>,
+    /// The quality read from the file.
+    pub quality: Option<String>,
+    /// The download it came from.
+    pub download_id: Option<String>,
+    /// Why it would not import.
+    pub rejections: Vec<String>,
+}
+
+/// One file to import, as the client mapped it.
+#[derive(Debug, Clone)]
+pub struct MusicImportFile {
+    /// The file.
+    pub path: String,
+    /// The album.
+    pub album: cellarr_core::ContentId,
+    /// The tracks it is.
+    pub tracks: Vec<cellarr_core::ContentId>,
+    /// The download it came from (its grab is finalized).
+    pub download_id: Option<String>,
 }

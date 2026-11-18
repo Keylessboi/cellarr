@@ -162,6 +162,25 @@ impl GrabRepo {
             .map_or(1, |(attempts, _)| attempts))
     }
 
+    /// The newest grab a download client knows by `download_id` (any case).
+    ///
+    /// # Errors
+    /// Returns a [`DbError`] on query failure.
+    pub async fn by_download_id(&self, download_id: &str) -> Result<Option<GrabId>> {
+        let row = sqlx::query(pq(
+            "SELECT id FROM grab WHERE lower(download_id) = lower(?1)
+             ORDER BY created_at DESC LIMIT 1",
+        ))
+        .bind(download_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.map(|r| {
+            let id: String = r.try_get("id")?;
+            serde_json::from_value(serde_json::Value::String(id)).map_err(DbError::from)
+        })
+        .transpose()
+    }
+
     /// Grab ids whose download has FINISHED and whose import is failing.
     ///
     /// An `import_attempt` row can only exist because the reconcile sweep tried to

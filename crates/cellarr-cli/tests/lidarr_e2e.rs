@@ -960,3 +960,111 @@ async fn a_complete_album_is_staged_by_the_sidecar_and_imported_from_there() {
     stop.send(()).unwrap();
     serve.await.unwrap().expect("clean shutdown");
 }
+
+#[tokio::test]
+async fn manual_import_lists_a_download_and_imports_a_folder_as_the_maintenance_script_does() {
+    let Fixture {
+        api,
+        library,
+        album_id,
+        stop,
+        serve,
+        _tmp,
+        ..
+    } = fixture_for("A Completely Different Album").await;
+
+    // The grabbed download is tagged as another album: listed, but refused.
+    let listed = api
+        .get(&format!(
+            "/manualimport?downloadId={}&filterExistingFiles=true",
+            HASH.to_uppercase()
+        ))
+        .await;
+    let items = listed.as_array().unwrap();
+    assert_eq!(items.len(), 3, "{listed}");
+    assert!(
+        items
+            .iter()
+            .all(|i| !i["rejections"].as_array().unwrap().is_empty()),
+        "a mis-tagged download is not offered for import: {listed}"
+    );
+
+    // A folder of the right album, scanned and imported exactly as the script does.
+    let folder = _tmp.path().join("by-hand");
+    write_download(&folder, "Kid A");
+    let folder = folder.join("Radiohead - Kid A (2000) [FLAC]");
+    let scanned = api
+        .get(&format!(
+            "/manualimport?folder={}&filterExistingFiles=true",
+            urlencode(&folder.to_string_lossy())
+        ))
+        .await;
+    let files: Vec<Value> = scanned
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|item| {
+            let artist = item["artist"]["id"].as_i64()?;
+            let album = item["album"]["id"].as_i64()?;
+            let release = item["albumReleaseId"].as_i64().filter(|r| *r > 0)?;
+            let tracks: Vec<i64> = item["tracks"]
+                .as_array()?
+                .iter()
+                .filter_map(|t| t["id"].as_i64())
+                .collect();
+            (!tracks.is_empty()).then(|| {
+                json!({
+                    "path": item["path"], "artistId": artist, "albumId": album,
+                    "albumReleaseId": release, "trackIds": tracks,
+                    "quality": item["quality"], "indexerFlags": 0,
+                    "downloadId": item["downloadId"], "disableReleaseSwitching": false,
+                })
+            })
+        })
+        .collect();
+    assert_eq!(files.len(), 3, "every file maps to a track: {scanned}");
+    assert!(files.iter().all(|f| f["albumId"] == album_id));
+
+    let cmd = api
+        .post_ok(
+            "/command",
+            json!({"name": "ManualImport", "files": files, "importMode": "auto", "replaceExistingFiles": false}),
+        )
+        .await;
+    let cid = cmd["id"].as_i64().unwrap();
+    let done = within(60, || async {
+        let st = api.get(&format!("/command/{cid}")).await;
+        st["status"] == "completed" || st["status"] == "failed"
+    })
+    .await;
+    let st = api.get(&format!("/command/{cid}")).await;
+    assert!(
+        done && st["status"] == "completed",
+        "ManualImport ended {st}"
+    );
+    let files = api.get(&format!("/trackfile?albumId={album_id}")).await;
+    assert_eq!(files.as_array().unwrap().len(), 3, "{files}");
+    assert_eq!(
+        walk(&library)
+            .iter()
+            .filter(|p| p.extension().is_some_and(|e| e == "flac"))
+            .count(),
+        3
+    );
+    // The source folder is untouched (imports copy or hardlink).
+    assert_eq!(walk(&folder).len(), 3);
+
+    stop.send(()).unwrap();
+    serve.await.unwrap().expect("clean shutdown");
+}
+
+fn urlencode(s: &str) -> String {
+    s.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}

@@ -2295,3 +2295,123 @@ pub(crate) async fn delete_delay_profile(
     let real = shim_delay_id(&fs, &id).await?;
     shim::delete_delay_profile(State(fs), Path(real)).await
 }
+
+// --- manual import ---------------------------------------------------------------
+
+/// `GET /manualimport?downloadId=|folder=[&artistId=]`: what a download (or a
+/// folder) would import as, file by file. Moves nothing.
+pub(crate) async fn manual_import(
+    State(fs): State<FaceState>,
+    Query(q): Params,
+) -> ApiResult<Json<Vec<Value>>> {
+    let state = app(&fs);
+    let Some(seam) = state.manual_import.clone() else {
+        return Ok(Json(Vec::new()));
+    };
+    let music = state.db.music();
+    let artist = match param(&q, "artistId").and_then(|v| v.parse::<i64>().ok()) {
+        Some(id) => music.artist(id).await?.map(|a| a.content_id),
+        None => None,
+    };
+    let download_id = param(&q, "downloadId").map(str::to_string);
+    let candidates = seam
+        .scan_music(crate::manual_import::MusicScanRequest {
+            folder: param(&q, "folder").map(str::to_string),
+            download_id: download_id.clone(),
+            artist,
+        })
+        .await
+        .map_err(ApiError::BadRequest)?;
+
+    // Render each album, its artist and its tracks once.
+    let album_ids: Vec<ContentId> = candidates.iter().filter_map(|c| c.album).collect();
+    let albums: HashMap<ContentId, Album> = music
+        .albums_by_content(&album_ids)
+        .await?
+        .into_iter()
+        .map(|a| (a.content_id, a))
+        .collect();
+    let renderer = AlbumRenderer::load(state).await?;
+    let unique: Vec<Album> = {
+        let mut seen = HashSet::new();
+        albums
+            .values()
+            .filter(|a| seen.insert(a.content_id))
+            .cloned()
+            .collect()
+    };
+    let rendered = renderer.render(state, &unique, false).await?;
+    let album_json: HashMap<ContentId, Value> =
+        unique.iter().map(|a| a.content_id).zip(rendered).collect();
+    let pressings = music.releases_for_albums(&album_ids).await?;
+    let mut tracks_by_content: HashMap<ContentId, cellarr_core::Track> = HashMap::new();
+    for a in &unique {
+        for t in music.tracks_for_album(a.content_id).await? {
+            tracks_by_content.insert(t.content_id, t);
+        }
+    }
+
+    let mut out = Vec::with_capacity(candidates.len());
+    for (i, c) in candidates.iter().enumerate() {
+        let album = c.album.and_then(|id| albums.get(&id));
+        let album_v = c.album.and_then(|id| album_json.get(&id)).cloned();
+        let artist_v = album_v.as_ref().and_then(|v| v.get("artist").cloned());
+        let release_id = album.map(|al| {
+            pressings
+                .get(&al.content_id)
+                .and_then(|list| {
+                    list.iter()
+                        .find(|r| Some(&r.mbid) == al.release_mbid.as_ref())
+                        .or(list.first())
+                        .map(|r| r.id)
+                })
+                .unwrap_or(al.id)
+        });
+        let tracks: Vec<Value> = c
+            .tracks
+            .iter()
+            .filter_map(|t| tracks_by_content.get(t))
+            .map(|t| {
+                json!({
+                    "id": t.id,
+                    "albumId": album.map_or(0, |a| a.id),
+                    "title": t.title,
+                    "trackNumber": t.position.to_string(),
+                    "absoluteTrackNumber": t.position,
+                    "mediumNumber": t.disc,
+                    "duration": t.duration_ms.unwrap_or(0),
+                    "hasFile": false,
+                })
+            })
+            .collect();
+        let quality_name = c.quality.clone().unwrap_or_else(|| "Unknown".into());
+        out.push(json!({
+            "id": i + 1,
+            "path": c.path,
+            "name": std::path::Path::new(&c.path)
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default(),
+            "size": c.size,
+            "artist": artist_v,
+            "album": album_v,
+            "albumReleaseId": release_id.unwrap_or(0),
+            "tracks": tracks,
+            "quality": {
+                "quality": {
+                    "id": cellarr_core::lidarr_quality_id(&quality_name),
+                    "name": quality_name,
+                },
+                "revision": { "version": 1, "real": 0, "isRepack": false },
+            },
+            "releaseGroup": "",
+            "indexerFlags": 0,
+            "downloadId": c.download_id,
+            "additionalFile": false,
+            "replaceExistingFiles": false,
+            "disableReleaseSwitching": false,
+            "rejections": c.rejections.iter().map(|r| json!({ "reason": r, "type": "permanent" })).collect::<Vec<_>>(),
+        }));
+    }
+    Ok(Json(out))
+}

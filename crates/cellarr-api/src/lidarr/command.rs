@@ -17,6 +17,7 @@ use time::OffsetDateTime;
 use super::app;
 use crate::commands;
 use crate::error::{ApiError, ApiResult};
+use crate::manual_import::MusicImportFile;
 use crate::shim::FaceState;
 use crate::state::AppState;
 
@@ -86,6 +87,19 @@ impl CommandLog {
             .collect()
     }
 
+    /// Set the message a finished command reports.
+    fn set_message(&self, id: i64, message: &str) {
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(e) = inner.entries.iter_mut().find(|e| e.id == id) {
+            if let Some(o) = e.body.as_object_mut() {
+                o.insert("completionMessage".into(), json!(message));
+            }
+        }
+    }
+
     fn cancel(&self, id: i64) {
         let mut inner = self
             .inner
@@ -95,6 +109,86 @@ impl CommandLog {
             e.cancelled = true;
         }
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TaskState {
+    Running,
+    Done,
+    Failed,
+}
+
+static TASKS: std::sync::Mutex<Vec<(String, TaskState)>> = std::sync::Mutex::new(Vec::new());
+
+fn task_state(id: &str) -> TaskState {
+    TASKS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .iter()
+        .rev()
+        .find(|(t, _)| t == id)
+        .map_or(TaskState::Done, |(_, s)| *s)
+}
+
+fn set_task(id: &str, state: TaskState) {
+    let mut g = TASKS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(e) = g.iter_mut().find(|(t, _)| t == id) {
+        e.1 = state;
+    } else {
+        g.push((id.to_string(), state));
+    }
+    if g.len() > 500 {
+        let drop = g.len() - 500;
+        g.drain(..drop);
+    }
+}
+
+/// `ManualImport`: import files exactly as the client mapped them, in the
+/// background; the command reports how it went.
+async fn start_manual_import(
+    state: &AppState,
+    body: &Value,
+) -> ApiResult<(String, Vec<MusicImportFile>)> {
+    if state.manual_import.is_none() {
+        return Err(ApiError::Domain("manual import is not available".into()));
+    }
+    let music = state.db.music();
+    let mut files = Vec::new();
+    for f in body
+        .get("files")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+    {
+        let path = f["path"].as_str().unwrap_or_default().to_string();
+        let Some(album) = f["albumId"].as_i64() else {
+            return Err(ApiError::BadRequest(format!("{path}: albumId is required")));
+        };
+        let album = music
+            .album(album)
+            .await?
+            .ok_or_else(|| ApiError::NotFound(format!("album {album} not found")))?;
+        let mut tracks = Vec::new();
+        for t in f["trackIds"].as_array().cloned().unwrap_or_default() {
+            if let Some(id) = t.as_i64() {
+                let track = music
+                    .track(id)
+                    .await?
+                    .ok_or_else(|| ApiError::NotFound(format!("track {id} not found")))?;
+                tracks.push(track.content_id);
+            }
+        }
+        files.push(MusicImportFile {
+            path,
+            album: album.content_id,
+            tracks,
+            download_id: f["downloadId"].as_str().map(str::to_string),
+        });
+    }
+    let task = uuid::Uuid::new_v4().to_string();
+    Ok((task, files))
 }
 
 /// Queue a job and return its id. The daemon's scheduler loop runs it; the
@@ -363,6 +457,15 @@ async fn status_of(state: &AppState, jobs: &[String], cancelled: bool) -> &'stat
     let mut running = false;
     let mut queued = false;
     for id in jobs {
+        // Work the face runs itself (a manual import) rather than queues.
+        if let Some(task) = id.strip_prefix("task:") {
+            match task_state(task) {
+                TaskState::Failed => return "failed",
+                TaskState::Running => running = true,
+                TaskState::Done => {}
+            }
+            continue;
+        }
         match all.iter().find(|j| &j.id == id).map(|j| j.state) {
             Some(JobState::Failed) => return "failed",
             Some(JobState::Running | JobState::Retrying) => running = true,
@@ -432,7 +535,14 @@ pub(crate) async fn create(
         .ok_or_else(|| ApiError::BadRequest("a command needs a name".into()))?
         .to_string();
     let mut body = body;
-    let jobs = if name.eq_ignore_ascii_case("searchsniper") {
+    let mut manual: Option<(String, Vec<MusicImportFile>)> = None;
+    let jobs = if name.eq_ignore_ascii_case("manualimport") {
+        let (task, files) = start_manual_import(state, &body).await?;
+        set_task(&task, TaskState::Running);
+        let jobs = vec![format!("task:{task}")];
+        manual = Some((task, files));
+        jobs
+    } else if name.eq_ignore_ascii_case("searchsniper") {
         let (jobs, message) = search_sniper(state).await?;
         if let Some(o) = body.as_object_mut() {
             o.insert("completionMessage".into(), json!(message));
@@ -444,6 +554,27 @@ pub(crate) async fn create(
     let id = state
         .lidarr_commands
         .record(&name, body.clone(), jobs.clone());
+    if let (Some((task, files)), Some(seam)) = (manual, state.manual_import.clone()) {
+        let state2 = state.clone();
+        tokio::spawn(async move {
+            let (outcome, message) = match seam.import_music(files).await {
+                Ok((n, errors)) if errors.is_empty() => {
+                    (TaskState::Done, format!("Imported {n} file(s)"))
+                }
+                Ok((n, errors)) => (
+                    if n > 0 {
+                        TaskState::Done
+                    } else {
+                        TaskState::Failed
+                    },
+                    format!("Imported {n} file(s); {}", errors.join("; ")),
+                ),
+                Err(e) => (TaskState::Failed, e),
+            };
+            state2.lidarr_commands.set_message(id, &message);
+            set_task(&task, outcome);
+        });
+    }
     let status = status_of(state, &jobs, false).await;
     Ok(Json(resource(
         id,
