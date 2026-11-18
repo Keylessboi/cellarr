@@ -804,13 +804,15 @@ async fn the_same_flow_works_with_a_plugin_indexer_and_a_plugin_download_client(
         files.as_array().is_some_and(|f| f.len() == 3)
     })
     .await;
-    assert!(
-        imported,
-        "not imported. searches: {:?} adds: {:?} queue: {}",
-        stub.searches.lock().unwrap(),
-        stub.added.lock().unwrap(),
-        api.get("/queue?page=1&pageSize=50").await
-    );
+    if !imported {
+        // Copied out first: a std mutex guard must not live across the await.
+        let searches = stub.searches.lock().unwrap().clone();
+        let adds = stub.added.lock().unwrap().clone();
+        panic!(
+            "not imported. searches: {searches:?} adds: {adds:?} queue: {}",
+            api.get("/queue?page=1&pageSize=50").await
+        );
+    }
     assert_eq!(
         stub.added.lock().unwrap().len(),
         1,
@@ -865,15 +867,12 @@ async fn the_same_flow_works_through_a_real_lidarr_sidecar() {
     .await;
     if !imported {
         let sidecar_queue = match &_sidecar {
-            Some(_) => {
-                let url = std::env::var("LIDARR_SIDECAR_URL_SEEN").unwrap_or_default();
-                url
-            }
+            Some(_) => std::env::var("LIDARR_SIDECAR_URL_SEEN").unwrap_or_default(),
             None => String::new(),
         };
+        let adds = stub.added.lock().unwrap().clone();
         panic!(
-            "not imported. adds: {:?}\ncellarr queue: {}\n{sidecar_queue}",
-            stub.added.lock().unwrap(),
+            "not imported. adds: {adds:?}\ncellarr queue: {}\n{sidecar_queue}",
             api.get("/queue?page=1&pageSize=50").await
         );
     }

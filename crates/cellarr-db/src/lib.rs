@@ -26,6 +26,10 @@
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
+// Queries are written `sqlx::query(&pq(..))`. The borrow is needless on SQLite,
+// where `pq` returns `&str`, and required on Postgres, where it returns a
+// `String`; one spelling has to compile on both.
+#![cfg_attr(not(feature = "postgres"), allow(clippy::needless_borrow))]
 
 mod convert;
 mod db;

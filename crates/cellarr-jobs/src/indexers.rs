@@ -154,6 +154,8 @@ impl DbIndexerSet {
         self
     }
 
+    /// Use the daemon's shared fetcher pool instead of a private one, so a
+    /// FlareSolverr session outlives this set and is reused by the next.
     pub fn with_fetcher_pool(mut self, fetchers: Arc<FetcherPool>) -> Self {
         self.fetchers = fetchers;
         self
@@ -253,17 +255,20 @@ impl DbIndexerSet {
         // A loaded plugin implements this kind: it takes its own settings.
         #[cfg(feature = "plugins")]
         if let (Some(entry), Some(sidecar)) = (
-            cellarr_plugins::catalog::find(&config.kind)
-                .filter(|e| e.runtime == "dotnet" && e.kind == cellarr_plugins::catalog::EntryKind::Indexer),
+            cellarr_plugins::catalog::find(&config.kind).filter(|e| {
+                e.runtime == "dotnet" && e.kind == cellarr_plugins::catalog::EntryKind::Indexer
+            }),
             cellarr_plugins::sidecar::global(),
         ) {
-            return Ok(NabAdapter::Sidecar(cellarr_plugins::sidecar::SidecarIndexer::new(
-                sidecar,
-                entry.name,
-                config.settings.clone(),
-                config.id,
-                config.name.clone(),
-            )));
+            return Ok(NabAdapter::Sidecar(
+                cellarr_plugins::sidecar::SidecarIndexer::new(
+                    sidecar,
+                    entry.name,
+                    config.settings.clone(),
+                    config.id,
+                    config.name.clone(),
+                ),
+            ));
         }
         #[cfg(feature = "plugins")]
         if let Some(plugin) = cellarr_plugins::registry::global().get(&config.kind) {
@@ -511,9 +516,10 @@ impl Indexer for DbIndexerSet {
     }
 
     async fn latest(&self) -> Result<Vec<Release>, Self::Error> {
-        self.fan_out(Capability::Rss, |adapter| async move {
-            adapter.latest().await
-        })
+        self.fan_out(
+            Capability::Rss,
+            |adapter| async move { adapter.latest().await },
+        )
         .await
     }
 
@@ -958,7 +964,7 @@ search:
 #[cfg(test)]
 mod deferred_resolve_routing_tests {
     use super::*;
-    use cellarr_core::{DEFERRED_LINK, IndexerId, Protocol};
+    use cellarr_core::{IndexerId, Protocol, DEFERRED_LINK};
 
     fn deferred_release(indexer_id: IndexerId) -> Release {
         Release {
@@ -1012,5 +1018,4 @@ mod deferred_resolve_routing_tests {
             .expect("a resolved release needs no indexer");
         assert_eq!(out.download_url, ready.download_url);
     }
-
 }

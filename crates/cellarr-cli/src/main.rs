@@ -204,7 +204,6 @@ struct TracingGuards {
     _otel: Option<otel::OtelGuard>,
 }
 
-#[must_use]
 fn init_tracing(
     filter: &str,
     log_dir: Option<&std::path::Path>,

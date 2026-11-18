@@ -12,6 +12,7 @@
 //!
 //! A plugin that fails to load is reported and skipped; the others still load.
 
+use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock, RwLock};
@@ -83,19 +84,20 @@ impl Registry {
             match load_one(&wasm, manifest.as_deref(), Arc::clone(&transport)) {
                 Ok(plugin) => {
                     let name = plugin.info().name.clone();
-                    if reg.plugins.contains_key(&name) {
-                        reg.failures.push(LoadFailure {
+                    match reg.plugins.entry(name) {
+                        Entry::Occupied(taken) => reg.failures.push(LoadFailure {
                             path: wasm,
-                            reason: format!("another plugin is already named {name}"),
-                        });
-                    } else {
-                        tracing::info!(
-                            plugin = %name,
-                            version = %plugin.info().version,
-                            kind = ?plugin.kind(),
-                            "plugin loaded"
-                        );
-                        reg.plugins.insert(name, Arc::new(plugin));
+                            reason: format!("another plugin is already named {}", taken.key()),
+                        }),
+                        Entry::Vacant(slot) => {
+                            tracing::info!(
+                                plugin = %slot.key(),
+                                version = %plugin.info().version,
+                                kind = ?plugin.kind(),
+                                "plugin loaded"
+                            );
+                            slot.insert(Arc::new(plugin));
+                        }
                     }
                 }
                 Err(e) => {
