@@ -261,8 +261,13 @@ async fn config_blocklist_and_mappings_come_across() {
     let report = import(&[&src], &db).await.unwrap();
     let m = report.music.unwrap();
     assert_eq!(
-        (m.blocklist, m.remote_path_mappings, m.history_skipped),
-        (1, 1, 1)
+        (
+            m.blocklist,
+            m.remote_path_mappings,
+            m.history,
+            m.history_skipped
+        ),
+        (1, 1, 1, 0)
     );
 
     let entries = BlocklistRepository::list(&db.blocklist()).await.unwrap();
@@ -354,4 +359,19 @@ async fn download_clients_keep_their_own_category_and_plugin_implementations_car
     let plugin = clients.iter().find(|c| c.name == "Plugin client").unwrap();
     assert_eq!(plugin.kind, "pluginprovidedclient");
     assert_eq!(plugin.settings["baseUrl"], "http://slskd:5030");
+}
+
+#[tokio::test]
+async fn history_is_carried_over_row_for_row() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = lidarr_db(dir.path()).await;
+    let db = dest(dir.path()).await;
+    import(&[&src], &db).await.unwrap();
+    let (total, rows) = db
+        .music()
+        .music_history(&cellarr_db::MusicHistoryFilter::default(), false, 0, 10)
+        .await
+        .unwrap();
+    assert_eq!(total, 1);
+    assert!(rows[0].id.is_some(), "Lidarr's id is kept");
 }
