@@ -2,7 +2,7 @@
 """Compare a live Lidarr with a shadow cellarr migrated from it: same data, by id.
 
     scripts/lidarr-shadow-diff LIDARR_URL CELLARR_URL [--lidarr-key K] [--cellarr-key K]
-                               [--sample N] [--max-shown N] [--report FILE]
+                               [--sample N] [--no-albums] [--max-shown N] [--report FILE]
 
 Keys default to $LIDARR_API_KEY / $CELLARR_API_KEY. Only GET requests are made, to
 both: it is safe to run against production. Compares what a cutover has to preserve:
@@ -10,6 +10,7 @@ both: it is safe to run against production. Compares what a cutover has to prese
   artists       id, MusicBrainz id, name, path, monitoring, profiles
   albums        id, MusicBrainz id, title, artist, monitoring, the pinned pressing
                 and the pressings' ids, and how many track files each has
+                (skipped with --no-albums: the full list is Lidarr's heaviest call)
   track files   per artist (all, or --sample N artists): id, path, album, quality
   wanted        the missing-album ids
   queue         the download ids in flight
@@ -131,6 +132,8 @@ def main():
     ap.add_argument("--lidarr-key", default=os.environ.get("LIDARR_API_KEY", ""))
     ap.add_argument("--cellarr-key", default=os.environ.get("CELLARR_API_KEY", ""))
     ap.add_argument("--sample", type=int, default=0, help="track files of N random artists (0 = all)")
+    ap.add_argument("--no-albums", action="store_true",
+                    help="skip the full album list (Lidarr's heaviest call) and the pressings")
     ap.add_argument("--max-shown", type=int, default=20)
     ap.add_argument("--report", help="also write the report here")
     a = ap.parse_args()
@@ -170,21 +173,22 @@ def main():
     ])
 
     # --- albums -----------------------------------------------------------------
-    albums_live = live.get("/album", timeout=1800)
-    albums_shadow = shadow.get("/album", timeout=1800)
-    compare_rows(report, "albums", albums_live, albums_shadow, [
-        "title", "foreignAlbumId", "artistId", "monitored", "anyReleaseOk",
-        "statistics.trackFileCount",
-    ])
-    a, b = by_id(albums_live), by_id(albums_shadow)
-    for i in sorted(set(a) & set(b), key=str):
-        ra = {r["id"]: (r.get("foreignReleaseId"), r.get("monitored")) for r in a[i].get("releases") or []}
-        rb = {r["id"]: (r.get("foreignReleaseId"), r.get("monitored")) for r in b[i].get("releases") or []}
-        if ra and rb and ra != rb:
-            pin_a = [k for k, v in ra.items() if v[1]]
-            pin_b = [k for k, v in rb.items() if v[1]]
-            report.diff("album pressings", f"album {i}: ids {sorted(ra)} pinned {pin_a} vs ids {sorted(rb)} pinned {pin_b}")
-    report.ok("album pressings")
+    if not a.no_albums:
+        albums_live = live.get("/album", timeout=1800)
+        albums_shadow = shadow.get("/album", timeout=1800)
+        compare_rows(report, "albums", albums_live, albums_shadow, [
+            "title", "foreignAlbumId", "artistId", "monitored", "anyReleaseOk",
+            "statistics.trackFileCount",
+        ])
+        al, ash = by_id(albums_live), by_id(albums_shadow)
+        for i in sorted(set(al) & set(ash), key=str):
+            ra = {r["id"]: (r.get("foreignReleaseId"), r.get("monitored")) for r in al[i].get("releases") or []}
+            rb = {r["id"]: (r.get("foreignReleaseId"), r.get("monitored")) for r in ash[i].get("releases") or []}
+            if ra and rb and ra != rb:
+                pin_a = [k for k, v in ra.items() if v[1]]
+                pin_b = [k for k, v in rb.items() if v[1]]
+                report.diff("album pressings", f"album {i}: ids {sorted(ra)} pinned {pin_a} vs ids {sorted(rb)} pinned {pin_b}")
+        report.ok("album pressings")
 
     # --- track files ------------------------------------------------------------
     ids = [x["id"] for x in artists_live]
