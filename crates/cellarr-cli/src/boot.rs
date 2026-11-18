@@ -334,7 +334,9 @@ impl Daemon {
             state.db.clone(),
             std::sync::Arc::clone(&registry),
         ));
-        let state = state.with_manual_import(manual_import);
+        let state = state
+            .with_manual_import(manual_import)
+            .with_read_only(config.shadow);
 
         // The import-list sync seam (POST /api/v3/importlist/{id}/sync + the
         // ImportListSync command) runs the safeguarded fetch+add over the live
@@ -392,7 +394,11 @@ impl Daemon {
             .map_err(|e| anyhow::anyhow!("creating the default music profiles: {e}"))?;
 
         // Register the recurring maintenance jobs the daemon runs unattended.
-        register_recurring(&state).await?;
+        if config.shadow {
+            info!("shadow mode: read-only, no scheduled jobs");
+        } else {
+            register_recurring(&state).await?;
+        }
 
         // 4. Bind the API listener.
         let bind_addr = SocketAddr::new(config.api.bind, config.api.port);

@@ -8,7 +8,7 @@
 //! Errors are the structured [`ApiError`] bodies (`code` + `message`), never
 //! bare statuses, so clients branch on `code`.
 
-use axum::extract::{Path, State, Query};
+use axum::extract::{Path, Query, State};
 use axum::routing::{get, post};
 use axum::{middleware, Json, Router};
 use cellarr_core::repo::{ContentRepository, ProfileRepository};
@@ -275,7 +275,9 @@ async fn list_content_subtitles(
     Path(id): Path<String>,
 ) -> ApiResult<Json<Vec<cellarr_core::Subtitle>>> {
     let content_id = ContentId::from_uuid(parse_uuid(&id, "content")?);
-    Ok(Json(state.db.subtitles().list_for_content(content_id).await?))
+    Ok(Json(
+        state.db.subtitles().list_for_content(content_id).await?,
+    ))
 }
 
 async fn content_history(

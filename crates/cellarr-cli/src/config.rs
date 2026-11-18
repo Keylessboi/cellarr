@@ -69,6 +69,11 @@ pub struct Config {
     /// that hosts native Lidarr plugins.
     #[serde(default)]
     pub plugins: PluginsConfig,
+    /// Shadow mode (`CELLARR_SHADOW=true`): run beside a live install, from a
+    /// copy of its data, without acting. No scheduled job is registered (nothing
+    /// is searched, grabbed, imported or renamed) and the API refuses writes.
+    #[serde(default)]
+    pub shadow: bool,
     /// Optional path to a declarative **managed-config** file (config-as-code).
     /// When set, the daemon reconciles its DB from this file on boot (after
     /// migrations, before serving): tags/root folders/libraries/quality
@@ -316,6 +321,7 @@ impl Default for Config {
             media_management: MediaManagementConfig::default(),
             music: MusicConfig::default(),
             plugins: PluginsConfig::default(),
+            shadow: false,
             managed_config_path: None,
             max_active_downloads: None,
             upgrade_search_limit: None,

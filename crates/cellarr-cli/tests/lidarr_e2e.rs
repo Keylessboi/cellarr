@@ -1395,3 +1395,73 @@ async fn every_field_the_production_clients_read_has_the_type_they_parse() {
     stop.send(()).unwrap();
     serve.await.unwrap().expect("clean shutdown");
 }
+
+#[tokio::test]
+async fn a_shadow_daemon_reads_but_never_writes_or_acts() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut config = Config {
+        data_dir: tmp.path().join("data"),
+        ..Config::default()
+    };
+    config.api.port = 0;
+    config.shadow = true;
+    let daemon = Daemon::boot(&config).await.expect("daemon boots");
+    let addr = daemon.addr();
+    let state = daemon.state().clone();
+    let (stop, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let serve = tokio::spawn(async move {
+        daemon
+            .serve_until(async move {
+                let _ = stop_rx.await;
+            })
+            .await
+    });
+    let http = reqwest::Client::new();
+    let base = format!("http://{addr}/lidarr/api/v1");
+    assert!(
+        within(20, || async {
+            http.get(format!("{base}/system/status"))
+                .send()
+                .await
+                .is_ok_and(|r| r.status().is_success())
+        })
+        .await
+    );
+    assert!(http
+        .get(format!("{base}/artist"))
+        .send()
+        .await
+        .unwrap()
+        .status()
+        .is_success());
+    for (method, path, body) in [
+        (
+            reqwest::Method::POST,
+            "/command",
+            json!({"name": "MissingAlbumSearch"}),
+        ),
+        (reqwest::Method::POST, "/rootfolder", json!({"path": "/x"})),
+        (reqwest::Method::PUT, "/album/1", json!({"monitored": true})),
+        (reqwest::Method::DELETE, "/artist/1", json!({})),
+    ] {
+        let r = http
+            .request(method.clone(), format!("{base}{path}"))
+            .json(&body)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 403, "{method} {path} is refused in shadow mode");
+    }
+    // Nothing is scheduled to run on its own.
+    let jobs = cellarr_api::commands::list_jobs(&state.scheduler)
+        .await
+        .unwrap_or_default();
+    assert!(
+        jobs.is_empty(),
+        "no scheduled jobs in shadow mode: {}",
+        jobs.len()
+    );
+
+    stop.send(()).unwrap();
+    serve.await.unwrap().expect("clean shutdown");
+}

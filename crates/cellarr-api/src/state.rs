@@ -59,6 +59,9 @@ impl CachedArtwork {
 /// The injected dependency bundle for the API.
 #[derive(Clone)]
 pub struct AppState {
+    /// Shadow mode: the API refuses every write (it serves reads only), so a copy
+    /// of a live install can run beside it and be compared without acting.
+    pub read_only: bool,
     /// The persistence layer (reads via repos, writes via the writer-actor).
     pub db: Database,
     /// The live push-event bus, driven by real domain transitions.
@@ -189,6 +192,7 @@ impl AppState {
             release_search: None,
             release_grab: None,
             manual_import: None,
+            read_only: false,
             import_list_sync: None,
             queue_client: None,
             download_client_probe: None,
@@ -244,6 +248,15 @@ impl AppState {
     /// through the real crash-safe import path. Builder form so the base
     /// [`AppState::new`] stays offline (the shim reports manual import unavailable)
     /// and tests can opt a fake in.
+    #[must_use]
+    /// Serve reads only (shadow mode).
+    #[must_use]
+    pub fn with_read_only(mut self, read_only: bool) -> Self {
+        self.read_only = read_only;
+        self
+    }
+
+    /// Attach the manual-import seam.
     #[must_use]
     pub fn with_manual_import(mut self, manual_import: Arc<dyn ManualImport>) -> Self {
         self.manual_import = Some(manual_import);

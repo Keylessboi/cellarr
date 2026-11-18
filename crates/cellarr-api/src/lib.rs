@@ -56,6 +56,38 @@ pub use notifications::default_senders;
 pub use state::AppState;
 pub use webhook::ReqwestWebhookSender;
 
+/// Shadow mode's guard: anything but a read is refused, before it reaches a
+/// handler. Logging in to the web UI is still allowed.
+async fn read_only_guard(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    req: axum::http::Request<axum::body::Body>,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::http::Method;
+    use axum::response::IntoResponse;
+    let read = matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS);
+    let login = req.uri().path().ends_with("/login") || req.uri().path().ends_with("/logout");
+    if state.read_only && !read && !login {
+        return (
+            axum::http::StatusCode::FORBIDDEN,
+            axum::Json(serde_json::json!({
+                "message": "cellarr is running in shadow mode: read-only",
+                "description": "Shadow mode serves reads only, so it can run beside a live install.",
+            })),
+        )
+            .into_response();
+    }
+    next.run(req).await
+}
+
+/// Apply the shadow-mode guard to a router.
+pub(crate) fn guarded(router: Router, state: &AppState) -> Router {
+    router.layer(axum::middleware::from_fn_with_state(
+        state.clone(),
+        read_only_guard,
+    ))
+}
+
 /// Build the complete application router.
 ///
 /// Surfaces:
@@ -73,7 +105,8 @@ pub use webhook::ReqwestWebhookSender;
 /// `/sonarr|radarr/api/v3/*`) path returns structured JSON — **not** the SPA
 /// HTML (bug B1). Only genuinely non-API paths reach the asset fallback.
 pub fn build_router(state: AppState) -> Router {
-    Router::new()
+    let guard_state = state.clone();
+    let app = Router::new()
         .nest("/api/v1", native::router(state.clone()))
         .nest("/lidarr/api/v1", lidarr::router(state.clone()))
         .nest("/api/v3", shim::router(state.clone(), shim::Face::Cellarr))
@@ -122,7 +155,8 @@ pub fn build_router(state: AppState) -> Router {
         // (the gate never touches it). Added before TraceLayer so traces wrap the
         // gate decision too.
         .layer(axum::middleware::from_fn_with_state(state, webauth::gate))
-        .layer(TraceLayer::new_for_http())
+        .layer(TraceLayer::new_for_http());
+    guarded(app, &guard_state)
 }
 
 /// Serve the API on an already-bound listener until the process is stopped.
@@ -168,7 +202,8 @@ pub async fn serve_lidarr_with_shutdown<F>(
 where
     F: std::future::Future<Output = ()> + Send + 'static,
 {
-    axum::serve(listener, lidarr::listener_router(state).into_make_service())
+    let router = guarded(lidarr::listener_router(state.clone()), &state);
+    axum::serve(listener, router.into_make_service())
         .with_graceful_shutdown(shutdown)
         .await
 }
