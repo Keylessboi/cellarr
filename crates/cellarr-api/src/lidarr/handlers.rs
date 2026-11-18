@@ -204,6 +204,11 @@ impl AlbumRenderer {
     }
 }
 
+/// Render albums (with their artists and statistics) for other modules.
+pub(crate) async fn render_albums(state: &AppState, albums: &[Album]) -> ApiResult<Vec<Value>> {
+    album_resources(state, albums, false).await
+}
+
 /// Render albums with their artists and statistics.
 async fn album_resources(
     state: &AppState,

@@ -56,8 +56,11 @@ pub struct MusicReport {
     pub blocklist: usize,
     /// Remote path mappings.
     pub remote_path_mappings: usize,
-    /// History rows left behind (cellarr starts a fresh history).
+    /// History rows left behind (none since history is carried over; kept so a
+    /// report reads the same).
     pub history_skipped: usize,
+    /// History rows carried over, with their ids.
+    pub history: usize,
 }
 
 pub(crate) async fn table_exists(pool: &SqlitePool, name: &str) -> Result<bool> {
@@ -726,10 +729,52 @@ pub(crate) async fn import(pool: &SqlitePool, db: &Database) -> Result<MusicRepo
         }
     }
     report.blocklist = import_blocklist(pool, db, &albums_by_id).await?;
-    report.history_skipped = count(pool, "History").await;
+    report.history = import_history(pool, db).await?;
+    report.history_skipped = count(pool, "History").await.saturating_sub(report.history);
     // Silence the unused-import lint for the helper some builds do not reach.
     let _ = normalize_name;
     Ok(report)
+}
+
+/// Lidarr's history, row for row with its ids, so a client reads one continuous
+/// history across the move (who grabbed what, from where, and where it landed).
+/// Streamed: an install's history is often the largest table it has.
+async fn import_history(pool: &SqlitePool, db: &Database) -> Result<usize> {
+    use futures::TryStreamExt;
+    if !table_exists(pool, "History").await? {
+        return Ok(0);
+    }
+    let music = db.music();
+    let mut rows = sqlx::query(
+        "SELECT Id, AlbumId, ArtistId, TrackId, SourceTitle, Quality, Date, EventType, Data, DownloadId
+         FROM History ORDER BY Id ASC",
+    )
+    .fetch(pool);
+    let mut batch = Vec::with_capacity(2000);
+    let mut n = 0;
+    while let Some(r) = rows.try_next().await? {
+        batch.push(cellarr_db::MusicHistoryRow {
+            id: r.try_get::<i64, _>("Id").ok(),
+            album_id: r.try_get("AlbumId").unwrap_or(0),
+            artist_id: r.try_get("ArtistId").unwrap_or(0),
+            track_id: r.try_get("TrackId").unwrap_or(0),
+            source_title: opt_text(&r, "SourceTitle").unwrap_or_default(),
+            quality: parse_json(opt_text(&r, "Quality")),
+            date: timestamp(opt_text(&r, "Date")).unwrap_or_else(|| "1970-01-01T00:00:00Z".into()),
+            event_type: r.try_get("EventType").unwrap_or(0),
+            data: parse_json(opt_text(&r, "Data")),
+            download_id: opt_text(&r, "DownloadId").filter(|d| !d.is_empty()),
+        });
+        if batch.len() >= 2000 {
+            n += batch.len();
+            music
+                .append_music_history(std::mem::take(&mut batch))
+                .await?;
+        }
+    }
+    n += batch.len();
+    music.append_music_history(batch).await?;
+    Ok(n)
 }
 
 /// Lidarr's blocklist, keyed by the release's name (the identity it recorded) or,

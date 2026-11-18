@@ -268,6 +268,24 @@ async fn seeded() -> Lidarr {
         })
         .await
         .unwrap();
+    // The Lidarr face reads the Lidarr-shaped music history the runner writes.
+    state
+        .db
+        .music()
+        .append_music_history(vec![cellarr_db::MusicHistoryRow {
+            id: None,
+            album_id: album.id,
+            artist_id: 1,
+            track_id: 0,
+            source_title: release.title.clone(),
+            quality: serde_json::json!({"quality": 6, "revision": {"version": 1, "real": 0, "isRepack": false}}),
+            date: "2026-11-18T10:00:00Z".into(),
+            event_type: 1,
+            data: serde_json::json!({"indexer": "Prowlarr", "guid": "g1", "size": 300_000_000}),
+            download_id: Some("ABC".into()),
+        }])
+        .await
+        .unwrap();
     cellarr_core::BlocklistRepository::add(
         &state.db.blocklist(),
         &cellarr_core::BlocklistEntry::from_release(

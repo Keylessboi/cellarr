@@ -2336,3 +2336,214 @@ impl MusicRepo {
         .await
     }
 }
+
+// --- music history (Lidarr-shaped) ---------------------------------------------
+
+/// One history row, as Lidarr-speaking clients read it.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct MusicHistoryRow {
+    /// Row id; `None` assigns the next one.
+    pub id: Option<i64>,
+    /// Album id (0 if none).
+    pub album_id: i64,
+    /// Artist id (0 if none).
+    pub artist_id: i64,
+    /// Track id (0 if none).
+    pub track_id: i64,
+    /// The release title.
+    pub source_title: String,
+    /// `{"quality": <lidarr id>, "revision": {...}}`.
+    pub quality: serde_json::Value,
+    /// RFC 3339.
+    pub date: String,
+    /// Lidarr's event number.
+    pub event_type: i64,
+    /// Free-form details.
+    pub data: serde_json::Value,
+    /// The download client's id for the download.
+    pub download_id: Option<String>,
+}
+
+/// What to filter music history by.
+#[derive(Debug, Clone, Default)]
+pub struct MusicHistoryFilter {
+    /// One album.
+    pub album_id: Option<i64>,
+    /// These artists.
+    pub artist_ids: Vec<i64>,
+    /// These event numbers.
+    pub event_types: Vec<i64>,
+    /// One download.
+    pub download_id: Option<String>,
+    /// On or after this RFC 3339 date.
+    pub since: Option<String>,
+}
+
+fn row_to_history(row: DbRow) -> Result<MusicHistoryRow> {
+    let quality: String = row.try_get("quality")?;
+    let data: String = row.try_get("data")?;
+    Ok(MusicHistoryRow {
+        id: Some(row.try_get("id")?),
+        album_id: row.try_get("album_id")?,
+        artist_id: row.try_get("artist_id")?,
+        track_id: row.try_get("track_id")?,
+        source_title: row.try_get("source_title")?,
+        quality: serde_json::from_str(&quality).unwrap_or(serde_json::Value::Null),
+        date: row.try_get("date")?,
+        event_type: row.try_get("event_type")?,
+        data: serde_json::from_str(&data).unwrap_or(serde_json::Value::Null),
+        download_id: row.try_get("download_id")?,
+    })
+}
+
+async fn insert_history(conn: &mut DbConnection, r: &MusicHistoryRow) -> Result<()> {
+    let quality = r.quality.to_string();
+    let data = r.data.to_string();
+    match r.id {
+        Some(id) => {
+            sqlx::query(pq(
+                "INSERT INTO music_history (id, album_id, artist_id, track_id, source_title, quality,
+                     date, event_type, data, download_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) ON CONFLICT(id) DO NOTHING",
+            ))
+            .bind(id)
+            .bind(r.album_id)
+            .bind(r.artist_id)
+            .bind(r.track_id)
+            .bind(&r.source_title)
+            .bind(&quality)
+            .bind(&r.date)
+            .bind(r.event_type)
+            .bind(&data)
+            .bind(&r.download_id)
+            .execute(&mut *conn)
+            .await?;
+        }
+        None => {
+            sqlx::query(pq(
+                "INSERT INTO music_history (album_id, artist_id, track_id, source_title, quality,
+                     date, event_type, data, download_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            ))
+            .bind(r.album_id)
+            .bind(r.artist_id)
+            .bind(r.track_id)
+            .bind(&r.source_title)
+            .bind(&quality)
+            .bind(&r.date)
+            .bind(r.event_type)
+            .bind(&data)
+            .bind(&r.download_id)
+            .execute(&mut *conn)
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+impl MusicRepo {
+    /// Append history rows (a migration's, with ids; or new ones).
+    ///
+    /// # Errors
+    /// Returns a [`DbError`] on write failure.
+    pub async fn append_music_history(&self, rows: Vec<MusicHistoryRow>) -> Result<()> {
+        if rows.is_empty() {
+            return Ok(());
+        }
+        self.write(move |conn| {
+            Box::pin(async move {
+                for r in &rows {
+                    insert_history(conn, r).await?;
+                }
+                Ok(())
+            })
+        })
+        .await
+    }
+
+    /// A page of music history, newest first (or oldest first), with the total.
+    ///
+    /// # Errors
+    /// Returns a [`DbError`] on query failure.
+    pub async fn music_history(
+        &self,
+        filter: &MusicHistoryFilter,
+        ascending: bool,
+        offset: u64,
+        limit: u64,
+    ) -> Result<(u64, Vec<MusicHistoryRow>)> {
+        let mut clauses = Vec::new();
+        let mut binds: Vec<String> = Vec::new();
+        let mut n = 0;
+        let mut next = || {
+            n += 1;
+            format!("?{n}")
+        };
+        if let Some(a) = filter.album_id {
+            clauses.push(format!("album_id = {}", next()));
+            binds.push(a.to_string());
+        }
+        if !filter.artist_ids.is_empty() {
+            let marks: Vec<String> = filter
+                .artist_ids
+                .iter()
+                .map(|id| {
+                    binds.push(id.to_string());
+                    next()
+                })
+                .collect();
+            clauses.push(format!("artist_id IN ({})", marks.join(",")));
+        }
+        if !filter.event_types.is_empty() {
+            let marks: Vec<String> = filter
+                .event_types
+                .iter()
+                .map(|e| {
+                    binds.push(e.to_string());
+                    next()
+                })
+                .collect();
+            clauses.push(format!("event_type IN ({})", marks.join(",")));
+        }
+        let mut text_binds: Vec<String> = Vec::new();
+        if let Some(d) = &filter.download_id {
+            clauses.push(format!("lower(download_id) = lower({})", next()));
+            text_binds.push(d.clone());
+        }
+        if let Some(s) = &filter.since {
+            clauses.push(format!("date >= {}", next()));
+            text_binds.push(s.clone());
+        }
+        let wher = if clauses.is_empty() {
+            String::new()
+        } else {
+            format!("WHERE {}", clauses.join(" AND "))
+        };
+        let order = if ascending { "ASC" } else { "DESC" };
+        let count_sql = format!("SELECT count(*) AS n FROM music_history {wher}");
+        let page_sql = format!(
+            "SELECT * FROM music_history {wher} ORDER BY date {order}, id {order} LIMIT {limit} OFFSET {offset}"
+        );
+        let count_sql = pq(&count_sql).to_string();
+        let page_sql = pq(&page_sql).to_string();
+        let mut count_q = sqlx::query(&count_sql);
+        let mut page_q = sqlx::query(&page_sql);
+        for b in &binds {
+            let v = b.parse::<i64>().unwrap_or(0);
+            count_q = count_q.bind(v);
+            page_q = page_q.bind(v);
+        }
+        for t in &text_binds {
+            count_q = count_q.bind(t.clone());
+            page_q = page_q.bind(t.clone());
+        }
+        let total: i64 = count_q.fetch_one(&self.pool).await?.try_get("n")?;
+        let rows = page_q
+            .fetch_all(&self.pool)
+            .await?
+            .into_iter()
+            .map(row_to_history)
+            .collect::<Result<Vec<_>>>()?;
+        Ok((u64::try_from(total).unwrap_or(0), rows))
+    }
+}

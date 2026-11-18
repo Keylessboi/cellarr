@@ -333,7 +333,7 @@ async fn run_migrate(config: &Config, sources: &[PathBuf]) -> Result<()> {
         println!(
             "imported music: {} artists, {} albums, {} tracks, {} track files recognized in place \
              ({} left out: no track points at them); {} quality profiles, {} metadata profiles, \
-             {} blocklist entries, {} path mappings; {} history rows not carried over",
+             {} blocklist entries, {} path mappings; {} history rows carried over",
             m.artists,
             m.albums,
             m.tracks,
@@ -343,7 +343,7 @@ async fn run_migrate(config: &Config, sources: &[PathBuf]) -> Result<()> {
             m.metadata_profiles,
             m.blocklist,
             m.remote_path_mappings,
-            m.history_skipped,
+            m.history,
         );
     }
     let p = &report.preview;

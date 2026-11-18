@@ -693,3 +693,279 @@ pub(crate) async fn album_by_id(
             .remove(0),
     ))
 }
+
+// --- music history, as Lidarr serves it ---------------------------------------
+
+/// Lidarr's name for an event number.
+fn event_type_name(n: i64) -> &'static str {
+    match n {
+        1 => "grabbed",
+        2 => "artistFolderImported",
+        3 => "trackFileImported",
+        4 => "downloadFailed",
+        5 => "trackFileDeleted",
+        6 => "trackFileRenamed",
+        7 => "albumImportIncomplete",
+        8 => "downloadImported",
+        9 => "trackFileRetagged",
+        10 => "downloadIgnored",
+        _ => "unknown",
+    }
+}
+
+/// An event filter value: Lidarr's number, or its name.
+fn event_type_number(v: &str) -> Option<i64> {
+    v.parse::<i64>()
+        .ok()
+        .or_else(|| (0..=10).find(|n| event_type_name(*n).eq_ignore_ascii_case(v.trim())))
+}
+
+/// Lidarr keeps `data` as strings; so do its clients.
+fn string_data(data: &Value) -> Value {
+    let mut out = serde_json::Map::new();
+    if let Some(o) = data.as_object() {
+        for (k, v) in o {
+            match v {
+                Value::Null => {}
+                Value::String(s) => {
+                    out.insert(k.clone(), json!(s));
+                }
+                other => {
+                    out.insert(k.clone(), json!(other.to_string()));
+                }
+            }
+        }
+    }
+    Value::Object(out)
+}
+
+async fn render_music_history(
+    state: &AppState,
+    rows: &[cellarr_db::MusicHistoryRow],
+    embed_album: bool,
+    embed_artist: bool,
+) -> ApiResult<Vec<Value>> {
+    let music = state.db.music();
+    let mut albums: HashMap<i64, Value> = HashMap::new();
+    let mut artists: HashMap<i64, Value> = HashMap::new();
+    if embed_album || embed_artist {
+        let mut seen = std::collections::BTreeSet::new();
+        let mut list = Vec::new();
+        for r in rows {
+            if r.album_id > 0 && seen.insert(r.album_id) {
+                if let Some(a) = music.album(r.album_id).await? {
+                    list.push(a);
+                }
+            }
+        }
+        for v in crate::lidarr::handlers::render_albums(state, &list).await? {
+            if let Some(id) = v["id"].as_i64() {
+                if let Some(artist) = v.get("artist").cloned() {
+                    if let Some(aid) = artist["id"].as_i64() {
+                        artists.insert(aid, artist);
+                    }
+                }
+                albums.insert(id, v);
+            }
+        }
+    }
+    Ok(rows
+        .iter()
+        .map(|r| {
+            let name = r.quality["quality"]
+                .as_i64()
+                .and_then(|id| u32::try_from(id).ok())
+                .and_then(cellarr_core::lidarr_quality_name)
+                .unwrap_or("Unknown");
+            let mut v = json!({
+                "id": r.id,
+                "albumId": r.album_id,
+                "artistId": r.artist_id,
+                "trackId": r.track_id,
+                "sourceTitle": r.source_title,
+                "quality": {
+                    "quality": { "id": cellarr_core::lidarr_quality_id(name), "name": name },
+                    "revision": r.quality.get("revision").cloned().unwrap_or(json!({ "version": 1, "real": 0, "isRepack": false })),
+                },
+                "customFormats": [],
+                "customFormatScore": 0,
+                "qualityCutoffNotMet": false,
+                "date": r.date,
+                "downloadId": r.download_id,
+                "eventType": event_type_name(r.event_type),
+                "data": string_data(&r.data),
+            });
+            if embed_album {
+                if let Some(a) = albums.get(&r.album_id) {
+                    v["album"] = a.clone();
+                }
+            }
+            if embed_artist {
+                if let Some(a) = artists.get(&r.artist_id) {
+                    v["artist"] = a.clone();
+                }
+            }
+            v
+        })
+        .collect())
+}
+
+fn history_filter(
+    q: &std::collections::HashMap<String, String>,
+    raw: &[(String, String)],
+) -> cellarr_db::MusicHistoryFilter {
+    let mut f = cellarr_db::MusicHistoryFilter::default();
+    f.album_id = q
+        .get("albumId")
+        .and_then(|v| v.parse::<i64>().ok())
+        .filter(|i| *i != 0);
+    f.download_id = q.get("downloadId").filter(|d| !d.is_empty()).cloned();
+    for (k, v) in raw {
+        if k.eq_ignore_ascii_case("eventType") {
+            for part in v.split(',') {
+                if let Some(n) = event_type_number(part) {
+                    f.event_types.push(n);
+                }
+            }
+        }
+        if k.eq_ignore_ascii_case("artistIds") || k.eq_ignore_ascii_case("artistId") {
+            for part in v.split(',') {
+                if let Ok(n) = part.trim().parse::<i64>() {
+                    f.artist_ids.push(n);
+                }
+            }
+        }
+    }
+    f
+}
+
+/// `GET /history`: a page of music history, filtered as Lidarr filters it.
+pub(crate) async fn music_history_page(
+    State(fs): State<FaceState>,
+    axum::extract::RawQuery(raw): axum::extract::RawQuery,
+) -> ApiResult<Json<Value>> {
+    let state = app(&fs);
+    let pairs = query_pairs(raw.as_deref());
+    let q: std::collections::HashMap<String, String> = pairs.iter().cloned().collect();
+    let size = q
+        .get("pageSize")
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(10)
+        .clamp(1, 1000);
+    let pg = q
+        .get("page")
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(1)
+        .max(1);
+    let ascending = q
+        .get("sortDirection")
+        .is_some_and(|d| d.eq_ignore_ascii_case("ascending"));
+    let filter = history_filter(&q, &pairs);
+    let (total, rows) = state
+        .db
+        .music()
+        .music_history(&filter, ascending, (pg - 1) * size, size)
+        .await?;
+    let truthy = |k: &str| q.get(k).is_some_and(|v| v.eq_ignore_ascii_case("true"));
+    let records = render_music_history(
+        state,
+        &rows,
+        truthy("includeAlbum"),
+        truthy("includeArtist"),
+    )
+    .await?;
+    Ok(Json(json!({
+        "page": pg,
+        "pageSize": size,
+        "sortKey": q.get("sortKey").cloned().unwrap_or_else(|| "date".into()),
+        "sortDirection": if ascending { "ascending" } else { "descending" },
+        "totalRecords": total,
+        "records": records,
+    })))
+}
+
+/// `GET /history/artist?artistId=[&albumId=][&eventType=]`: every row, newest first.
+pub(crate) async fn music_history_artist(
+    State(fs): State<FaceState>,
+    axum::extract::RawQuery(raw): axum::extract::RawQuery,
+) -> ApiResult<Json<Vec<Value>>> {
+    let state = app(&fs);
+    let pairs = query_pairs(raw.as_deref());
+    let q: std::collections::HashMap<String, String> = pairs.iter().cloned().collect();
+    let filter = history_filter(&q, &pairs);
+    if filter.artist_ids.is_empty() {
+        return Err(ApiError::BadRequest("artistId is required".into()));
+    }
+    let (_, rows) = state
+        .db
+        .music()
+        .music_history(&filter, false, 0, 100_000)
+        .await?;
+    let truthy = |k: &str| q.get(k).is_some_and(|v| v.eq_ignore_ascii_case("true"));
+    Ok(Json(
+        render_music_history(
+            state,
+            &rows,
+            truthy("includeAlbum"),
+            truthy("includeArtist"),
+        )
+        .await?,
+    ))
+}
+
+/// `GET /history/since?date=[&eventType=]`: every row on or after `date`, oldest first.
+pub(crate) async fn music_history_since(
+    State(fs): State<FaceState>,
+    axum::extract::RawQuery(raw): axum::extract::RawQuery,
+) -> ApiResult<Json<Vec<Value>>> {
+    let state = app(&fs);
+    let pairs = query_pairs(raw.as_deref());
+    let q: std::collections::HashMap<String, String> = pairs.iter().cloned().collect();
+    let mut filter = history_filter(&q, &pairs);
+    filter.since = q.get("date").cloned();
+    let (_, rows) = state
+        .db
+        .music()
+        .music_history(&filter, true, 0, 100_000)
+        .await?;
+    let truthy = |k: &str| q.get(k).is_some_and(|v| v.eq_ignore_ascii_case("true"));
+    Ok(Json(
+        render_music_history(
+            state,
+            &rows,
+            truthy("includeAlbum"),
+            truthy("includeArtist"),
+        )
+        .await?,
+    ))
+}
+
+/// Decode a raw query string into ordered pairs (repeated keys kept).
+fn query_pairs(raw: Option<&str>) -> Vec<(String, String)> {
+    let decode = |s: &str| {
+        let s = s.replace('+', " ");
+        let bytes = s.as_bytes();
+        let mut out = Vec::with_capacity(bytes.len());
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'%' && i + 2 < bytes.len() {
+                if let Ok(b) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
+                    out.push(b);
+                    i += 3;
+                    continue;
+                }
+            }
+            out.push(bytes[i]);
+            i += 1;
+        }
+        String::from_utf8_lossy(&out).to_string()
+    };
+    raw.unwrap_or_default()
+        .split('&')
+        .filter(|p| !p.is_empty())
+        .map(|p| match p.split_once('=') {
+            Some((k, v)) => (decode(k), decode(v)),
+            None => (decode(p), String::new()),
+        })
+        .collect()
+}

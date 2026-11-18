@@ -38,7 +38,8 @@ pub use import_list::ImportListRepo;
 pub use managed_config::{ManagedConfigRepo, ManagedEntity};
 pub use media_file::MediaFileRepo;
 pub use music::{
-    AlbumSort, AlbumWithArtist, MusicRepo, MusicStats, NewAlbum, NewArtist, NewRelease, NewTrack,
+    AlbumSort, AlbumWithArtist, MusicHistoryFilter, MusicHistoryRow, MusicRepo, MusicStats,
+    NewAlbum, NewArtist, NewRelease, NewTrack,
 };
 pub use pending_release::{PendingRelease, PendingReleaseRepo};
 pub use profile::ProfileRepo;

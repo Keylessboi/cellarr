@@ -243,12 +243,6 @@ impl AppState {
         self
     }
 
-    /// Attach the manual-import source (the live pipeline wiring), so
-    /// `GET/POST /api/v3/manualimport` scans loose folders and commits chosen files
-    /// through the real crash-safe import path. Builder form so the base
-    /// [`AppState::new`] stays offline (the shim reports manual import unavailable)
-    /// and tests can opt a fake in.
-    #[must_use]
     /// Serve reads only (shadow mode).
     #[must_use]
     pub fn with_read_only(mut self, read_only: bool) -> Self {
@@ -256,7 +250,11 @@ impl AppState {
         self
     }
 
-    /// Attach the manual-import seam.
+    /// Attach the manual-import source (the live pipeline wiring), so
+    /// `GET/POST /api/v3/manualimport` scans loose folders and commits chosen files
+    /// through the real crash-safe import path. Builder form so the base
+    /// [`AppState::new`] stays offline (the shim reports manual import unavailable)
+    /// and tests can opt a fake in.
     #[must_use]
     pub fn with_manual_import(mut self, manual_import: Arc<dyn ManualImport>) -> Self {
         self.manual_import = Some(manual_import);

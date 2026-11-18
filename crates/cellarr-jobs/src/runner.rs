@@ -2205,6 +2205,8 @@ where
                 self.fire_files_webhook(WebhookEventType::Rename, matched_ref, &paths)
                     .await;
                 *stage = self.advance(run_id, *stage, None).await?; // -> Notify
+                self.music_history(content.id, &HistoryEvent::Imported { grab_id }, &paths)
+                    .await;
                 self.append_history(run_id, content.id, HistoryEvent::Imported { grab_id })
                     .await?;
                 self.advance(run_id, *stage, Some("imported".into()))
@@ -2855,6 +2857,13 @@ where
         self.set_grab_status(grab.id, GrabStatus::Imported)
             .await
             .map_err(|e| format!("set imported: {e}"))?;
+        let imported_paths: Vec<String> = destinations.iter().map(|(p, _)| p.clone()).collect();
+        self.music_history(
+            matched_ref.id,
+            &HistoryEvent::Imported { grab_id: grab.id },
+            &imported_paths,
+        )
+        .await;
         // Record the import in history (parity with the inline path) so the activity
         // view shows a reconcile-finalized import too, and close the run in the
         // decision log so it reads as a completed acquisition rather than one that
@@ -2910,7 +2919,16 @@ where
         self.persist_imported_files(&parsed, release_type, &destinations)
             .await
             .map_err(|e| format!("persist imported files: {e}"))?;
-        Ok(destinations.into_iter().map(|(p, _)| p).collect())
+        let paths: Vec<String> = destinations.into_iter().map(|(p, _)| p).collect();
+        self.music_history(
+            album.id,
+            &HistoryEvent::Imported {
+                grab_id: GrabId::new(),
+            },
+            &paths,
+        )
+        .await;
+        Ok(paths)
     }
 
     /// Write the `.nfo` metadata sidecars next to the imported destinations, using
@@ -3163,6 +3181,13 @@ where
         content_id: cellarr_core::ContentId,
         event: HistoryEvent,
     ) -> Result<()> {
+        // An import's rows are written where the imported files are known.
+        if !matches!(
+            event,
+            HistoryEvent::Imported { .. } | HistoryEvent::Upgraded { .. }
+        ) {
+            self.music_history(content_id, &event, &[]).await;
+        }
         let record = HistoryRecord {
             at: self.now(),
             content_id,
@@ -3172,6 +3197,167 @@ where
         HistoryRepository::append(&self.db.history(), &record)
             .await
             .map_err(|e| JobError::Persistence(Box::new(e)))
+    }
+
+    /// Record an album's event in the Lidarr-shaped music history: the release
+    /// title, the download's id, the quality, and the details a Lidarr client
+    /// reads (indexer, client, guid; each imported file's path; a failure's
+    /// message). Best-effort: a failure here never fails the acquisition.
+    async fn music_history(
+        &self,
+        content_id: cellarr_core::ContentId,
+        event: &HistoryEvent,
+        imported: &[String],
+    ) {
+        if let Err(e) = self.try_music_history(content_id, event, imported).await {
+            tracing::warn!(%content_id, error = %e, "could not record music history");
+        }
+    }
+
+    async fn try_music_history(
+        &self,
+        content_id: cellarr_core::ContentId,
+        event: &HistoryEvent,
+        imported: &[String],
+    ) -> std::result::Result<(), String> {
+        use serde_json::json;
+        let music = self.db.music();
+        let Some(album) = music
+            .album_by_content(content_id)
+            .await
+            .map_err(|e| e.to_string())?
+        else {
+            return Ok(()); // not an album: not music history
+        };
+        let artist_id = music
+            .artist_by_content(album.artist_content_id)
+            .await
+            .map_err(|e| e.to_string())?
+            .map_or(0, |a| a.id);
+        let grab_id = match event {
+            HistoryEvent::Grabbed { grab_id, .. }
+            | HistoryEvent::DownloadCompleted { grab_id }
+            | HistoryEvent::DownloadFailed { grab_id, .. }
+            | HistoryEvent::Imported { grab_id }
+            | HistoryEvent::Upgraded { grab_id } => Some(*grab_id),
+            _ => None,
+        };
+        let grab = match grab_id {
+            Some(id) => GrabRepository::get(&self.db.grabs(), id)
+                .await
+                .map_err(|e| e.to_string())?,
+            None => None,
+        };
+        let title = grab
+            .as_ref()
+            .map_or_else(|| album.title.clone(), |g| g.request.release.title.clone());
+        let parsed = cellarr_parse::parse_title_for(cellarr_core::MediaType::Music, &title);
+        let quality_name = cellarr_core::resolve_quality(&parsed, &self.config.ranking).name;
+        let quality = |name: &str| {
+            json!({
+                "quality": cellarr_core::lidarr_quality_id(name),
+                "revision": { "version": 1, "real": 0, "isRepack": false },
+            })
+        };
+        let config = self.db.config();
+        let (indexer, client) = match &grab {
+            Some(g) => (
+                config
+                    .list_indexers()
+                    .await
+                    .ok()
+                    .and_then(|l| l.into_iter().find(|i| i.id == g.request.indexer_id))
+                    .map(|i| i.name),
+                config
+                    .list_download_clients()
+                    .await
+                    .ok()
+                    .and_then(|l| l.into_iter().find(|c| c.id == g.request.client_id))
+                    .map(|c| c.name),
+            ),
+            None => (None, None),
+        };
+        let download_id = grab.as_ref().and_then(|g| g.download_id.clone());
+        let date = self
+            .now()
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_default();
+        let row = |event_type: i64,
+                   track_id: i64,
+                   quality: serde_json::Value,
+                   data: serde_json::Value| {
+            cellarr_db::MusicHistoryRow {
+                id: None,
+                album_id: album.id,
+                artist_id,
+                track_id,
+                source_title: title.clone(),
+                quality,
+                date: date.clone(),
+                event_type,
+                data,
+                download_id: download_id.clone(),
+            }
+        };
+        let client_data = json!({ "downloadClient": client, "downloadClientName": client });
+        let mut rows = Vec::new();
+        match event {
+            HistoryEvent::Grabbed { .. } => {
+                let release = grab.as_ref().map(|g| &g.request.release);
+                rows.push(row(
+                    1,
+                    0,
+                    quality(&quality_name),
+                    json!({
+                        "indexer": indexer,
+                        "downloadClient": client,
+                        "downloadClientName": client,
+                        "guid": release.and_then(|r| r.guid.clone()),
+                        "size": release.and_then(|r| r.size),
+                        "protocol": release.map(|r| match r.protocol {
+                            cellarr_core::Protocol::Torrent => "torrent",
+                            cellarr_core::Protocol::Usenet => "usenet",
+                        }),
+                        "releaseSource": "Search",
+                    }),
+                ));
+            }
+            HistoryEvent::DownloadFailed { detail, .. } => {
+                let mut data = client_data.clone();
+                data["message"] = json!(detail);
+                rows.push(row(4, 0, quality(&quality_name), data));
+            }
+            HistoryEvent::Deleted { detail } => {
+                rows.push(row(5, 0, quality("Unknown"), json!({ "reason": detail })));
+            }
+            HistoryEvent::Imported { .. } | HistoryEvent::Upgraded { .. } => {
+                let files = music
+                    .track_files_for_album(content_id)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let tracks = music
+                    .tracks_for_album(content_id)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                for path in imported {
+                    let file = files.iter().find(|f| &f.file.path == path);
+                    let track_id = file
+                        .and_then(|f| tracks.iter().find(|t| t.content_id == f.track_content_id))
+                        .map_or(0, |t| t.id);
+                    let file_quality =
+                        file.map_or(quality_name.clone(), |f| f.file.quality.name.clone());
+                    let mut data = client_data.clone();
+                    data["importedPath"] = json!(path);
+                    rows.push(row(3, track_id, quality(&file_quality), data));
+                }
+                rows.push(row(8, 0, quality(&quality_name), client_data.clone()));
+            }
+            _ => {}
+        }
+        music
+            .append_music_history(rows)
+            .await
+            .map_err(|e| e.to_string())
     }
 
     async fn set_grab_status(&self, id: GrabId, status: GrabStatus) -> Result<()> {
