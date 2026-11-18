@@ -36,20 +36,46 @@ cellarr's key to Lidarr's.
 ## Migrating
 
 ```sh
-# 1. Stop (or leave running) Lidarr; copy its database somewhere cellarr can read.
-cellarr migrate /path/to/lidarr.db
+# 1. Take a consistent copy. Lidarr can keep running: this is one read transaction on a
+#    read-only connection (VACUUM INTO), with no write lock and the source untouched.
+cellarr snapshot /path/to/lidarr.db /tmp/lidarr-snapshot.db
+# 2. Migrate the copy.
+cellarr migrate /tmp/lidarr-snapshot.db
 # imported music: 914 artists, 41459 albums, 953583 tracks, 35798 track files recognized in place …
 ```
+
+Copying the live file by hand while Lidarr writes can give a torn database, and migrating
+the live file directly reads it over minutes, so an import in between could leave an album
+without its tracks. Use `snapshot`.
 
 What is carried: artists, albums (with their monitored flags and selected release), the tracks of
 each album's selected release, track files and their quality and media info, quality profiles
 (groups flattened, cutoff resolved), metadata profiles, root folders, indexers, download clients,
-remote path mappings, and the blocklist (matched by release name, so a dead release stays dead).
+remote path mappings, the blocklist (matched by release name, so a dead release stays dead),
+every pressing of each album (with Lidarr's release ids, and a pinned pressing stays pinned),
+and the **history**, row for row with Lidarr's ids, event types, download ids and data.
+Download clients keep their real category (`musicCategory`), and plugin-provided clients are
+carried as sidecar clients ([20-plugins.md](20-plugins.md)).
 
-What is not: **history** (cellarr starts a fresh one; Lidarr's is mostly search noise, ~934k
-rows in the reference install), tags, import lists, notifications.
+What is not: tags, import lists, notifications.
 
 The migration is idempotent per database: to redo it, discard cellarr's database and run it again.
+
+## Shadow mode
+
+`CELLARR_SHADOW=true` runs cellarr as a read-only rehearsal beside a live Lidarr. It registers
+no scheduled jobs, so there is no RSS sync, search, download-client polling, import or rename.
+It also refuses every non-GET request with 403, on both listeners. Point nothing at it except
+`scripts/lidarr-shadow-diff`:
+
+```sh
+scripts/lidarr-shadow-diff http://lidarr:8686 http://cellarr:8686 [--sample N] [--no-albums]
+```
+
+The script compares the two by id, with GET requests only: profiles, root folders, indexers,
+download clients and their categories, artists, albums and pressings, track files, wanted and
+queue. It exits 1 on any difference. `--no-albums` skips the full album list, Lidarr's heaviest
+call. Mount the library read-only for a shadow; cellarr does not need write access to compare.
 
 ## Cutting over
 
@@ -69,12 +95,14 @@ A safe order, because nothing here is destructive until the last step:
 5. **Stop Lidarr.** Keep its database and `MediaCover` for a while; nothing in cellarr
    modifies them or your music files.
 
-Two things to know. Downloads Lidarr had in flight when you switched are tracked by the
-download client's category, so cellarr will see them in the client but they are not in its
-queue; remove and re-search, or let them finish and import once via a rescan. And the
-**force-import step of a maintenance script** (`GET /manualimport`) has no equivalent yet: a
-completed download that cellarr cannot place is held with its reason in the decision log
-(`GET /api/v1/queue` shows it) rather than force-imported.
+Things to know:
+- **In-flight downloads.** Downloads Lidarr had in flight when you switched are tracked by the
+  download client's category, so cellarr sees them in the client but not in its queue. Stop
+  Lidarr with the queue empty, or import the stragglers with Manual Import
+  (`GET /manualimport?folder=` then `POST /command ManualImport`, as Lidarr does).
+- **Torrents are never removed after import.** Seeding rules and tools that reap hardlinked
+  seeds rely on that. Only Usenet downloads are cleaned up. A stalled or failed download is
+  still removed when it is blocklisted.
 
 ## What it costs
 
@@ -192,8 +220,8 @@ real server answering the same calls Lidarr's clients make.
 
 | | cellarr | Lidarr (the same install, from its own deployment notes) |
 |---|---|---|
-| Import of the library | **174 s**, peak **185 MiB** | n/a |
-| Database on disk | **360 MB** (no history) | 3.9 GB (934k history rows) |
+| Import of the library | **278 s**, peak **119 MiB** (history included) | n/a |
+| Database on disk | **505 MB** (934k history rows carried over) | 3.9 GB (934k history rows) |
 | Memory, just started | **~140 MiB** | ~900 MiB "fresh pod" |
 | Memory, after a mixed workload | **~410 MiB** (**~240 MiB** with `MALLOC_ARENA_MAX=2`) | 1.5–1.7 GiB (reached 1.7 GiB and wedged; limit raised to 3 GiB) |
 | Memory, empty library | **29 MiB** | n/a |
@@ -210,7 +238,8 @@ Request latency on that library, best of three (the SQLite file on local disk):
 | `GET /blocklist` (page of 50 of 16,271) | ~0.45 s |
 | `GET /artist` (all 914, with statistics) | ~0.45 s |
 | `POST /command AlbumSearch` × 50 albums | ~0.5 s, and it returns; the search runs as jobs |
-| `GET /album` (all 41,459 albums, 77 MB of JSON) | ~2.3 s, peak ~600 MiB while it streams |
+| `GET /album` (all 41,459 albums, 87 MB of JSON) | ~3.8 s |
+| `GET /history/artist` (934k rows, 299 MB of JSON) | ~36 s, peak **125 MiB**: streamed in pages of 2,000 via a keyset cursor |
 
 Lidarr's own note on this library: `GET /api/v1/artist` exceeded 180 s on network storage and
 `/ping` took ~5 s on local disk, which is what its probes and the mass-search script had to work
@@ -220,8 +249,8 @@ Caveats, so the table is read correctly: Lidarr's figures are what its operator 
 about a long-running install under a multi-day mass search, not a controlled run, and this
 benchmark has no indexers or download client, so it measures the library and the API, not
 the cost of searching. What is certain is the shape: memory and latency here do not grow with
-history (cellarr starts a fresh one), nothing is a .NET runtime, and the unfiltered calls are
-streamed rather than built in memory.
+history (the whole-history calls stream a page at a time), nothing is a .NET runtime, and the
+unfiltered calls are streamed rather than built in memory.
 
 ### Knobs
 
