@@ -13,7 +13,7 @@ Lidarr changes**.
 | **Ids are preserved** | Artists, albums, tracks, track files and quality-profile ids carry across a migration unchanged, so a cursor, a stored profile id or a script's config still means the same thing. |
 | **Files are untouched** | The importer recognizes your files where they are. Nothing is moved, renamed or re-tagged. |
 | **Lidarr can keep running** | The source database is opened read-only; the migration is repeatable into a fresh cellarr database. |
-| **Not covered** | Lidarr's own plugin system (Tubifarry, etc.), manual import of loose files, renaming/retagging existing files, metadata sidecar writers, music import lists. The exact endpoint-level list is `crates/cellarr-api/tests/contracts/lidarr-gaps.json`. |
+| **Not covered** | Renaming/retagging existing files, metadata sidecar writers, music import lists, unmapped track files. Lidarr's native plugins (Tubifarry, etc.) run through an optional sidecar Lidarr ([20-plugins.md](20-plugins.md)); manual import of a download folder is served (`/manualimport`). The exact endpoint-level list is `crates/cellarr-api/tests/contracts/lidarr-gaps.json`. |
 
 ## Running it
 
