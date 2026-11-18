@@ -37,7 +37,8 @@ async fn lidarr_db(dir: &std::path::Path) -> String {
         "INSERT INTO RootFolders VALUES (1, '/data/media/music')",
         "INSERT INTO RemotePathMappings VALUES (1, 'qbit', '/downloads/', '/data/torrents/')",
         r#"INSERT INTO Indexers VALUES (1, 'Prowlarr TPB', 'Torznab', '{"baseUrl":"http://prowlarr/1","apiKey":"k","categories":[3000]}', 'TorznabSettings', 1, 1, 1, 25, '[]', 0)"#,
-        r#"INSERT INTO DownloadClients VALUES (1, 1, 'qBittorrent', 'QBittorrent', '{"host":"qbit","port":8080,"musicCategory":"lidarr"}', 'QBittorrentSettings', 1, 1, 1, '[]')"#,
+        r#"INSERT INTO DownloadClients VALUES (1, 1, 'qBittorrent', 'QBittorrent', '{"host":"qbit","port":8080,"musicCategory":"music"}', 'QBittorrentSettings', 1, 1, 1, '[]')"#,
+        r#"INSERT INTO DownloadClients VALUES (2, 1, 'Plugin client', 'PluginProvidedClient', '{"baseUrl":"http://slskd:5030","apiKey":"k"}', 'PluginProvidedClientSettings', 2, 1, 1, '[]')"#,
         // Profiles. Items reference qualities by bare id, as Lidarr stores them.
         r#"INSERT INTO QualityProfiles VALUES (1, 'Lossless', 1001, '[{"id":1001,"name":"Lossless","items":[{"quality":6,"items":[],"allowed":true},{"quality":21,"items":[],"allowed":true}],"allowed":true},{"quality":4,"items":[],"allowed":true},{"quality":1,"items":[],"allowed":false}]', 1, 0, 0, '[]')"#,
         r#"INSERT INTO QualityProfiles VALUES (4, 'Any', 4, '[{"quality":4,"items":[],"allowed":true}]', 0, 0, 0, '[]')"#,
@@ -292,7 +293,7 @@ async fn config_blocklist_and_mappings_come_across() {
         "/data/media/music"
     );
     assert_eq!(db.config().list_indexers().await.unwrap().len(), 1);
-    assert_eq!(db.config().list_download_clients().await.unwrap().len(), 1);
+    assert_eq!(db.config().list_download_clients().await.unwrap().len(), 2);
     assert_eq!(
         db.config().list_remote_path_mappings().await.unwrap()[0].local_path,
         "/data/torrents/"
@@ -333,4 +334,24 @@ async fn every_pressing_keeps_its_lidarr_id_and_the_pin_survives() {
         .map(|r| (r.id, r.mbid.as_str(), r.track_count))
         .collect();
     assert_eq!(ids, [(501, "rel-a", 13), (502, "rel-b", 2)]);
+}
+
+#[tokio::test]
+async fn download_clients_keep_their_own_category_and_plugin_implementations_carry_over() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = lidarr_db(dir.path()).await;
+    let db = dest(dir.path()).await;
+    import(&[&src], &db).await.unwrap();
+    let clients = db.config().list_download_clients().await.unwrap();
+    let qbit = clients.iter().find(|c| c.name == "qBittorrent").unwrap();
+    assert_eq!(qbit.kind, "qbittorrent");
+    assert_eq!(
+        qbit.category, "music",
+        "the client's own category, not the app's name"
+    );
+    // A plugin's client keeps its implementation, so the plugin sidecar (which
+    // offers the same implementation) serves it once it is running.
+    let plugin = clients.iter().find(|c| c.name == "Plugin client").unwrap();
+    assert_eq!(plugin.kind, "pluginprovidedclient");
+    assert_eq!(plugin.settings["baseUrl"], "http://slskd:5030");
 }

@@ -124,9 +124,12 @@ pub(crate) async fn read_download_clients(
                 protocol: protocol_of(row),
                 enabled,
                 priority: priority as i32,
-                // The app names its download category per-app; default to the
-                // source app name so cellarr keeps touching only its own grabs.
-                category: kind.app_name().to_string(),
+                // The category the source app tagged its downloads with. It is
+                // what the client's per-category save path, and any tooling
+                // around the client (cleanup jobs keyed on it), depend on, so it
+                // carries over unchanged; only a client that set none falls back
+                // to the app's name.
+                category: category_of(&settings).unwrap_or_else(|| kind.app_name().to_string()),
                 // Legacy per-client Tags are not remapped here; default to
                 // untagged (global), preserving prior behaviour.
                 // TODO(deferred): remap the source `Tags` column to migrated
@@ -178,6 +181,17 @@ fn protocol_of_implementation(implementation: &str) -> Protocol {
     } else {
         Protocol::Torrent
     }
+}
+
+/// The download category a client's settings name (`musicCategory` in Lidarr,
+/// `tvCategory` in Sonarr, `movieCategory` in Radarr, or a plain `category`).
+fn category_of(settings: &serde_json::Value) -> Option<String> {
+    ["musicCategory", "tvCategory", "movieCategory", "category"]
+        .iter()
+        .find_map(|k| settings.get(*k).and_then(|v| v.as_str()))
+        .map(str::trim)
+        .filter(|c| !c.is_empty())
+        .map(str::to_string)
 }
 
 fn parse_settings(raw: Option<String>) -> serde_json::Value {
