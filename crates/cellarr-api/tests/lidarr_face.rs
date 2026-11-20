@@ -160,6 +160,12 @@ async fn the_wanted_list_pages_monitored_albums_without_files() {
     let l = start(AuthConfig::disabled()).await;
     let profile = l.flac_profile().await;
     l.add_radiohead(profile).await;
+    // Lidarr only wants albums that have a track list, and cellarr fetches one
+    // the first time it is asked for, so ask for every album's tracks first.
+    for album in l.get("/album?artistId=1").await.as_array().unwrap() {
+        let id = album["id"].as_i64().unwrap();
+        l.get(&format!("/track?albumId={id}")).await;
+    }
 
     let page = l.get("/wanted/missing?page=1&pageSize=3&sortKey=albums.releaseDate&sortDirection=descending&includeArtist=true").await;
     assert_eq!(page["page"], 1);

@@ -725,15 +725,59 @@ impl MusicRepo {
         offset: u64,
         limit: u64,
     ) -> Result<(u64, Vec<Album>)> {
-        const WHERE: &str = "c.monitored = 1 AND ac.monitored = 1
-               AND (al.release_date IS NULL OR al.release_date <= ?1)
-               AND NOT EXISTS (
+        self.missing_albums_in(today, sort, ascending, offset, limit, false)
+            .await
+    }
+
+    /// Lidarr's `wanted/missing` view: like [`Self::missing_albums`], but an
+    /// album with some of its tracks on disk still counts (fewer files than
+    /// tracks), and an album with no track list at all does not (Lidarr has
+    /// nothing to want there).
+    ///
+    /// # Errors
+    /// Returns a [`DbError`] on query failure.
+    pub async fn wanted_albums(
+        &self,
+        today: &str,
+        sort: AlbumSort,
+        ascending: bool,
+        offset: u64,
+        limit: u64,
+    ) -> Result<(u64, Vec<Album>)> {
+        self.missing_albums_in(today, sort, ascending, offset, limit, true)
+            .await
+    }
+
+    async fn missing_albums_in(
+        &self,
+        today: &str,
+        sort: AlbumSort,
+        ascending: bool,
+        offset: u64,
+        limit: u64,
+        lidarr_view: bool,
+    ) -> Result<(u64, Vec<Album>)> {
+        const BASE: &str = "c.monitored = 1 AND ac.monitored = 1
+               AND (al.release_date IS NULL OR al.release_date <= ?1)";
+        const NO_FILE: &str = "AND NOT EXISTS (
                    SELECT 1 FROM track_file tf WHERE tf.album_content_id = al.content_id)";
+        const SHORT_OF_TRACKS: &str = "AND EXISTS (
+                   SELECT 1 FROM track_meta t WHERE t.album_content_id = al.content_id)
+               AND (SELECT count(*) FROM track_meta t WHERE t.album_content_id = al.content_id)
+                 > (SELECT count(*) FROM track_file tf WHERE tf.album_content_id = al.content_id)";
+        let filter = format!(
+            "{BASE} {}",
+            if lidarr_view {
+                SHORT_OF_TRACKS
+            } else {
+                NO_FILE
+            }
+        );
         let total: i64 = sqlx::query(&pq(&format!(
             "SELECT count(*) AS n FROM album_meta al
              JOIN content c ON c.id = al.content_id
              JOIN content ac ON ac.id = al.artist_content_id
-             WHERE {WHERE}"
+             WHERE {filter}"
         )))
         .bind(today)
         .fetch_one(&self.pool)
@@ -749,7 +793,7 @@ impl MusicRepo {
             "SELECT {ALBUM_COLS} FROM album_meta al
              JOIN content c ON c.id = al.content_id
              JOIN content ac ON ac.id = al.artist_content_id
-             WHERE {WHERE}
+             WHERE {filter}
              ORDER BY {column} {direction}, al.id ASC LIMIT ?2 OFFSET ?3"
         );
         let rows = sqlx::query(&pq(&sql))

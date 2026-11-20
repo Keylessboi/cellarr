@@ -403,6 +403,70 @@ async fn an_album_is_missing_until_a_track_file_lands_and_the_sweep_agrees() {
 }
 
 #[tokio::test]
+async fn lidarrs_wanted_list_keeps_partial_albums_and_skips_albums_without_tracks() {
+    let db = common::test_database().await;
+    let lib = music_library(&db).await;
+    let a = db
+        .music()
+        .add_artist(lib, artist("Radiohead", "mb-a1"))
+        .await
+        .unwrap();
+    let albums = db
+        .music()
+        .upsert_albums(
+            lib,
+            a.content_id,
+            vec![
+                album("OK Computer", "mb-rg1", "1997-05-21"),
+                album("Kid A", "mb-rg2", "2000-10-02"),
+            ],
+        )
+        .await
+        .unwrap();
+    // OK Computer has two tracks, one of them on disk; Kid A has no track list.
+    let tracks = db
+        .music()
+        .set_album_tracks(
+            lib,
+            albums[0].content_id,
+            None,
+            vec![track(1, 1, "Airbag"), track(1, 2, "Paranoid Android")],
+        )
+        .await
+        .unwrap();
+    let wanted = |db: Database| async move {
+        db.music()
+            .wanted_albums("2026-01-01", AlbumSort::Id, true, 0, 10)
+            .await
+            .unwrap()
+    };
+    let (total, page) = wanted(db.clone()).await;
+    assert_eq!(total, 1, "no files yet: only the album that has tracks");
+    assert_eq!(page[0].id, albums[0].id);
+
+    db.music()
+        .record_track_file(tracks[0].content_id, file("/m/01.flac", 1234), None, None)
+        .await
+        .unwrap();
+    let (total, _) = wanted(db.clone()).await;
+    assert_eq!(total, 1, "one of two tracks on disk is still wanted");
+    // The plain missing list (used to search) says the album has a file.
+    let (plain, _) = db
+        .music()
+        .missing_albums("2026-01-01", AlbumSort::Id, true, 0, 10)
+        .await
+        .unwrap();
+    assert_eq!(plain, 1, "only Kid A has no file at all");
+
+    db.music()
+        .record_track_file(tracks[1].content_id, file("/m/02.flac", 1234), None, None)
+        .await
+        .unwrap();
+    let (total, _) = wanted(db).await;
+    assert_eq!(total, 0, "every track on disk");
+}
+
+#[tokio::test]
 async fn statistics_count_albums_tracks_files_and_bytes() {
     let db = common::test_database().await;
     let lib = music_library(&db).await;

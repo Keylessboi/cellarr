@@ -294,7 +294,7 @@ pub(crate) async fn wanted_missing(
     let (total, albums) = state
         .db
         .music()
-        .missing_albums(&today(), sort, ascending, (pg - 1) * size, size)
+        .wanted_albums(&today(), sort, ascending, (pg - 1) * size, size)
         .await?;
     let records = album_page(state, &albums, flag(&q, "includeArtist")).await?;
     Ok(Json(page(
