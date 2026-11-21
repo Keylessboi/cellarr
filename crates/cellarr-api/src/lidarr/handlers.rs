@@ -1279,8 +1279,8 @@ pub(crate) async fn get_track(
         .ok_or_else(|| ApiError::NotFound(format!("track {id} not found")))
 }
 
-async fn cutoff_ranks(state: &AppState) -> ApiResult<HashMap<ContentId, u32>> {
-    // The cutoff of the profile each artist uses, keyed by artist content id.
+/// The cutoff of the profile each of `artists` uses, keyed by artist content id.
+async fn cutoff_ranks(state: &AppState, artists: &[Artist]) -> ApiResult<HashMap<ContentId, u32>> {
     let profiles: HashMap<QualityProfileId, u32> = state
         .db
         .profiles()
@@ -1289,12 +1289,8 @@ async fn cutoff_ranks(state: &AppState) -> ApiResult<HashMap<ContentId, u32>> {
         .into_iter()
         .map(|p| (p.id, p.cutoff_quality))
         .collect();
-    Ok(state
-        .db
-        .music()
-        .artists()
-        .await?
-        .into_iter()
+    Ok(artists
+        .iter()
         .filter_map(|a| {
             a.quality_profile_id
                 .and_then(|p| profiles.get(&p).copied())
@@ -1308,19 +1304,30 @@ async fn file_resources(
     files: Vec<cellarr_core::TrackFile>,
 ) -> ApiResult<Vec<Value>> {
     let music = state.db.music();
-    let artists: HashMap<ContentId, i64> = music
-        .artists()
-        .await?
+    // Only the artists and albums the files belong to: a request for one album's
+    // files must not cost a read of every album in the library.
+    let artist_ids: Vec<ContentId> = files
+        .iter()
+        .map(|f| f.artist_content_id)
+        .collect::<HashSet<_>>()
         .into_iter()
-        .map(|a| (a.content_id, a.id))
         .collect();
+    let album_ids: Vec<ContentId> = files
+        .iter()
+        .map(|f| f.album_content_id)
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    let artist_rows = music.artists_by_content(&artist_ids).await?;
+    let artists: HashMap<ContentId, i64> =
+        artist_rows.iter().map(|a| (a.content_id, a.id)).collect();
     let albums: HashMap<ContentId, i64> = music
-        .albums()
+        .albums_by_content(&album_ids)
         .await?
         .into_iter()
         .map(|a| (a.content_id, a.id))
         .collect();
-    let cutoffs = cutoff_ranks(state).await?;
+    let cutoffs = cutoff_ranks(state, &artist_rows).await?;
     Ok(files
         .iter()
         .map(|f| {

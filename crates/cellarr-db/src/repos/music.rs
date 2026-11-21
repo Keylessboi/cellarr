@@ -383,6 +383,33 @@ impl MusicRepo {
         self.artist_where("a.id = ?1", ArtistKey::Seq(id)).await
     }
 
+    /// Artists by content id, in as few queries as the list needs.
+    ///
+    /// # Errors
+    /// Returns a [`DbError`] on query failure.
+    pub async fn artists_by_content(&self, ids: &[ContentId]) -> Result<Vec<Artist>> {
+        let mut out = Vec::with_capacity(ids.len());
+        for chunk in ids.chunks(400) {
+            let marks = (1..=chunk.len())
+                .map(|i| format!("?{i}"))
+                .collect::<Vec<_>>()
+                .join(",");
+            let sql = format!(
+                "SELECT {ARTIST_COLS} FROM artist_meta a JOIN content c ON c.id = a.content_id
+                 WHERE a.content_id IN ({marks}) ORDER BY a.id ASC"
+            );
+            let sql = pq(&sql);
+            let mut q = sqlx::query(&sql);
+            for id in chunk {
+                q = q.bind(id.to_string());
+            }
+            for row in q.fetch_all(&self.pool).await? {
+                out.push(row_to_artist(row)?);
+            }
+        }
+        Ok(out)
+    }
+
     /// One artist by content id.
     ///
     /// # Errors
@@ -761,10 +788,14 @@ impl MusicRepo {
                AND (al.release_date IS NULL OR al.release_date <= ?1)";
         const NO_FILE: &str = "AND NOT EXISTS (
                    SELECT 1 FROM track_file tf WHERE tf.album_content_id = al.content_id)";
+        // An album with no file at all is short of its tracks as soon as it has one,
+        // so the two counts are only taken for the minority that has some files.
         const SHORT_OF_TRACKS: &str = "AND EXISTS (
                    SELECT 1 FROM track_meta t WHERE t.album_content_id = al.content_id)
-               AND (SELECT count(*) FROM track_meta t WHERE t.album_content_id = al.content_id)
-                 > (SELECT count(*) FROM track_file tf WHERE tf.album_content_id = al.content_id)";
+               AND (NOT EXISTS (
+                      SELECT 1 FROM track_file tf WHERE tf.album_content_id = al.content_id)
+                    OR (SELECT count(*) FROM track_meta t WHERE t.album_content_id = al.content_id)
+                     > (SELECT count(*) FROM track_file tf WHERE tf.album_content_id = al.content_id))";
         let filter = format!(
             "{BASE} {}",
             if lidarr_view {
@@ -773,16 +804,33 @@ impl MusicRepo {
                 NO_FILE
             }
         );
-        let total: i64 = sqlx::query(&pq(&format!(
-            "SELECT count(*) AS n FROM album_meta al
-             JOIN content c ON c.id = al.content_id
-             JOIN content ac ON ac.id = al.artist_content_id
-             WHERE {filter}"
-        )))
-        .bind(today)
-        .fetch_one(&self.pool)
-        .await?
-        .try_get("n")?;
+        // The page below stops after `limit` rows, so correlated lookups are cheap
+        // there; the total visits every album, where two grouped passes over the
+        // (covering) track indexes touch far fewer pages than a lookup per album.
+        let total_sql = if lidarr_view {
+            format!(
+                "SELECT count(*) AS n FROM album_meta al
+                 JOIN content c ON c.id = al.content_id
+                 JOIN content ac ON ac.id = al.artist_content_id
+                 JOIN (SELECT album_content_id AS k, count(*) AS n FROM track_meta
+                       GROUP BY album_content_id) tm ON tm.k = al.content_id
+                 LEFT JOIN (SELECT album_content_id AS k, count(*) AS n FROM track_file
+                            GROUP BY album_content_id) fm ON fm.k = al.content_id
+                 WHERE {BASE} AND tm.n > COALESCE(fm.n, 0)"
+            )
+        } else {
+            format!(
+                "SELECT count(*) AS n FROM album_meta al
+                 JOIN content c ON c.id = al.content_id
+                 JOIN content ac ON ac.id = al.artist_content_id
+                 WHERE {filter}"
+            )
+        };
+        let total: i64 = sqlx::query(&pq(&total_sql))
+            .bind(today)
+            .fetch_one(&self.pool)
+            .await?
+            .try_get("n")?;
         let column = match sort {
             AlbumSort::Id => "al.id",
             AlbumSort::ReleaseDate => "al.release_date",
@@ -1172,8 +1220,9 @@ impl MusicRepo {
         {
             out.entry(key_of(&row)?).or_default().album_count = row.try_get("n")?;
         }
-        for row in sqlx::query(&pq("SELECT al.artist_content_id AS k, count(*) AS n
-             FROM track_meta t JOIN album_meta al ON al.content_id = t.album_content_id
+        for row in sqlx::query(&pq("SELECT al.artist_content_id AS k, CAST(sum(g.n) AS BIGINT) AS n
+             FROM (SELECT album_content_id, count(*) AS n FROM track_meta GROUP BY album_content_id) g
+             JOIN album_meta al ON al.content_id = g.album_content_id
              GROUP BY al.artist_content_id"))
         .fetch_all(&self.pool)
         .await?
