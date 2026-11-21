@@ -391,7 +391,15 @@ impl Daemon {
         let backup_engine =
             cellarr_api::BackupEngine::new(config.backup_dir(), state.db.clone(), db_path.clone())
                 .with_artwork_dir(artwork_dir.clone());
-        let state = state.with_backup(backup_engine);
+        // A shadow is a throwaway copy of Lidarr's catalog (rebuilt by `migrate`), so
+        // it takes no backups: the daily VACUUM INTO + integrity_check of a multi-GB
+        // database OOMKilled the shadow pod, and the copies would fill its volume.
+        let state = if config.shadow {
+            info!("shadow mode: no scheduled backups");
+            state
+        } else {
+            state.with_backup(backup_engine)
+        };
 
         // The on-disk log-file reader, bound to the rolling appender's directory
         // (`<data_dir>/logs`), powering the `/api/v3/log/file` surface.

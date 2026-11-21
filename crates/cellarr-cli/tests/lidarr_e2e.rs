@@ -1483,6 +1483,10 @@ async fn a_shadow_daemon_reads_but_never_writes_or_acts() {
         "no scheduled jobs in shadow mode: {}",
         jobs.len()
     );
+    assert!(
+        state.backup.is_none(),
+        "a shadow takes no scheduled backups (the daily VACUUM OOMKilled the pod)"
+    );
     #[cfg(feature = "plugins")]
     {
         // Discovery still reads the sidecar's catalog.
