@@ -97,6 +97,19 @@ async fn albums_are_listed_by_artist_and_by_musicbrainz_id() {
 }
 
 #[tokio::test]
+async fn albums_of_an_unknown_artist_are_an_empty_list_not_a_404() {
+    let l = start(AuthConfig::disabled()).await;
+    let r = l
+        .req(reqwest::Method::GET, "/album?artistId=999999")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200, "Lidarr answers [] for an unknown artist");
+    let body: serde_json::Value = r.json().await.unwrap();
+    assert_eq!(body, serde_json::json!([]));
+}
+
+#[tokio::test]
 async fn tracks_are_fetched_the_first_time_they_are_asked_for() {
     let l = start(AuthConfig::disabled()).await;
     let profile = l.flac_profile().await;

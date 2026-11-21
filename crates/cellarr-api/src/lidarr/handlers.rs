@@ -772,8 +772,11 @@ pub(crate) async fn list_albums(
     let albums: Vec<Album> = if let Some(mbid) = param(&q, "foreignAlbumId") {
         music.album_by_mbid(mbid).await?.into_iter().collect()
     } else if let Some(artist) = param(&q, "artistId").and_then(|v| v.parse::<i64>().ok()) {
-        let a = artist_or_404(state, artist).await?;
-        music.albums_for_artist(a.content_id).await?
+        // Lidarr answers an artist it does not know with an empty list, not a 404.
+        match music.artist(artist).await? {
+            Some(a) => music.albums_for_artist(a.content_id).await?,
+            None => Vec::new(),
+        }
     } else {
         let ids: HashSet<i64> = params(&q, "albumIds")
             .iter()
