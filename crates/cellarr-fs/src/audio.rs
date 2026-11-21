@@ -61,7 +61,14 @@ pub struct AudioTags {
 /// audio.
 #[must_use]
 pub fn read_audio_tags(path: &Path) -> Option<AudioTags> {
-    let tagged = lofty::read_from_path(path).ok()?;
+    // Embedded cover art is skipped: it is megabytes per file that nothing here
+    // uses, and on a network mount every byte of it is read for nothing.
+    let options = lofty::config::ParseOptions::new().read_cover_art(false);
+    let tagged = lofty::probe::Probe::open(path)
+        .ok()?
+        .options(options)
+        .read()
+        .ok()?;
     let properties = tagged.properties();
     let codec = match tagged.file_type() {
         FileType::Flac => "flac",
