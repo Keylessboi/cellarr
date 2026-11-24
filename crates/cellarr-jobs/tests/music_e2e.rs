@@ -274,7 +274,14 @@ async fn an_album_import_removes_the_staged_copy_and_writes_no_nfo() {
     let dl = staging.path().join("Radiohead - OK Computer (1997) [FLAC]");
     std::fs::create_dir_all(&dl).unwrap();
     write_track(&dl, "01 - Airbag.flac", "OK Computer", 1, 1, "Airbag");
-    write_track(&dl, "02 - Paranoid Android.flac", "OK Computer", 1, 2, "Paranoid Android");
+    write_track(
+        &dl,
+        "02 - Paranoid Android.flac",
+        "OK Computer",
+        1,
+        2,
+        "Paranoid Android",
+    );
     cellarr_jobs::set_staging_roots(vec![staging.path().to_path_buf()]);
 
     let library = tempfile::tempdir().unwrap();
@@ -286,12 +293,18 @@ async fn an_album_import_removes_the_staged_copy_and_writes_no_nfo() {
     let clock = LogicalClock::default();
     let runner = PipelineRunner::new(&indexer, &client, &registry, &db, &clock, &cfg);
     let outcome = runner.run(&album).await.unwrap();
-    assert!(matches!(outcome, RunOutcome::Imported { .. }), "{outcome:?}");
+    assert!(
+        matches!(outcome, RunOutcome::Imported { .. }),
+        "{outcome:?}"
+    );
 
     let base = library.path().join("Radiohead/OK Computer (1997)");
     assert!(base.join("01 - Airbag.flac").exists());
     assert!(base.join("02 - Paranoid Android.flac").exists());
-    assert!(!base.join("movie.nfo").exists(), "no movie.nfo in an album folder");
+    assert!(
+        !base.join("movie.nfo").exists(),
+        "no movie.nfo in an album folder"
+    );
     assert!(!dl.join("01 - Airbag.flac").exists(), "staged copy removed");
     assert!(!dl.join("02 - Paranoid Android.flac").exists());
     assert!(staging.path().exists(), "the staging root itself stays");
