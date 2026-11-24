@@ -3116,6 +3116,7 @@ pub(crate) fn v3_download_client(dc: &cellarr_core::DownloadClientConfig) -> Val
         .as_object()
         .map(|o| {
             o.iter()
+                .filter(|(k, _)| k.as_str() != PLUGIN_PROTOCOL_KEY)
                 .enumerate()
                 .map(|(i, (k, v))| json!({ "order": i, "name": k, "value": v }))
                 .collect()
@@ -3130,12 +3131,29 @@ pub(crate) fn v3_download_client(dc: &cellarr_core::DownloadClientConfig) -> Val
         "implementation": dc_implementation(&dc.kind, dc.protocol),
         "implementationName": dc_implementation(&dc.kind, dc.protocol),
         "configContract": format!("{}Settings", dc_implementation(&dc.kind, dc.protocol)),
-        "protocol": protocol_str(dc.protocol),
+        "protocol": dc_protocol(dc),
         "priority": dc.priority,
         "enable": dc.enabled,
         "fields": fields,
         "tags": dc.tags,
     })
+}
+
+/// Where a plugin download client's own protocol name is kept in `settings`.
+const PLUGIN_PROTOCOL_KEY: &str = "__protocol";
+
+/// The v3 `protocol` of a download client: the plugin's own when it has one
+/// (kept from the push, else the catalog's), else torrent/usenet.
+pub(crate) fn dc_protocol(dc: &cellarr_core::DownloadClientConfig) -> String {
+    if let Some(p) = dc.settings.get(PLUGIN_PROTOCOL_KEY).and_then(Value::as_str) {
+        return p.to_string();
+    }
+    if let Some(e) = cellarr_plugins::catalog::find(&dc.kind)
+        .filter(|e| e.kind == cellarr_plugins::catalog::EntryKind::DownloadClient)
+    {
+        return e.protocol;
+    }
+    protocol_str(dc.protocol).to_string()
 }
 
 /// The v3 `implementation` string for a cellarr download-client kind. The
@@ -3327,6 +3345,13 @@ pub(crate) fn download_client_from_body(
         Some(p) if p.eq_ignore_ascii_case("usenet") => cellarr_core::Protocol::Usenet,
         _ => cellarr_core::Protocol::Torrent,
     };
+    // A plugin client's own protocol (`SoulseekDownloadProtocol`) does not fit
+    // torrent/usenet; keep it beside the settings so it survives the round trip.
+    if let Some(p) = body.protocol.as_deref().filter(|p| {
+        !p.is_empty() && !p.eq_ignore_ascii_case("torrent") && !p.eq_ignore_ascii_case("usenet")
+    }) {
+        settings.insert(PLUGIN_PROTOCOL_KEY.to_string(), json!(p));
+    }
     // Normalize the implementation into a cellarr kind. The two blackhole
     // implementations collapse to one kind ("blackhole"); the protocol carries
     // the torrent/usenet distinction.
@@ -8451,5 +8476,35 @@ mod history_projection {
             grab_id: GrabId::new(),
         };
         assert_eq!(history_event_type(&imported), "imported");
+    }
+}
+
+#[cfg(test)]
+mod plugin_client_protocol_tests {
+    use super::*;
+
+    #[test]
+    fn a_plugin_clients_own_protocol_survives_the_round_trip() {
+        let body: DownloadClientBody = serde_json::from_value(json!({
+            "name": "slskd", "implementation": "Slskd",
+            "protocol": "SoulseekDownloadProtocol", "enable": true,
+            "fields": [{"name": "baseUrl", "value": "http://s"}],
+        }))
+        .unwrap();
+        let dc = download_client_from_body(&body, cellarr_core::DownloadClientId::new());
+        let v = v3_download_client(&dc);
+        assert_eq!(v["protocol"], json!("SoulseekDownloadProtocol"));
+        assert!(v["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|f| f["name"] != json!("__protocol")));
+        // A plain client keeps torrent/usenet.
+        let body: DownloadClientBody = serde_json::from_value(json!({
+            "name": "q", "implementation": "QBittorrent", "protocol": "torrent", "enable": true,
+        }))
+        .unwrap();
+        let dc = download_client_from_body(&body, cellarr_core::DownloadClientId::new());
+        assert_eq!(v3_download_client(&dc)["protocol"], json!("torrent"));
     }
 }
