@@ -430,14 +430,23 @@ async fn jobs_for(state: &AppState, name: &str, body: &Value) -> ApiResult<Optio
                 .get("githubUrl")
                 .and_then(Value::as_str)
                 .ok_or_else(|| ApiError::BadRequest("githubUrl is required".into()))?;
-            let result = if lower == "installplugin" {
-                sidecar.install(url).await
+            if lower == "installplugin" {
+                let outcome = sidecar
+                    .install(url)
+                    .await
+                    .map_err(|e| ApiError::Command(e.to_string()))?;
+                if outcome == cellarr_plugins::sidecar::InstallOutcome::RestartRequired {
+                    return Err(ApiError::Command(
+                        "installed, but the sidecar does not list the plugin yet: a sidecar restart is required"
+                            .into(),
+                    ));
+                }
             } else {
                 sidecar
                     .forward_command(&json!({ "name": "UninstallPlugin", "githubUrl": url }))
                     .await
-            };
-            result.map_err(|e| ApiError::Command(e.to_string()))?;
+                    .map_err(|e| ApiError::Command(e.to_string()))?;
+            }
             Ok(None)
         }
         _ => Err(ApiError::BadRequest(format!("unknown command: {name}"))),

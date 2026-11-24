@@ -109,7 +109,31 @@ pub struct Sidecar {
     schemas: RwLock<BTreeMap<String, (EntryKind, Value)>>,
     /// Releases the sidecar found recently: guid -> sidecar indexer id, so a
     /// grab of one is handed back by id (the sidecar keeps them cached).
-    found: std::sync::Mutex<BTreeMap<String, i64>>,
+    found: std::sync::Mutex<BTreeMap<String, Found>>,
+    /// Mirrors asked for so far (mirror name -> catalog name and settings), so a
+    /// grab can fall back to the mirror whose protocol matches the release.
+    mirrors: std::sync::Mutex<BTreeMap<String, (String, Value)>>,
+    retry_pause: Duration,
+    album_wait_polls: u32,
+    install_polls: u32,
+}
+
+/// What the sidecar told us about a release it found.
+#[derive(Debug, Clone)]
+struct Found {
+    indexer: i64,
+    /// The release's protocol as the sidecar names it (`SoulseekDownloadProtocol`).
+    protocol: String,
+    album: i64,
+}
+
+/// What an `InstallPlugin` request came to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstallOutcome {
+    /// The sidecar lists the plugin and its implementations are published.
+    Loaded,
+    /// The sidecar accepted the install but does not list the plugin yet.
+    RestartRequired,
 }
 
 fn err(e: impl std::fmt::Display) -> PluginError {
@@ -130,6 +154,10 @@ impl Sidecar {
             setup: Mutex::new(false),
             schemas: RwLock::new(BTreeMap::new()),
             found: std::sync::Mutex::new(BTreeMap::new()),
+            mirrors: std::sync::Mutex::new(BTreeMap::new()),
+            retry_pause: Duration::from_secs(2),
+            album_wait_polls: 60,
+            install_polls: 30,
         }
     }
 
@@ -263,6 +291,17 @@ impl Sidecar {
         Ok(entries)
     }
 
+    /// Discover and publish the sidecar's implementations to the catalog.
+    ///
+    /// # Errors
+    /// When the sidecar cannot be reached.
+    pub async fn refresh_catalog(&self) -> Result<usize> {
+        let entries = self.discover().await?;
+        let n = entries.len();
+        crate::catalog::set_runtime("dotnet", entries);
+        Ok(n)
+    }
+
     fn schema(&self, name: &str) -> Option<(EntryKind, Value)> {
         self.schemas
             .read()
@@ -288,6 +327,7 @@ impl Sidecar {
             )
             .await?;
         }
+        self.allow_all_primary_types().await;
         let roots = self.get("/rootfolder").await?;
         let have = roots.as_array().is_some_and(|a| {
             a.iter().any(|r| {
@@ -313,6 +353,38 @@ impl Sidecar {
         Ok(())
     }
 
+    /// The sidecar's default metadata profile drops EPs (and singles), so an EP
+    /// never gets an album row and its release search finds nothing. Allow every
+    /// primary type on the profile new artists are added with. Best effort.
+    async fn allow_all_primary_types(&self) {
+        let Ok(profiles) = self.get("/metadataprofile").await else {
+            return;
+        };
+        let Some(mut profile) = profiles
+            .as_array()
+            .and_then(|a| a.iter().find(|p| p["id"].as_i64() == Some(1)).cloned())
+        else {
+            return;
+        };
+        let mut changed = false;
+        if let Some(items) = profile["primaryAlbumTypes"].as_array_mut() {
+            for item in items {
+                if item["allowed"] == json!(false) {
+                    item["allowed"] = json!(true);
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            if let Err(e) = self
+                .call(reqwest::Method::PUT, "/metadataprofile/1", Some(&profile))
+                .await
+            {
+                tracing::warn!(error = %e, "could not widen the sidecar's metadata profile");
+            }
+        }
+    }
+
     /// Create or update the sidecar's mirror of one cellarr indexer/client.
     async fn ensure_mirror(
         &self,
@@ -322,7 +394,22 @@ impl Sidecar {
     ) -> Result<(EntryKind, i64)> {
         self.ensure_setup().await?;
         if self.schema(catalog_name).is_none() {
-            self.discover().await?;
+            // A plugin installed after boot: look again, a few times, since the
+            // sidecar may still be restarting to load it.
+            for attempt in 0..4 {
+                if attempt > 0 {
+                    tokio::time::sleep(self.retry_pause).await;
+                }
+                if self.refresh_catalog().await.is_ok() && self.schema(catalog_name).is_some() {
+                    break;
+                }
+            }
+        }
+        if let Ok(mut m) = self.mirrors.lock() {
+            m.insert(
+                mirror_name.to_string(),
+                (catalog_name.to_string(), settings.clone()),
+            );
         }
         let (kind, schema) = self.schema(catalog_name).ok_or_else(|| {
             err(format!(
@@ -372,15 +459,33 @@ impl Sidecar {
                 }
                 id
             }
-            None => self
-                .call(
-                    reqwest::Method::POST,
-                    &format!("{collection}?forceSave=true"),
-                    Some(&wanted),
-                )
-                .await?["id"]
-                .as_i64()
-                .unwrap_or_default(),
+            None => {
+                let url = format!("{collection}?forceSave=true");
+                match self.call(reqwest::Method::POST, &url, Some(&wanted)).await {
+                    Ok(v) => v["id"].as_i64().unwrap_or_default(),
+                    Err(first) if kind == EntryKind::DownloadClient => {
+                        // Creating an enabled client validates it, and a client
+                        // whose test needs more than its key allows fails. Create
+                        // it disabled, then enable it with forceSave.
+                        let mut off = wanted.clone();
+                        off["enable"] = json!(false);
+                        let made = self
+                            .call(reqwest::Method::POST, &url, Some(&off))
+                            .await
+                            .map_err(|_| first)?;
+                        let id = made["id"].as_i64().unwrap_or_default();
+                        wanted["id"] = json!(id);
+                        self.call(
+                            reqwest::Method::PUT,
+                            &format!("{collection}/{id}?forceSave=true"),
+                            Some(&wanted),
+                        )
+                        .await?;
+                        id
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
         };
         Ok((kind, id))
     }
@@ -420,14 +525,35 @@ impl Sidecar {
                 .await?;
         }
         // The album list arrives with the artist's refresh.
-        for _ in 0..60 {
+        let mut refreshed = false;
+        for i in 0..self.album_wait_polls {
             if let Some(id) = find().await {
                 return Ok(id);
             }
-            tokio::time::sleep(Duration::from_secs(2)).await;
+            if i == self.album_wait_polls / 3 && !refreshed {
+                // An artist added before the profile was widened keeps its old
+                // album list until refreshed.
+                refreshed = true;
+                if let Ok(a) = self.get(&format!("/artist?mbId={artist_mbid}")).await {
+                    if let Some(aid) = a
+                        .as_array()
+                        .and_then(|a| a.first())
+                        .and_then(|a| a["id"].as_i64())
+                    {
+                        let _ = self
+                            .call(
+                                reqwest::Method::POST,
+                                "/command",
+                                Some(&json!({"name": "RefreshArtist", "artistId": aid})),
+                            )
+                            .await;
+                    }
+                }
+            }
+            tokio::time::sleep(self.retry_pause).await;
         }
         Err(err(format!(
-            "the sidecar has no album {album_mbid} for artist {artist_mbid} (its metadata profile may exclude it)"
+            "the sidecar has no album {album_mbid} for artist {artist_mbid} (its metadata profile may exclude this album type, or the metadata server does not list it)"
         )))
     }
 
@@ -470,7 +596,14 @@ impl Sidecar {
         if let Ok(mut cache) = self.found.lock() {
             for r in &mine {
                 if let Some(g) = r["guid"].as_str() {
-                    cache.insert(g.to_string(), sidecar_indexer);
+                    cache.insert(
+                        g.to_string(),
+                        Found {
+                            indexer: sidecar_indexer,
+                            protocol: r["protocol"].as_str().unwrap_or_default().to_string(),
+                            album: album_id,
+                        },
+                    );
                 }
             }
             // Bound the cache; the sidecar forgets its own after a while too.
@@ -495,9 +628,23 @@ impl Sidecar {
         settings: &Value,
         release: &Release,
     ) -> Result<String> {
-        let (_, client_id) = self
+        let (_, mut client_id) = self
             .ensure_mirror(catalog_name, mirror_name, settings)
             .await?;
+        let known = release
+            .guid
+            .as_ref()
+            .and_then(|g| self.found.lock().ok().and_then(|c| c.get(g).cloned()));
+        let by_link = release
+            .download_url
+            .strip_prefix(SIDECAR_SCHEME)
+            .and_then(|rest| {
+                rest.split_once(':')
+                    .map(|(i, g)| (i.parse::<i64>().unwrap_or_default(), g.to_string()))
+            });
+        if let Some(f) = &known {
+            client_id = self.client_for_protocol(client_id, &f.protocol).await?;
+        }
         // Only this client may take it: every other enabled client of the
         // sidecar steps back.
         let clients = self.get("/downloadclient").await?;
@@ -515,26 +662,13 @@ impl Sidecar {
                 .await?;
             }
         }
-        let cached = release
-            .guid
+        let cached = known
             .as_ref()
-            .and_then(|g| self.found.lock().ok().and_then(|c| c.get(g).copied()))
-            .zip(release.guid.clone());
-        let by_link = release
-            .download_url
-            .strip_prefix(SIDECAR_SCHEME)
-            .and_then(|rest| {
-                rest.split_once(':')
-                    .map(|(i, g)| (i.parse::<i64>().unwrap_or_default(), g.to_string()))
-            });
+            .zip(release.guid.clone())
+            .map(|(f, g)| (f.indexer, g));
         if let Some((indexer, guid)) = by_link.or(cached) {
             // A release the sidecar found itself: grab it from its own cache.
-            self.call(
-                reqwest::Method::POST,
-                "/release",
-                Some(&json!({ "guid": guid, "indexerId": indexer })),
-            )
-            .await?;
+            self.grab_cached(&release.title, indexer, &guid).await?;
         } else {
             let protocol = match release.protocol {
                 Protocol::Torrent => "torrent",
@@ -598,6 +732,113 @@ impl Sidecar {
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
         Ok(format!("title:{}", release.title))
+    }
+
+    /// The sidecar client that should take a release of `protocol`: `chosen`
+    /// when it speaks that protocol (or the protocol is unknown), else a
+    /// client of the sidecar that does, creating its mirror when cellarr has
+    /// asked for one.
+    async fn client_for_protocol(&self, chosen: i64, protocol: &str) -> Result<i64> {
+        if protocol.is_empty() {
+            return Ok(chosen);
+        }
+        let clients = self.get("/downloadclient").await?;
+        let list = clients.as_array().cloned().unwrap_or_default();
+        let speaks = |c: &Value| {
+            c["protocol"]
+                .as_str()
+                .is_some_and(|p| p.eq_ignore_ascii_case(protocol))
+        };
+        if list
+            .iter()
+            .any(|c| c["id"].as_i64() == Some(chosen) && speaks(c))
+        {
+            return Ok(chosen);
+        }
+        // A mirror cellarr configured for this protocol, not yet created.
+        let candidates: Vec<(String, String, Value)> = self
+            .mirrors
+            .lock()
+            .map(|m| {
+                m.iter()
+                    .map(|(n, (c, s))| (n.clone(), c.clone(), s.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        for (name, catalog, settings) in candidates {
+            let matches = self.schema(&catalog).is_some_and(|(k, sc)| {
+                k == EntryKind::DownloadClient
+                    && sc["protocol"]
+                        .as_str()
+                        .is_some_and(|p| p.eq_ignore_ascii_case(protocol))
+            });
+            if matches {
+                if let Ok((_, id)) = self.ensure_mirror(&catalog, &name, &settings).await {
+                    return Ok(id);
+                }
+            }
+        }
+        Ok(list
+            .iter()
+            .find(|c| speaks(c))
+            .and_then(|c| c["id"].as_i64())
+            .unwrap_or(chosen))
+    }
+
+    /// Grab a release out of the sidecar's search cache. The cache forgets after
+    /// about half an hour; when it has, search the album again, find the same
+    /// release and grab that, once.
+    async fn grab_cached(&self, title: &str, indexer: i64, guid: &str) -> Result<()> {
+        let body = json!({ "guid": guid, "indexerId": indexer });
+        let first = self
+            .call(reqwest::Method::POST, "/release", Some(&body))
+            .await;
+        let Err(e) = first else { return Ok(()) };
+        if !e.to_string().to_ascii_lowercase().contains("not in cache") {
+            return Err(e);
+        }
+        let known = self.found.lock().ok().and_then(|c| c.get(guid).cloned());
+        let album = match known.as_ref().map(|f| f.album) {
+            Some(a) => Some(a),
+            None => self
+                .get(&format!("/parse?title={}", encode_query(title)))
+                .await
+                .ok()
+                .and_then(|p| p["albums"][0]["id"].as_i64()),
+        };
+        let Some(album) = album else { return Err(e) };
+        let found = self.get(&format!("/release?albumId={album}")).await?;
+        let list = found.as_array().cloned().unwrap_or_default();
+        let same = |r: &&Value| r["indexerId"].as_i64() == Some(indexer);
+        let hit = list
+            .iter()
+            .filter(same)
+            .find(|r| r["guid"].as_str() == Some(guid))
+            .or_else(|| {
+                list.iter().filter(same).find(|r| {
+                    r["title"]
+                        .as_str()
+                        .is_some_and(|t| t.eq_ignore_ascii_case(title))
+                })
+            })
+            .or_else(|| {
+                list.iter().find(|r| {
+                    r["title"]
+                        .as_str()
+                        .is_some_and(|t| t.eq_ignore_ascii_case(title))
+                })
+            });
+        let Some(hit) = hit else {
+            return Err(err(format!(
+                "the sidecar's search cache expired and a new search did not find \"{title}\" again"
+            )));
+        };
+        let body = json!({
+            "guid": hit["guid"], "indexerId": hit["indexerId"],
+        });
+        self.call(reqwest::Method::POST, "/release", Some(&body))
+            .await
+            .map(|_| ())
     }
 
     /// Monitor the artist and album a release title names, returning what to
@@ -750,17 +991,46 @@ impl Sidecar {
     }
 
     /// Ask the sidecar to install a plugin from its GitHub URL (Lidarr restarts
-    /// itself to load it).
+    /// itself to load it), then wait for it to list the plugin and publish its
+    /// implementations.
     ///
     /// # Errors
     /// When the sidecar refuses the command.
-    pub async fn install(&self, github_url: &str) -> Result<Value> {
+    pub async fn install(&self, github_url: &str) -> Result<InstallOutcome> {
         self.call(
             reqwest::Method::POST,
             "/command",
             Some(&json!({ "name": "InstallPlugin", "githubUrl": github_url })),
         )
-        .await
+        .await?;
+        let wanted = github_url
+            .trim_end_matches('/')
+            .rsplit('/')
+            .next()
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        for _ in 0..self.install_polls {
+            tokio::time::sleep(self.retry_pause).await;
+            // The sidecar is down while it restarts to load the plugin.
+            let Ok(list) = self.installed().await else {
+                continue;
+            };
+            let listed = list.as_array().is_some_and(|a| {
+                a.iter().any(|p| {
+                    p["githubUrl"].as_str().is_some_and(|u| {
+                        u.trim_end_matches('/')
+                            .eq_ignore_ascii_case(github_url.trim_end_matches('/'))
+                    }) || (!wanted.is_empty()
+                        && p["name"]
+                            .as_str()
+                            .is_some_and(|n| n.to_ascii_lowercase() == wanted))
+                })
+            });
+            if listed && self.refresh_catalog().await.is_ok() {
+                return Ok(InstallOutcome::Loaded);
+            }
+        }
+        Ok(InstallOutcome::RestartRequired)
     }
 
     /// Pass a command straight to the sidecar.
@@ -1027,11 +1297,10 @@ pub fn spawn_discovery(sidecar: Arc<Sidecar>) {
     tokio::spawn(async move {
         let mut delay = Duration::from_secs(5);
         loop {
-            match sidecar.discover().await {
-                Ok(entries) => {
-                    tracing::info!(implementations = entries.len(), "lidarr sidecar discovered");
-                    crate::catalog::set_runtime("dotnet", entries);
-                    delay = Duration::from_secs(600);
+            match sidecar.refresh_catalog().await {
+                Ok(n) => {
+                    tracing::info!(implementations = n, "lidarr sidecar discovered");
+                    delay = Duration::from_secs(120);
                 }
                 Err(e) => {
                     tracing::warn!(error = %e, "lidarr sidecar not reachable yet");
@@ -1249,5 +1518,254 @@ mod tests {
                 .as_deref(),
             Some("QBittorrentViaLidarr")
         );
+    }
+
+    // --- a fake sidecar over a socket ------------------------------------
+
+    type Handler = std::sync::Arc<dyn Fn(&str, &str, &Value) -> (u16, Value) + Send + Sync>;
+
+    async fn fake(handler: Handler) -> Sidecar {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut sock, _)) = listener.accept().await else {
+                    return;
+                };
+                let handler = handler.clone();
+                tokio::spawn(async move {
+                    let mut buf = Vec::new();
+                    let mut chunk = [0u8; 4096];
+                    let (head_end, len) = loop {
+                        let n = sock.read(&mut chunk).await.unwrap_or(0);
+                        if n == 0 {
+                            return;
+                        }
+                        buf.extend_from_slice(&chunk[..n]);
+                        if let Some(p) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                            let head = String::from_utf8_lossy(&buf[..p]).to_ascii_lowercase();
+                            let len = head
+                                .lines()
+                                .find_map(|l| l.strip_prefix("content-length:"))
+                                .and_then(|v| v.trim().parse::<usize>().ok())
+                                .unwrap_or(0);
+                            break (p + 4, len);
+                        }
+                    };
+                    while buf.len() < head_end + len {
+                        let n = sock.read(&mut chunk).await.unwrap_or(0);
+                        if n == 0 {
+                            break;
+                        }
+                        buf.extend_from_slice(&chunk[..n]);
+                    }
+                    let head = String::from_utf8_lossy(&buf[..head_end]).to_string();
+                    let mut parts = head.split_whitespace();
+                    let method = parts.next().unwrap_or_default().to_string();
+                    let target = parts.next().unwrap_or_default().to_string();
+                    let path = target
+                        .strip_prefix("/api/v1")
+                        .unwrap_or(&target)
+                        .to_string();
+                    let body: Value =
+                        serde_json::from_slice(&buf[head_end..]).unwrap_or(Value::Null);
+                    let (status, out) = handler(&method, &path, &body);
+                    let text = out.to_string();
+                    let resp = format!(
+                        "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{text}",
+                        text.len()
+                    );
+                    let _ = sock.write_all(resp.as_bytes()).await;
+                });
+            }
+        });
+        let mut s = Sidecar::new(SidecarConfig {
+            url: format!("http://{addr}"),
+            api_key: "k".into(),
+            root_folder: "/root".into(),
+            expose_builtins: false,
+        });
+        s.retry_pause = Duration::from_millis(5);
+        s.install_polls = 3;
+        s.album_wait_polls = 3;
+        s
+    }
+
+    type Log = std::sync::Arc<std::sync::Mutex<Vec<(String, String, Value)>>>;
+
+    fn logged(log: &Log, method: &str, path: &str, body: &Value) {
+        log.lock()
+            .unwrap()
+            .push((method.into(), path.into(), body.clone()));
+    }
+
+    fn slsk_schema() -> Value {
+        json!({"implementation": "Slskd", "protocol": "SoulseekDownloadProtocol",
+               "fields": [{"name": "baseUrl", "value": ""}]})
+    }
+
+    #[tokio::test]
+    async fn a_mirror_that_fails_validation_is_created_disabled_then_enabled() {
+        let log: Log = Default::default();
+        let l = log.clone();
+        let sc = fake(std::sync::Arc::new(move |m, p, b| {
+            logged(&l, m, p, b);
+            match (m, p.split('?').next().unwrap()) {
+                ("GET", "/config/downloadclient") => (
+                    200,
+                    json!({"id": 1, "enableCompletedDownloadHandling": true}),
+                ),
+                ("GET", "/metadataprofile") => (200, json!([])),
+                ("GET", "/rootfolder") => (200, json!([{"path": "/root"}])),
+                ("GET", "/downloadclient") => (200, json!([])),
+                ("POST", "/downloadclient") if b["enable"] == json!(true) => (
+                    400,
+                    json!([{"propertyName": "x", "errorMessage": "403 on /api/v0/options"}]),
+                ),
+                ("POST", "/downloadclient") => (201, json!({"id": 9})),
+                ("PUT", "/downloadclient/9") => (202, json!({"id": 9})),
+                _ => (404, json!({})),
+            }
+        }))
+        .await;
+        sc.schemas
+            .write()
+            .unwrap()
+            .insert("slskd".into(), (EntryKind::DownloadClient, slsk_schema()));
+        let (_, id) = sc
+            .ensure_mirror("Slskd", "cellarr-slskd", &json!({"baseUrl": "http://s"}))
+            .await
+            .unwrap();
+        assert_eq!(id, 9);
+        let log = log.lock().unwrap();
+        let posts: Vec<_> = log.iter().filter(|(m, ..)| m == "POST").collect();
+        assert_eq!(posts.len(), 2);
+        assert_eq!(posts[1].2["enable"], json!(false));
+        let put = log.iter().find(|(m, ..)| m == "PUT").unwrap();
+        assert!(put.1.contains("forceSave=true"));
+        assert_eq!(put.2["enable"], json!(true));
+    }
+
+    #[tokio::test]
+    async fn setup_allows_every_primary_album_type() {
+        let log: Log = Default::default();
+        let l = log.clone();
+        let sc = fake(std::sync::Arc::new(move |m, p, b| {
+            logged(&l, m, p, b);
+            match (m, p) {
+                ("GET", "/config/downloadclient") => (
+                    200,
+                    json!({"id": 1, "enableCompletedDownloadHandling": true}),
+                ),
+                ("GET", "/metadataprofile") => (
+                    200,
+                    json!([{"id": 1, "name": "Standard", "primaryAlbumTypes": [
+                        {"albumType": {"name": "Album"}, "allowed": true},
+                        {"albumType": {"name": "EP"}, "allowed": false}]}]),
+                ),
+                ("PUT", "/metadataprofile/1") => (202, json!({})),
+                ("GET", "/rootfolder") => (200, json!([{"path": "/root"}])),
+                _ => (404, json!({})),
+            }
+        }))
+        .await;
+        sc.ensure_setup().await.unwrap();
+        let log = log.lock().unwrap();
+        let put = log.iter().find(|(m, ..)| m == "PUT").unwrap();
+        assert!(put.2["primaryAlbumTypes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|t| t["allowed"] == json!(true)));
+    }
+
+    #[tokio::test]
+    async fn an_expired_release_cache_is_searched_again_once() {
+        let log: Log = Default::default();
+        let l = log.clone();
+        let sc = fake(std::sync::Arc::new(move |m, p, b| {
+            logged(&l, m, p, b);
+            let posts = l
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|(m, p, _)| m == "POST" && p == "/release")
+                .count();
+            match (m, p.split('?').next().unwrap()) {
+                ("POST", "/release") if b["guid"] == json!("old") => (
+                    404,
+                    json!({"message": "Unable to find matching release, release not in cache"}),
+                ),
+                ("POST", "/release") => {
+                    assert!(posts >= 2);
+                    (200, json!({}))
+                }
+                ("GET", "/release") => (
+                    200,
+                    json!([{"guid": "new", "indexerId": 3, "title": "Burial - Street Halo"}]),
+                ),
+                ("GET", "/parse") => (200, json!({"albums": [{"id": 77}]})),
+                _ => (404, json!({})),
+            }
+        }))
+        .await;
+        sc.grab_cached("Burial - Street Halo", 3, "old")
+            .await
+            .unwrap();
+        let log = log.lock().unwrap();
+        let last = log
+            .iter()
+            .rfind(|(m, p, _)| m == "POST" && p == "/release")
+            .unwrap();
+        assert_eq!(last.2["guid"], json!("new"));
+        assert!(log
+            .iter()
+            .any(|(_, p, _)| p.starts_with("/release?albumId=77")));
+    }
+
+    #[tokio::test]
+    async fn a_release_goes_to_the_client_that_speaks_its_protocol() {
+        let sc = fake(std::sync::Arc::new(|m, p, _| match (m, p) {
+            ("GET", "/downloadclient") => (
+                200,
+                json!([{"id": 1, "protocol": "torrent"},
+                       {"id": 2, "protocol": "SoulseekDownloadProtocol"}]),
+            ),
+            _ => (404, json!({})),
+        }))
+        .await;
+        assert_eq!(
+            sc.client_for_protocol(1, "SoulseekDownloadProtocol")
+                .await
+                .unwrap(),
+            2
+        );
+        assert_eq!(sc.client_for_protocol(1, "torrent").await.unwrap(), 1);
+        assert_eq!(sc.client_for_protocol(1, "").await.unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn install_reports_loaded_only_when_the_sidecar_lists_the_plugin() {
+        let listed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let l = listed.clone();
+        let sc = fake(std::sync::Arc::new(move |m, p, _| match (m, p) {
+            ("POST", "/command") => (201, json!({})),
+            ("GET", "/system/plugins") if l.load(std::sync::atomic::Ordering::SeqCst) => (
+                200,
+                json!([{"name": "Tubifarry", "githubUrl": "https://github.com/TypNull/Tubifarry"}]),
+            ),
+            ("GET", "/system/plugins") => (200, json!([])),
+            ("GET", _) => (200, json!([])),
+            _ => (404, json!({})),
+        }))
+        .await;
+        let url = "https://github.com/TypNull/Tubifarry";
+        assert_eq!(
+            sc.install(url).await.unwrap(),
+            InstallOutcome::RestartRequired
+        );
+        listed.store(true, std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(sc.install(url).await.unwrap(), InstallOutcome::Loaded);
     }
 }
