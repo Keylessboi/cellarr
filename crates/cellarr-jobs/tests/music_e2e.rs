@@ -268,6 +268,50 @@ async fn an_album_is_searched_grabbed_and_imported_onto_its_tracks() {
 }
 
 #[tokio::test]
+async fn an_album_import_removes_the_staged_copy_and_writes_no_nfo() {
+    let Shelf { db, album } = shelf().await;
+    let staging = tempfile::tempdir().unwrap();
+    let dl = staging.path().join("Radiohead - OK Computer (1997) [FLAC]");
+    std::fs::create_dir_all(&dl).unwrap();
+    write_track(&dl, "01 - Airbag.flac", "OK Computer", 1, 1, "Airbag");
+    write_track(
+        &dl,
+        "02 - Paranoid Android.flac",
+        "OK Computer",
+        1,
+        2,
+        "Paranoid Android",
+    );
+    cellarr_jobs::set_staging_roots(vec![staging.path().to_path_buf()]);
+
+    let library = tempfile::tempdir().unwrap();
+    let mut cfg = config(library.path().to_path_buf());
+    cfg.write_nfo = true;
+    let registry = registry(&db);
+    let indexer = Indexer(vec![release("Radiohead - OK Computer (1997) [FLAC]")]);
+    let client = Client(dl.to_string_lossy().into_owned());
+    let clock = LogicalClock::default();
+    let runner = PipelineRunner::new(&indexer, &client, &registry, &db, &clock, &cfg);
+    let outcome = runner.run(&album).await.unwrap();
+    assert!(
+        matches!(outcome, RunOutcome::Imported { .. }),
+        "{outcome:?}"
+    );
+
+    let base = library.path().join("Radiohead/OK Computer (1997)");
+    assert!(base.join("01 - Airbag.flac").exists());
+    assert!(base.join("02 - Paranoid Android.flac").exists());
+    assert!(
+        !base.join("movie.nfo").exists(),
+        "no movie.nfo in an album folder"
+    );
+    assert!(!dl.join("01 - Airbag.flac").exists(), "staged copy removed");
+    assert!(!dl.join("02 - Paranoid Android.flac").exists());
+    assert!(staging.path().exists(), "the staging root itself stays");
+    cellarr_jobs::set_staging_roots(Vec::new());
+}
+
+#[tokio::test]
 async fn a_download_tagged_as_another_album_is_not_imported() {
     let Shelf { db, album } = shelf().await;
     let download = tempfile::tempdir().unwrap();

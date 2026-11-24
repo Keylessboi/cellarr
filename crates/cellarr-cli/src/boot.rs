@@ -237,6 +237,7 @@ impl Daemon {
                     .dotnet_sidecar_root
                     .clone()
                     .unwrap_or_else(|| config.data_dir.join("sidecar-root"));
+                cellarr_jobs::set_staging_roots(vec![root.clone()]);
                 let sidecar = std::sync::Arc::new(cellarr_plugins::sidecar::Sidecar::new(
                     cellarr_plugins::sidecar::SidecarConfig {
                         url,

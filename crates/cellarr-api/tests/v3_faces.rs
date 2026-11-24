@@ -754,6 +754,45 @@ async fn downloadclient_test_validates_body() {
     assert_eq!(bad.status(), 400);
 }
 
+#[tokio::test]
+async fn plugin_implementations_pass_indexer_and_downloadclient_test() {
+    use cellarr_plugins::catalog::{set_runtime, Entry, EntryKind};
+    let mk = |name: &str, kind| Entry {
+        name: name.into(),
+        version: "1".into(),
+        description: String::new(),
+        kind,
+        protocol: "torrent".into(),
+        fields: vec![],
+        runtime: "test-import-fixes".into(),
+    };
+    set_runtime(
+        "test-import-fixes",
+        vec![
+            mk("TestPluginIndexer", EntryKind::Indexer),
+            mk("TestPluginClient", EntryKind::DownloadClient),
+        ],
+    );
+    let server = start_authed().await;
+    for (path, imp) in [
+        ("/api/v3/indexer/test", "TestPluginIndexer"),
+        ("/api/v3/downloadclient/test", "TestPluginClient"),
+    ] {
+        let ok: Value = server
+            .client()
+            .post(server.url(path))
+            .header("X-Api-Key", TEST_API_KEY)
+            .json(&serde_json::json!({ "implementation": imp, "fields": [] }))
+            .send()
+            .await
+            .expect("request")
+            .json()
+            .await
+            .expect("json");
+        assert_eq!(ok["isValid"], true, "{imp}");
+    }
+}
+
 // --- remotepathmapping CRUD ------------------------------------------------
 
 #[tokio::test]

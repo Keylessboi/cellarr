@@ -3087,6 +3087,16 @@ pub(crate) async fn test_indexer(Json(body): Json<IndexerBody>) -> ApiResult<Jso
         };
     }
 
+    // A plugin implementation (sidecar or WASM) has no host/baseUrl in Lidarr's own
+    // schema: its settings are plugin-specific, so there is nothing generic to check.
+    if let Some(i) = body.implementation.as_deref() {
+        if cellarr_plugins::catalog::find(i)
+            .is_some_and(|e| e.kind == cellarr_plugins::catalog::EntryKind::Indexer)
+        {
+            return Ok(Json(json!({ "isValid": true, "validationFailures": [] })));
+        }
+    }
+
     // Torznab/Newznab: a baseUrl must be present (the shim does no live check here).
     let has_base_url = body
         .fields
@@ -3454,6 +3464,14 @@ pub(crate) async fn delete_download_client(
 pub(crate) async fn test_download_client(
     Json(body): Json<DownloadClientBody>,
 ) -> ApiResult<Json<Value>> {
+    // Plugin implementations carry plugin-specific fields, not a watchFolder/host.
+    if let Some(i) = body.implementation.as_deref() {
+        if cellarr_plugins::catalog::find(i)
+            .is_some_and(|e| e.kind == cellarr_plugins::catalog::EntryKind::DownloadClient)
+        {
+            return Ok(Json(json!({ "isValid": true, "validationFailures": [] })));
+        }
+    }
     let has_watch = body
         .fields
         .iter()

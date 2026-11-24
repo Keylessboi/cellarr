@@ -1538,6 +1538,30 @@ impl<E: PipelineEnv> LivePipelineHandler<E> {
                     continue;
                 }
             };
+            // A client can sit at 100% "downloading" with its files already on disk
+            // (a sidecar that finished but never staged the download). When it
+            // reports a content path and that path holds files, treat the download
+            // as completed so it is imported rather than reaped as a stall.
+            let status_poll = match status_poll {
+                Ok(mut st)
+                    if matches!(st.state, DownloadState::Downloading)
+                        && st.progress >= COMPLETE_PROGRESS =>
+                {
+                    if let Some(reported) = st.content_path.as_deref() {
+                        let mapped = cellarr_core::apply_remote_path_mappings(
+                            &config.remote_path_mappings,
+                            &config.client_host,
+                            reported,
+                        );
+                        if path_holds_files(std::path::Path::new(&mapped)).await {
+                            tracing::info!(grab = %g.id, path = %mapped, "reconcile-downloads: download at 100% with files on disk; treating as completed");
+                            st.state = DownloadState::Completed;
+                        }
+                    }
+                    Ok(st)
+                }
+                other => other,
+            };
             match status_poll {
                 // Hard failure on the client: dead → blocklist + remove.
                 Ok(status) if matches!(status.state, DownloadState::Failed) => {
@@ -1745,7 +1769,11 @@ impl<E: PipelineEnv> LivePipelineHandler<E> {
                             false
                         }
                     };
-                    let dead_stall = status.peers == Some(0) && age > STALL_MIN_AGE;
+                    // A download at 100% is not a stalled transfer: its bytes may be
+                    // on disk (just not reported to us), so it is never reaped here.
+                    let at_full = status.progress >= COMPLETE_PROGRESS;
+                    let stalled_no_progress = stalled_no_progress && !at_full;
+                    let dead_stall = status.peers == Some(0) && age > STALL_MIN_AGE && !at_full;
                     if stalled_no_progress || dead_stall {
                         let reason = if stalled_no_progress {
                             "download made no progress within the stall window".to_string()
@@ -2262,6 +2290,33 @@ const NO_PROGRESS_STALL: time::Duration = time::Duration::hours(3);
 
 /// The smallest progress increase counted as real forward movement (guards against
 /// float jitter in a client's reported fraction).
+/// Progress at or above this counts as fully downloaded.
+const COMPLETE_PROGRESS: f32 = 0.999;
+
+/// True when `path` is a file, or a directory containing at least one file.
+async fn path_holds_files(path: &std::path::Path) -> bool {
+    let path = path.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        fn walk(p: &std::path::Path, depth: u32) -> bool {
+            let Ok(md) = std::fs::metadata(p) else {
+                return false;
+            };
+            if md.is_file() {
+                return true;
+            }
+            if depth == 0 {
+                return false;
+            }
+            std::fs::read_dir(p)
+                .map(|rd| rd.flatten().any(|e| walk(&e.path(), depth - 1)))
+                .unwrap_or(false)
+        }
+        walk(&path, 4)
+    })
+    .await
+    .unwrap_or(false)
+}
+
 const PROGRESS_EPSILON: f64 = 0.001;
 
 /// How long to wait for a single download-client status poll in the reconcile

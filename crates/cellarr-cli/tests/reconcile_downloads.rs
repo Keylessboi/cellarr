@@ -78,6 +78,12 @@ impl cellarr_core::DownloadClient for ReconcileClient {
                 content_path: Some(self.completed_path.clone()),
                 ..base(DownloadState::Completed, 1.0, Some(0))
             }),
+            // 100% but still "downloading" (a sidecar that never staged it).
+            "full-dl" => Ok(DownloadStatus {
+                content_path: Some(self.completed_path.clone()),
+                ..base(DownloadState::Downloading, 1.0, None)
+            }),
+            "full-nopath-dl" => Ok(base(DownloadState::Downloading, 1.0, None)),
             "failed-dl" => Ok(base(DownloadState::Failed, 0.0, Some(1))),
             "gone-dl" => Err(cellarr_download::DownloadError::NotFound(id.into())),
             "healthy-dl" => Ok(base(DownloadState::Downloading, 0.5, Some(10))),
@@ -722,6 +728,48 @@ async fn reconcile_blocklists_a_download_that_made_no_progress() {
         "a download stuck at the same progress past the stall window is cleaned"
     );
     assert_eq!(db.blocklist().list().await.unwrap().len(), 1);
+}
+
+/// A download stuck at 100% "downloading" whose files exist on disk is imported
+/// rather than reaped; one at 100% with no path is left alone, never blocklisted.
+#[tokio::test]
+async fn reconcile_imports_a_full_download_stuck_as_downloading() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db_path = tmp.path().join("cellarr.sqlite");
+    let db = Database::open(db_path.to_str().unwrap()).await.unwrap();
+    let download_dir = tmp.path().join("downloads");
+    std::fs::create_dir_all(&download_dir).unwrap();
+    let downloaded = download_dir.join("The.Matrix.1999.1080p.BluRay.x264-GROUP.mkv");
+    std::fs::write(&downloaded, b"synthetic movie bytes").unwrap();
+    let library_root = tmp.path().join("library/movies");
+    std::fs::create_dir_all(&library_root).unwrap();
+
+    let node = seed_movie(&db).await;
+    let grab = seed_grab(&db, &node, "full-dl").await;
+    let h = handler(
+        &db,
+        &node,
+        downloaded.to_string_lossy().into_owned(),
+        library_root.clone(),
+    );
+    let _ = h.handle(&JobKind::ReconcileDownloads).await;
+    assert_eq!(status_of(&db, grab).await, GrabStatus::Imported);
+    assert!(find_one_file(&library_root).is_some());
+}
+
+#[tokio::test]
+async fn reconcile_never_reaps_a_full_download_without_a_path() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db_path = tmp.path().join("cellarr.sqlite");
+    let db = Database::open(db_path.to_str().unwrap()).await.unwrap();
+    let node = seed_movie(&db).await;
+    let grab = seed_grab(&db, &node, "full-nopath-dl").await;
+    let h = handler(&db, &node, String::new(), tmp.path().to_path_buf());
+    let _ = h.handle(&JobKind::ReconcileDownloads).await;
+    backdate_progress(&db_path, grab, 4).await;
+    let _ = h.handle(&JobKind::ReconcileDownloads).await;
+    assert_eq!(status_of(&db, grab).await, GrabStatus::Sent);
+    assert!(db.blocklist().list().await.unwrap().is_empty());
 }
 
 /// A download whose progress ADVANCES is left alone: the stall timer resets to the
