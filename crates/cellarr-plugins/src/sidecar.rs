@@ -1199,7 +1199,11 @@ fn status_of(rec: &Value) -> DownloadStatus {
         } else {
             progress
         },
-        content_path: (state == DownloadState::Completed)
+        // A finished download the sidecar is still staging stays Downloading, but
+        // its files are on disk: give cellarr the path so a download stuck at
+        // 100% (Soulseek, behind a Windows-style remote path) can be imported
+        // from where it sits instead of being reaped as stalled.
+        content_path: (state == DownloadState::Completed || status == "completed")
             .then(|| rec["outputPath"].as_str().map(str::to_string))
             .flatten(),
         ratio: None,
@@ -1440,6 +1444,12 @@ mod tests {
             "size": 100.0, "sizeleft": 0.0, "outputPath": "/downloads/Kid A",
         }));
         assert_eq!(s.state, DownloadState::Downloading);
+        // ...but its files are on disk, so cellarr is told where, and can import
+        // a download that never leaves this state (Soulseek, stuck at 100%).
+        assert_eq!(s.content_path.as_deref(), Some("/downloads/Kid A"));
+        // A running download has no path yet.
+        let s = status_of(&json!({"status": "downloading", "size": 100.0, "sizeleft": 50.0, "outputPath": "/downloads/x"}));
+        assert_eq!(s.content_path, None);
         // The sidecar could not stage it: cellarr takes the download folder.
         let s = status_of(&json!({
             "status": "completed", "trackedDownloadState": "importBlocked",
