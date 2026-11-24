@@ -2753,9 +2753,24 @@ where
         // Best-effort, post-commit metadata sidecars (Kodi/Jellyfin `.nfo`). The
         // media is already durable; a sidecar failure is logged and never fails
         // the import (so the crash-safe stage->verify->commit guarantee stands).
-        if self.config.write_nfo {
+        if self.config.write_nfo
+            && matches!(
+                matched_ref.media_type,
+                cellarr_core::MediaType::Movie | cellarr_core::MediaType::Tv
+            )
+        {
             let nfo_paths: Vec<String> = destinations.iter().map(|(p, _)| p.clone()).collect();
             self.write_nfo_sidecars(matched_ref, &nfo_paths).await;
+        }
+
+        // The plugin sidecar stages a finished download under its own root; the
+        // library file is a hardlink or copy of it, so the staged copy is spent.
+        for (src, (dst, _)) in plan.moves.iter().zip(destinations.iter()) {
+            remove_spent_staged_copy(
+                std::path::Path::new(&src.source_path),
+                std::path::Path::new(dst),
+            )
+            .await;
         }
 
         Ok(destinations)
@@ -4307,6 +4322,67 @@ fn with_ext_token(tokens: &NamingTokens, ext: &str) -> NamingTokens {
 /// (`tracing::warn`) and swallowed — it never rolls back, corrupts, or fails the
 /// import. Permissions are applied *after* extras so a placed subtitle inherits the
 /// configured mode too.
+static STAGING_ROOTS: std::sync::RwLock<Vec<std::path::PathBuf>> =
+    std::sync::RwLock::new(Vec::new());
+
+/// Register the folders a plugin sidecar stages finished downloads under. After a
+/// successful import the staged source copy beneath one of these is removed.
+/// Nothing outside a registered root is ever removed; empty by default.
+pub fn set_staging_roots(roots: Vec<std::path::PathBuf>) {
+    if let Ok(mut g) = STAGING_ROOTS.write() {
+        *g = roots;
+    }
+}
+
+/// Remove `src` if it lies strictly inside a registered staging root and the
+/// library file `dst` exists with the same size. Best-effort; empty parent
+/// folders left behind (below the root) are pruned.
+async fn remove_spent_staged_copy(src: &std::path::Path, dst: &std::path::Path) {
+    let roots = STAGING_ROOTS.read().map(|g| g.clone()).unwrap_or_default();
+    if roots.is_empty() || src == dst {
+        return;
+    }
+    let (Ok(src_c), Ok(dst_c)) = (
+        tokio::fs::canonicalize(src).await,
+        tokio::fs::canonicalize(dst).await,
+    ) else {
+        return;
+    };
+    if src_c == dst_c {
+        return;
+    }
+    let mut root_hit = None;
+    for r in &roots {
+        if let Ok(rc) = tokio::fs::canonicalize(r).await {
+            if src_c.starts_with(&rc) && src_c != rc {
+                root_hit = Some(rc);
+                break;
+            }
+        }
+    }
+    let Some(root) = root_hit else { return };
+    let (Ok(sm), Ok(dm)) = (
+        tokio::fs::metadata(&src_c).await,
+        tokio::fs::metadata(&dst_c).await,
+    ) else {
+        return;
+    };
+    if !sm.is_file() || !dm.is_file() || sm.len() != dm.len() {
+        return;
+    }
+    if let Err(e) = tokio::fs::remove_file(&src_c).await {
+        tracing::warn!(path = %src_c.display(), error = %e, "removing staged copy failed");
+        return;
+    }
+    let mut dir = src_c.parent().map(std::path::Path::to_path_buf);
+    while let Some(d) = dir {
+        if d == root || !d.starts_with(&root) || tokio::fs::remove_dir(&d).await.is_err() {
+            break;
+        }
+        dir = d.parent().map(std::path::Path::to_path_buf);
+    }
+}
+
 async fn apply_post_commit(
     extra_files: &cellarr_core::ExtraFileImport,
     permissions: &cellarr_core::ImportPermissions,
