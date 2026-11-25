@@ -2475,7 +2475,9 @@ impl LivePipelineEnv {
         let Some(config) = clients.first() else {
             return Ok(None);
         };
-        let client = ConfiguredDownloadClient::from_config(config)
+        // Every eligible client is built so each release can be handed to the one
+        // that fits it; the run's category is the top-priority client's.
+        let client = ConfiguredDownloadClient::routed(&clients)
             .map_err(|e| format!("building download client '{}': {e}", config.name))?;
         Ok(Some((client, config.category.clone())))
     }

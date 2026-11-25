@@ -734,6 +734,40 @@ impl Sidecar {
         Ok(format!("title:{}", release.title))
     }
 
+    /// The protocol the sidecar names for a download-client implementation
+    /// (`SoulseekDownloadProtocol`, `torrent`, ...), from its schema. `None`
+    /// when the catalog has no such client.
+    #[must_use]
+    pub fn client_wire_protocol(&self, catalog_name: &str) -> Option<String> {
+        self.schema(catalog_name)
+            .filter(|(k, _)| *k == EntryKind::DownloadClient)
+            .and_then(|(_, s)| s["protocol"].as_str().map(str::to_string))
+    }
+
+    /// What the sidecar needs to know to route `release`: `None` for a release
+    /// from an ordinary indexer, else `Some(protocol)` (as the sidecar names it,
+    /// empty when the sidecar no longer remembers the release) for one only the
+    /// sidecar can fetch or that it found itself.
+    #[must_use]
+    pub fn release_wire_protocol(&self, release: &Release) -> Option<String> {
+        let by_link_guid = release
+            .download_url
+            .strip_prefix(SIDECAR_SCHEME)
+            .map(|rest| rest.split_once(':').map_or(rest, |(_, g)| g).to_string());
+        let guid = release.guid.clone().or_else(|| by_link_guid.clone());
+        let known = guid.and_then(|g| {
+            self.found
+                .lock()
+                .ok()
+                .and_then(|c| c.get(&g).map(|f| f.protocol.clone()))
+        });
+        match known {
+            Some(p) => Some(p),
+            None if by_link_guid.is_some() => Some(String::new()),
+            None => None,
+        }
+    }
+
     /// The sidecar client that should take a release of `protocol`: `chosen`
     /// when it speaks that protocol (or the protocol is unknown), else a
     /// client of the sidecar that does, creating its mirror when cellarr has
@@ -1381,6 +1415,18 @@ pub struct SidecarDownloadClient {
 }
 
 impl SidecarDownloadClient {
+    /// The sidecar behind this client.
+    #[must_use]
+    pub fn sidecar(&self) -> &Arc<Sidecar> {
+        &self.sidecar
+    }
+
+    /// The protocol the sidecar names for this client's implementation.
+    #[must_use]
+    pub fn wire_protocol(&self) -> Option<String> {
+        self.sidecar.client_wire_protocol(&self.implementation)
+    }
+
     /// The mirror of one configured client.
     #[must_use]
     pub fn new(
@@ -1732,6 +1778,48 @@ mod tests {
         assert!(log
             .iter()
             .any(|(_, p, _)| p.starts_with("/release?albumId=77")));
+    }
+
+    #[tokio::test]
+    async fn a_release_is_routed_by_the_protocol_the_sidecar_named_for_it() {
+        let sc = fake(std::sync::Arc::new(|_, _, _| (404, json!({})))).await;
+        sc.schemas
+            .write()
+            .unwrap()
+            .insert("slskd".into(), (EntryKind::DownloadClient, slsk_schema()));
+        sc.found.lock().unwrap().insert(
+            "g1".into(),
+            Found {
+                indexer: 3,
+                protocol: "SoulseekDownloadProtocol".into(),
+                album: 1,
+            },
+        );
+        let mut rel = Release {
+            indexer_id: IndexerId::new(),
+            title: "t".into(),
+            download_url: "https://x/y.torrent".into(),
+            guid: Some("g1".into()),
+            protocol: Protocol::Torrent,
+            size: None,
+            seeders: None,
+            indexer_flags: Vec::new(),
+        };
+        assert_eq!(
+            sc.release_wire_protocol(&rel).as_deref(),
+            Some("SoulseekDownloadProtocol")
+        );
+        // An ordinary indexer's release the sidecar never saw.
+        rel.guid = Some("other".into());
+        assert_eq!(sc.release_wire_protocol(&rel), None);
+        // A sidecar-scheme link the sidecar forgot: sidecar-only, protocol unknown.
+        rel.download_url = format!("{SIDECAR_SCHEME}3:gone");
+        assert_eq!(sc.release_wire_protocol(&rel).as_deref(), Some(""));
+        assert_eq!(
+            sc.client_wire_protocol("Slskd").as_deref(),
+            slsk_schema()["protocol"].as_str()
+        );
+        assert_eq!(sc.client_wire_protocol("nope"), None);
     }
 
     #[tokio::test]

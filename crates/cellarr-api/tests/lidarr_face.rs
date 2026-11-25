@@ -347,3 +347,42 @@ async fn adding_an_artist_to_monitor_no_albums_leaves_it_unmonitored_like_lidarr
         .iter()
         .all(|a| a["monitored"] == false));
 }
+
+#[tokio::test]
+async fn an_ep_added_by_hand_is_listed_though_the_metadata_profile_excludes_eps() {
+    let l = start(AuthConfig::disabled()).await;
+    let profile = l.flac_profile().await;
+    let hits = l.get("/artist/lookup?term=radiohead").await;
+    let mut payload = hits[0].clone();
+    payload["qualityProfileId"] = json!(profile);
+    payload["metadataProfileId"] = json!(1);
+    payload["rootFolderPath"] = json!("/data/media/music");
+    payload["monitored"] = json!(true);
+    payload["addOptions"] = json!({ "monitor": "none", "searchForMissingAlbums": false });
+    let r = l.send(reqwest::Method::POST, "/artist", &payload).await;
+    assert!(r.status().is_success());
+    let before = l.get("/album?artistId=1").await.as_array().unwrap().len();
+
+    let ep = "11111111-2222-3333-4444-555555555555";
+    let body = json!({
+        "foreignAlbumId": ep,
+        "title": "Street Halo",
+        "albumType": "EP",
+        "artistId": 1,
+        "monitored": true,
+        "releaseDate": "2011-02-14",
+        "addOptions": { "searchForNewAlbum": false },
+    });
+    let r = l.send(reqwest::Method::POST, "/album", &body).await;
+    assert!(r.status().is_success(), "{}", r.text().await.unwrap());
+
+    let listed = l.get("/album?artistId=1").await;
+    let listed = listed.as_array().unwrap();
+    assert_eq!(listed.len(), before + 1);
+    let found = listed
+        .iter()
+        .find(|a| a["foreignAlbumId"] == ep)
+        .expect("the hand-added EP is listed");
+    assert_eq!(found["albumType"], "EP");
+    assert_eq!(found["monitored"], true);
+}

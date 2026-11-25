@@ -17,7 +17,7 @@
 //! change here. Each adapter routes its I/O through the real `reqwest` transport.
 
 use async_trait::async_trait;
-use cellarr_core::{DownloadClient, DownloadClientConfig, DownloadStatus, GrabRequest};
+use cellarr_core::{DownloadClient, DownloadClientConfig, DownloadStatus, GrabRequest, Protocol};
 use cellarr_download::{
     BlackholeClient, BlackholeSettings, DelugeClient, DelugeSettings, DownloadError, NzbgetClient,
     NzbgetSettings, QbittorrentClient, QbittorrentSettings, RtorrentClient, RtorrentSettings,
@@ -72,9 +72,145 @@ pub enum ConfiguredDownloadClient {
     Nzbget(NzbgetClient),
     /// Blackhole / watch-folder (universal).
     Blackhole(BlackholeClient),
+    /// Several eligible clients, in priority order; each release is handed to
+    /// the one that fits it (see [`choose_client`]).
+    Routed(Box<RoutedClients>),
+}
+
+/// What decides whether a client can take a given release.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientTraits {
+    /// The protocol the client is configured for.
+    pub protocol: Protocol,
+    /// `Some(protocol as the sidecar names it)` for a sidecar-hosted plugin
+    /// client (empty when unknown), `None` for a native client.
+    pub sidecar_wire: Option<String>,
+}
+
+/// What decides which client a release goes to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReleaseTraits {
+    /// The release's protocol as cellarr models it.
+    pub protocol: Protocol,
+    /// `None` for a release from an ordinary indexer; `Some(protocol as the
+    /// sidecar names it)` (empty when unknown) for one only the sidecar can fetch.
+    pub sidecar_wire: Option<String>,
+}
+
+fn is_standard_wire(w: &str) -> bool {
+    w.eq_ignore_ascii_case("torrent") || w.eq_ignore_ascii_case("usenet")
+}
+
+/// Pick the client for one release from `clients`, given in priority order.
+///
+/// A release in a plugin's own protocol goes to a sidecar client of that
+/// protocol; a release only the sidecar can fetch goes to any sidecar client; an
+/// ordinary release goes to the first client whose protocol matches (a sidecar
+/// client in a non-standard protocol never takes one). When nothing fits, the
+/// highest-priority client is the fallback, so a single-client setup behaves as
+/// before. `None` only for an empty list.
+#[must_use]
+pub fn choose_client(clients: &[ClientTraits], release: &ReleaseTraits) -> Option<usize> {
+    let first = |f: &dyn Fn(&ClientTraits) -> bool| clients.iter().position(f);
+    let by_wire = |c: &ClientTraits, w: &str| {
+        c.sidecar_wire
+            .as_deref()
+            .is_some_and(|cw| cw.eq_ignore_ascii_case(w))
+    };
+    let standard_fit = |c: &ClientTraits| match c.sidecar_wire.as_deref() {
+        Some(w) if is_standard_wire(w) => {
+            let p = if w.eq_ignore_ascii_case("usenet") {
+                Protocol::Usenet
+            } else {
+                Protocol::Torrent
+            };
+            p == release.protocol
+        }
+        Some(w) if w.is_empty() => c.protocol == release.protocol,
+        Some(_) => false,
+        None => c.protocol == release.protocol,
+    };
+    let fit = match release.sidecar_wire.as_deref() {
+        Some(w) if !w.is_empty() && !is_standard_wire(w) => first(&|c| by_wire(c, w)),
+        Some(w) if w.is_empty() => first(&|c| c.sidecar_wire.is_some()),
+        _ => first(&standard_fit),
+    };
+    fit.or(if clients.is_empty() { None } else { Some(0) })
+}
+
+/// Clients tried per release by [`choose_client`]; `status`/`remove` ask them in
+/// priority order, skipping those that do not know the download.
+pub struct RoutedClients {
+    clients: Vec<(ClientTraits, ConfiguredDownloadClient)>,
+}
+
+impl RoutedClients {
+    fn pick(&self, release: &cellarr_core::Release) -> &ConfiguredDownloadClient {
+        let traits: Vec<ClientTraits> = self.clients.iter().map(|(t, _)| t.clone()).collect();
+        let want = ReleaseTraits {
+            protocol: release.protocol,
+            sidecar_wire: release_sidecar_wire(release),
+        };
+        let i = choose_client(&traits, &want).unwrap_or(0);
+        &self.clients[i].1
+    }
+}
+
+#[cfg(feature = "plugins")]
+fn release_sidecar_wire(release: &cellarr_core::Release) -> Option<String> {
+    cellarr_plugins::sidecar::global().and_then(|s| s.release_wire_protocol(release))
+}
+
+#[cfg(not(feature = "plugins"))]
+fn release_sidecar_wire(_release: &cellarr_core::Release) -> Option<String> {
+    None
 }
 
 impl ConfiguredDownloadClient {
+    /// Build every config (given in priority order) and route per release. A
+    /// config that cannot be built is skipped with a warning while another can;
+    /// when none can, the first build error is returned. One usable client is
+    /// returned bare.
+    ///
+    /// # Errors
+    /// The first build error when no config builds.
+    pub fn routed(configs: &[DownloadClientConfig]) -> Result<Self, DownloadClientFactoryError> {
+        let mut built = Vec::new();
+        let mut first_err = None;
+        for c in configs {
+            match Self::from_config(c) {
+                Ok(client) => built.push((client.traits(c), client)),
+                Err(e) => {
+                    tracing::warn!(client = %c.name, error = %e, "skipping download client that cannot be built");
+                    first_err.get_or_insert(e);
+                }
+            }
+        }
+        match built.len() {
+            0 => Err(
+                first_err.unwrap_or(DownloadClientFactoryError::UnsupportedKind {
+                    kind: "none".to_string(),
+                }),
+            ),
+            1 => Ok(built.remove(0).1),
+            _ => Ok(Self::Routed(Box::new(RoutedClients { clients: built }))),
+        }
+    }
+
+    fn traits(&self, config: &DownloadClientConfig) -> ClientTraits {
+        #[cfg(feature = "plugins")]
+        if let Self::Sidecar(c) = self {
+            return ClientTraits {
+                protocol: config.protocol,
+                sidecar_wire: Some(c.wire_protocol().unwrap_or_default()),
+            };
+        }
+        ClientTraits {
+            protocol: config.protocol,
+            sidecar_wire: None,
+        }
+    }
+
     /// Build the adapter for one [`DownloadClientConfig`], reading its open-ended
     /// `settings` JSON (the shape the API shim persists) into the kind's typed
     /// settings struct.
@@ -239,6 +375,7 @@ impl DownloadClient for ConfiguredDownloadClient {
             Self::Sabnzbd(c) => <SabnzbdClient as DownloadClient>::name(c),
             Self::Nzbget(c) => <NzbgetClient as DownloadClient>::name(c),
             Self::Blackhole(c) => <BlackholeClient as DownloadClient>::name(c),
+            Self::Routed(r) => r.clients[0].1.name(),
             #[cfg(feature = "plugins")]
             Self::Plugin(c) => DownloadClient::name(c),
             #[cfg(feature = "plugins")]
@@ -259,6 +396,7 @@ impl DownloadClient for ConfiguredDownloadClient {
             Self::Sabnzbd(c) => DownloadClient::add(c, grab).await,
             Self::Nzbget(c) => DownloadClient::add(c, grab).await,
             Self::Blackhole(c) => DownloadClient::add(c, grab).await,
+            Self::Routed(r) => Box::pin(DownloadClient::add(r.pick(&grab.release), grab)).await,
             #[cfg(feature = "plugins")]
             Self::Plugin(c) => DownloadClient::add(c, grab)
                 .await
@@ -279,6 +417,16 @@ impl DownloadClient for ConfiguredDownloadClient {
             Self::Sabnzbd(c) => DownloadClient::status(c, download_id).await,
             Self::Nzbget(c) => DownloadClient::status(c, download_id).await,
             Self::Blackhole(c) => DownloadClient::status(c, download_id).await,
+            Self::Routed(r) => {
+                let mut missing = None;
+                for (_, c) in &r.clients {
+                    match Box::pin(DownloadClient::status(c, download_id)).await {
+                        Err(DownloadError::NotFound(id)) => missing = Some(id),
+                        other => return other,
+                    }
+                }
+                Err(DownloadError::NotFound(missing.unwrap_or_default()))
+            }
             #[cfg(feature = "plugins")]
             Self::Plugin(c) => DownloadClient::status(c, download_id)
                 .await
@@ -299,6 +447,16 @@ impl DownloadClient for ConfiguredDownloadClient {
             Self::Sabnzbd(c) => DownloadClient::remove(c, download_id, delete_data).await,
             Self::Nzbget(c) => DownloadClient::remove(c, download_id, delete_data).await,
             Self::Blackhole(c) => DownloadClient::remove(c, download_id, delete_data).await,
+            Self::Routed(r) => {
+                let mut missing = None;
+                for (_, c) in &r.clients {
+                    match Box::pin(DownloadClient::remove(c, download_id, delete_data)).await {
+                        Err(DownloadError::NotFound(id)) => missing = Some(id),
+                        other => return other,
+                    }
+                }
+                Err(DownloadError::NotFound(missing.unwrap_or_default()))
+            }
             #[cfg(feature = "plugins")]
             Self::Plugin(c) => DownloadClient::remove(c, download_id, delete_data)
                 .await
@@ -454,5 +612,106 @@ mod tests {
             ConfiguredDownloadClient::from_config(&c),
             Err(DownloadClientFactoryError::Misconfigured { .. })
         ));
+    }
+
+    fn native(p: Protocol) -> ClientTraits {
+        ClientTraits {
+            protocol: p,
+            sidecar_wire: None,
+        }
+    }
+    fn plugin(w: &str) -> ClientTraits {
+        ClientTraits {
+            protocol: Protocol::Torrent,
+            sidecar_wire: Some(w.to_string()),
+        }
+    }
+    fn rel(p: Protocol, w: Option<&str>) -> ReleaseTraits {
+        ReleaseTraits {
+            protocol: p,
+            sidecar_wire: w.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn a_usenet_release_skips_a_higher_priority_torrent_client() {
+        let c = [native(Protocol::Torrent), native(Protocol::Usenet)];
+        assert_eq!(choose_client(&c, &rel(Protocol::Usenet, None)), Some(1));
+        assert_eq!(choose_client(&c, &rel(Protocol::Torrent, None)), Some(0));
+    }
+
+    #[test]
+    fn a_plugin_protocol_release_goes_to_the_matching_sidecar_client() {
+        let c = [
+            native(Protocol::Torrent),
+            plugin("AppleMusicDownloadProtocol"),
+            plugin("SoulseekDownloadProtocol"),
+        ];
+        let r = rel(Protocol::Torrent, Some("SoulseekDownloadProtocol"));
+        assert_eq!(choose_client(&c, &r), Some(2));
+    }
+
+    #[test]
+    fn an_ordinary_release_never_goes_to_a_plugin_protocol_client() {
+        let c = [
+            plugin("SoulseekDownloadProtocol"),
+            native(Protocol::Torrent),
+        ];
+        assert_eq!(choose_client(&c, &rel(Protocol::Torrent, None)), Some(1));
+    }
+
+    #[test]
+    fn a_sidecar_only_release_with_unknown_protocol_takes_any_sidecar_client() {
+        let c = [
+            native(Protocol::Torrent),
+            plugin("SoulseekDownloadProtocol"),
+        ];
+        assert_eq!(
+            choose_client(&c, &rel(Protocol::Torrent, Some(""))),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn sidecar_torrent_client_takes_a_torrent_release_by_priority() {
+        let c = [plugin("torrent"), native(Protocol::Torrent)];
+        assert_eq!(
+            choose_client(&c, &rel(Protocol::Torrent, Some("torrent"))),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn nothing_fitting_falls_back_to_the_top_priority_client() {
+        let c = [native(Protocol::Torrent)];
+        assert_eq!(choose_client(&c, &rel(Protocol::Usenet, None)), Some(0));
+        assert_eq!(
+            choose_client(&c, &rel(Protocol::Torrent, Some("YoutubeDownloadProtocol"))),
+            Some(0)
+        );
+        assert_eq!(choose_client(&[], &rel(Protocol::Torrent, None)), None);
+    }
+
+    #[test]
+    fn routed_builds_all_skips_unbuildable_and_returns_one_bare() {
+        let ok = |p: Protocol, name: &str| {
+            let mut c = config(
+                "blackhole",
+                json!({"watch_folder": "/tmp/w", "completed_folder": "/tmp/c"}),
+            );
+            c.protocol = p;
+            c.name = name.to_string();
+            c
+        };
+        let bad = config("nonsense-kind", json!({}));
+        let one = ConfiguredDownloadClient::routed(&[bad.clone(), ok(Protocol::Torrent, "a")]);
+        assert!(matches!(one, Ok(ConfiguredDownloadClient::Blackhole(_))));
+        let two = ConfiguredDownloadClient::routed(&[
+            ok(Protocol::Torrent, "a"),
+            ok(Protocol::Usenet, "b"),
+        ])
+        .unwrap();
+        assert!(matches!(two, ConfiguredDownloadClient::Routed(_)));
+        assert!(ConfiguredDownloadClient::routed(&[bad]).is_err());
     }
 }
