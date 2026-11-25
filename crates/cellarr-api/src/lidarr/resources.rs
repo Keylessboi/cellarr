@@ -252,7 +252,8 @@ pub fn album(
 }
 
 /// Replace an album resource's releases with every stored pressing. The pinned
-/// one (the album's `release_mbid`) is monitored; with none pinned, the first.
+/// one (the album's `release_mbid`) is monitored; with none pinned, the first;
+/// none at all when the album's release is flagged unmonitored.
 pub fn set_releases(v: &mut Value, al: &Album, pressings: &[cellarr_core::AlbumRelease]) {
     if pressings.is_empty() {
         return;
@@ -286,7 +287,7 @@ pub fn set_releases(v: &mut Value, al: &Album, pressings: &[cellarr_core::AlbumR
                 "country": r.country,
                 "label": r.label,
                 "format": r.media.first().map(|m| m.2.clone()).unwrap_or_default(),
-                "monitored": r.mbid == pinned,
+                "monitored": al.release_monitored && r.mbid == pinned,
             })
         })
         .collect();

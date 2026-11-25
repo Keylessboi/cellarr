@@ -157,7 +157,7 @@ const ARTIST_COLS: &str = "a.id, a.content_id, a.mbid, a.name, a.sort_name, a.di
 
 const ALBUM_COLS: &str = "al.id, al.content_id, al.artist_content_id, al.mbid, al.title, \
      al.disambiguation, al.album_type, al.secondary_types, al.release_date, al.release_mbid, \
-     al.added_at, al.tracks_fetched_at, al.any_release_ok, c.monitored";
+     al.added_at, al.tracks_fetched_at, al.any_release_ok, al.release_monitored, c.monitored";
 
 const TRACK_COLS: &str =
     "t.id, t.content_id, t.album_content_id, t.mbid, t.title, t.disc, t.position, t.duration_ms";
@@ -603,6 +603,7 @@ impl MusicRepo {
                         added_at,
                         tracks_fetched_at: None,
                         any_release_ok: true,
+                        release_monitored: true,
                     });
                 }
                 Ok(inserted)
@@ -796,14 +797,15 @@ impl MusicRepo {
                       SELECT 1 FROM track_file tf WHERE tf.album_content_id = al.content_id)
                     OR (SELECT count(*) FROM track_meta t WHERE t.album_content_id = al.content_id)
                      > (SELECT count(*) FROM track_file tf WHERE tf.album_content_id = al.content_id))";
-        let filter = format!(
-            "{BASE} {}",
-            if lidarr_view {
-                SHORT_OF_TRACKS
-            } else {
-                NO_FILE
-            }
-        );
+        // Lidarr counts tracks of the album's monitored release; with none monitored
+        // there are no tracks, so nothing is missing (the search sweep's no-file rule
+        // is unaffected).
+        const RELEASE_MONITORED: &str = "AND al.release_monitored = 1";
+        let filter = if lidarr_view {
+            format!("{BASE} {RELEASE_MONITORED} {SHORT_OF_TRACKS}")
+        } else {
+            format!("{BASE} {NO_FILE}")
+        };
         // The page below stops after `limit` rows, so correlated lookups are cheap
         // there; the total visits every album, where two grouped passes over the
         // (covering) track indexes touch far fewer pages than a lookup per album.
@@ -816,7 +818,7 @@ impl MusicRepo {
                        GROUP BY album_content_id) tm ON tm.k = al.content_id
                  LEFT JOIN (SELECT album_content_id AS k, count(*) AS n FROM track_file
                             GROUP BY album_content_id) fm ON fm.k = al.content_id
-                 WHERE {BASE} AND tm.n > COALESCE(fm.n, 0)"
+                 WHERE {BASE} {RELEASE_MONITORED} AND tm.n > COALESCE(fm.n, 0)"
             )
         } else {
             format!(
@@ -2152,6 +2154,7 @@ fn row_to_album(row: DbRow) -> Result<Album> {
         added_at: row.try_get("added_at")?,
         tracks_fetched_at: row.try_get("tracks_fetched_at")?,
         any_release_ok: row.try_get::<i64, _>("any_release_ok")? != 0,
+        release_monitored: row.try_get::<i64, _>("release_monitored")? != 0,
     })
 }
 
@@ -2419,11 +2422,34 @@ impl MusicRepo {
         self.write(move |conn| {
             Box::pin(async move {
                 sqlx::query(&pq(
-                    "UPDATE album_meta SET release_mbid = ?2, any_release_ok = ?3 WHERE content_id = ?1",
+                    "UPDATE album_meta SET release_mbid = ?2, any_release_ok = ?3, release_monitored = 1
+                     WHERE content_id = ?1",
                 ))
                 .bind(album.to_string())
                 .bind(release_mbid)
                 .bind(i64::from(any_release_ok))
+                .execute(&mut *conn)
+                .await?;
+                Ok(())
+            })
+        })
+        .await
+    }
+
+    /// Record whether the album's pinned release is monitored. A migration from
+    /// Lidarr clears it for an album none of whose releases is monitored; pinning
+    /// a release ([`Self::pin_release`]) sets it again.
+    ///
+    /// # Errors
+    /// Returns a [`DbError`] on write failure.
+    pub async fn set_release_monitored(&self, album: ContentId, monitored: bool) -> Result<()> {
+        self.write(move |conn| {
+            Box::pin(async move {
+                sqlx::query(&pq(
+                    "UPDATE album_meta SET release_monitored = ?2 WHERE content_id = ?1",
+                ))
+                .bind(album.to_string())
+                .bind(i64::from(monitored))
                 .execute(&mut *conn)
                 .await?;
                 Ok(())

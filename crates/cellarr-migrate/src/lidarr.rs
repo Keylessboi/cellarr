@@ -586,6 +586,20 @@ pub(crate) async fn import(pool: &SqlitePool, db: &Database) -> Result<MusicRepo
                 }
             }
         }
+        // An album none of whose releases is monitored: Lidarr gives it no tracks
+        // and never wants it. The first release still supplies a track list below,
+        // so flag the album instead (after any pin, which would set it again).
+        for r in sqlx::query(
+            "SELECT AlbumId FROM AlbumReleases GROUP BY AlbumId HAVING max(Monitored) = 0",
+        )
+        .fetch_all(pool)
+        .await?
+        {
+            let id: i64 = r.try_get("AlbumId").unwrap_or(0);
+            if let Some((content, _, _)) = albums_by_id.get(&id) {
+                music.set_release_monitored(*content, false).await?;
+            }
+        }
     }
 
     // --- tracks of each album's selected release -------------------------------
