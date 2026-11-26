@@ -143,6 +143,41 @@ pub enum AlbumSort {
     Title,
 }
 
+/// How long a cached wanted id list is trusted when no write has gone through this
+/// process's writer, bounding staleness if another process writes the database.
+const WANTED_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// The ordered wanted-album ids per (day, sort, direction), valid for one writer
+/// generation. Every mutation funnels through the writer, which bumps the
+/// generation, so any write that could change wanted-ness drops the lists.
+#[derive(Default)]
+pub struct WantedCache {
+    generation: u64,
+    filled: Option<std::time::Instant>,
+    lists: HashMap<String, Arc<Vec<i64>>>,
+}
+
+impl WantedCache {
+    fn get(&self, key: &str, generation: u64) -> Option<Arc<Vec<i64>>> {
+        let fresh = self.filled.is_some_and(|t| t.elapsed() < WANTED_CACHE_TTL);
+        if self.generation == generation && fresh {
+            self.lists.get(key).cloned()
+        } else {
+            None
+        }
+    }
+
+    fn put(&mut self, key: String, generation: u64, ids: Arc<Vec<i64>>) {
+        let fresh = self.filled.is_some_and(|t| t.elapsed() < WANTED_CACHE_TTL);
+        if self.generation != generation || !fresh {
+            self.lists.clear();
+            self.generation = generation;
+            self.filled = Some(std::time::Instant::now());
+        }
+        self.lists.insert(key, ids);
+    }
+}
+
 /// Reads/writes for the music tables.
 #[derive(Clone)]
 pub struct MusicRepo {
@@ -789,56 +824,29 @@ impl MusicRepo {
                AND (al.release_date IS NULL OR al.release_date <= ?1)";
         const NO_FILE: &str = "AND NOT EXISTS (
                    SELECT 1 FROM track_file tf WHERE tf.album_content_id = al.content_id)";
-        // An album with no file at all is short of its tracks as soon as it has one,
-        // so the two counts are only taken for the minority that has some files.
-        const SHORT_OF_TRACKS: &str = "AND EXISTS (
-                   SELECT 1 FROM track_meta t WHERE t.album_content_id = al.content_id)
-               AND (NOT EXISTS (
-                      SELECT 1 FROM track_file tf WHERE tf.album_content_id = al.content_id)
-                    OR (SELECT count(*) FROM track_meta t WHERE t.album_content_id = al.content_id)
-                     > (SELECT count(*) FROM track_file tf WHERE tf.album_content_id = al.content_id))";
-        // Lidarr counts tracks of the album's monitored release; with none monitored
-        // there are no tracks, so nothing is missing (the search sweep's no-file rule
-        // is unaffected).
-        const RELEASE_MONITORED: &str = "AND al.release_monitored = 1";
-        let filter = if lidarr_view {
-            format!("{BASE} {RELEASE_MONITORED} {SHORT_OF_TRACKS}")
-        } else {
-            format!("{BASE} {NO_FILE}")
-        };
-        // The page below stops after `limit` rows, so correlated lookups are cheap
-        // there; the total visits every album, where two grouped passes over the
-        // (covering) track indexes touch far fewer pages than a lookup per album.
-        let total_sql = if lidarr_view {
-            format!(
-                "SELECT count(*) AS n FROM album_meta al
-                 JOIN content c ON c.id = al.content_id
-                 JOIN content ac ON ac.id = al.artist_content_id
-                 JOIN (SELECT album_content_id AS k, count(*) AS n FROM track_meta
-                       GROUP BY album_content_id) tm ON tm.k = al.content_id
-                 LEFT JOIN (SELECT album_content_id AS k, count(*) AS n FROM track_file
-                            GROUP BY album_content_id) fm ON fm.k = al.content_id
-                 WHERE {BASE} {RELEASE_MONITORED} AND tm.n > COALESCE(fm.n, 0)"
-            )
-        } else {
-            format!(
-                "SELECT count(*) AS n FROM album_meta al
-                 JOIN content c ON c.id = al.content_id
-                 JOIN content ac ON ac.id = al.artist_content_id
-                 WHERE {filter}"
-            )
-        };
-        let total: i64 = sqlx::query(&pq(&total_sql))
-            .bind(today)
-            .fetch_one(&self.pool)
-            .await?
-            .try_get("n")?;
         let column = match sort {
             AlbumSort::Id => "al.id",
             AlbumSort::ReleaseDate => "al.release_date",
             AlbumSort::Title => "al.title_norm",
         };
         let direction = if ascending { "ASC" } else { "DESC" };
+        if lidarr_view {
+            return self
+                .wanted_page(today, column, direction, offset, limit)
+                .await;
+        }
+        let filter = format!("{BASE} {NO_FILE}");
+        let total_sql = format!(
+            "SELECT count(*) AS n FROM album_meta al
+             JOIN content c ON c.id = al.content_id
+             JOIN content ac ON ac.id = al.artist_content_id
+             WHERE {filter}"
+        );
+        let total: i64 = sqlx::query(&pq(&total_sql))
+            .bind(today)
+            .fetch_one(&self.pool)
+            .await?
+            .try_get("n")?;
         let sql = format!(
             "SELECT {ALBUM_COLS} FROM album_meta al
              JOIN content c ON c.id = al.content_id
@@ -854,6 +862,100 @@ impl MusicRepo {
             .await?;
         let albums = rows.into_iter().map(row_to_album).collect::<Result<_>>()?;
         Ok((u64::try_from(total).unwrap_or(0), albums))
+    }
+
+    /// One page of Lidarr's wanted view, plus the total.
+    ///
+    /// Computing the total and the order means visiting every monitored album and
+    /// its track counts, which dominated the cost of every page of a 515-page sync.
+    /// So the full ordered id list is computed once per (day, sort, direction) and
+    /// reused until a write finishes (the writer's generation changes) or
+    /// [`WANTED_CACHE_TTL`] passes (a bound on staleness should another process
+    /// write the same database file). A page is then a slice of ids plus one
+    /// indexed fetch of at most `limit` rows.
+    async fn wanted_page(
+        &self,
+        today: &str,
+        column: &str,
+        direction: &str,
+        offset: u64,
+        limit: u64,
+    ) -> Result<(u64, Vec<Album>)> {
+        let key = format!("{today}|{column}|{direction}");
+        // Read the generation before querying: a write that lands mid-query then
+        // makes the stored entry stale at once instead of being missed.
+        let generation = self.writer.generation();
+        let cached = self
+            .writer
+            .wanted
+            .lock()
+            .ok()
+            .and_then(|c| c.get(&key, generation));
+        let ids = match cached {
+            Some(ids) => ids,
+            None => {
+                // Per-album track and file counts come from two grouped passes over
+                // the covering track indexes: far fewer pages than a lookup per
+                // album. Lidarr counts the tracks of the monitored release only;
+                // with none monitored nothing is missing, and an album with no
+                // track list has nothing to want.
+                let sql = format!(
+                    "SELECT al.id AS id FROM album_meta al
+                     JOIN content c ON c.id = al.content_id
+                     JOIN content ac ON ac.id = al.artist_content_id
+                     JOIN (SELECT album_content_id AS k, count(*) AS n FROM track_meta
+                           GROUP BY album_content_id) tm ON tm.k = al.content_id
+                     LEFT JOIN (SELECT album_content_id AS k, count(*) AS n FROM track_file
+                                GROUP BY album_content_id) fm ON fm.k = al.content_id
+                     WHERE c.monitored = 1 AND ac.monitored = 1
+                       AND (al.release_date IS NULL OR al.release_date <= ?1)
+                       AND al.release_monitored = 1 AND tm.n > COALESCE(fm.n, 0)
+                     ORDER BY {column} {direction}, al.id ASC"
+                );
+                let rows = sqlx::query(&pq(&sql))
+                    .bind(today)
+                    .fetch_all(&self.pool)
+                    .await?;
+                let ids: Arc<Vec<i64>> = Arc::new(
+                    rows.iter()
+                        .map(|r| r.try_get::<i64, _>("id"))
+                        .collect::<std::result::Result<_, _>>()?,
+                );
+                if let Ok(mut c) = self.writer.wanted.lock() {
+                    c.put(key, generation, Arc::clone(&ids));
+                }
+                ids
+            }
+        };
+        let total = ids.len() as u64;
+        let start = usize::try_from(offset).unwrap_or(usize::MAX).min(ids.len());
+        let end = start
+            .saturating_add(usize::try_from(limit).unwrap_or(usize::MAX))
+            .min(ids.len());
+        let page = &ids[start..end];
+        if page.is_empty() {
+            return Ok((total, Vec::new()));
+        }
+        // Integers only, so inlining them is injection-free.
+        let list = page
+            .iter()
+            .map(i64::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!(
+            "SELECT {ALBUM_COLS} FROM album_meta al
+             JOIN content c ON c.id = al.content_id
+             JOIN content ac ON ac.id = al.artist_content_id
+             WHERE al.id IN ({list})"
+        );
+        let rows = sqlx::query(&pq(&sql)).fetch_all(&self.pool).await?;
+        let mut by_id: HashMap<i64, Album> = HashMap::with_capacity(rows.len());
+        for row in rows {
+            let album = row_to_album(row)?;
+            by_id.insert(album.id, album);
+        }
+        let albums = page.iter().filter_map(|id| by_id.remove(id)).collect();
+        Ok((total, albums))
     }
 
     /// Set the monitored flag on a set of nodes (artists, albums or tracks).
