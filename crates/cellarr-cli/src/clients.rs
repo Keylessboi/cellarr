@@ -75,6 +75,10 @@ pub enum ConfiguredDownloadClient {
     /// Several eligible clients, in priority order; each release is handed to
     /// the one that fits it (see [`choose_client`]).
     Routed(Box<RoutedClients>),
+    /// Stands in when every eligible client failed to build (an unsupported or
+    /// misconfigured kind). Jobs that never grab (a library rescan) still run;
+    /// anything that does call it gets the build error back.
+    Unavailable(String),
 }
 
 /// What decides whether a client can take a given release.
@@ -194,6 +198,20 @@ impl ConfiguredDownloadClient {
             ),
             1 => Ok(built.remove(0).1),
             _ => Ok(Self::Routed(Box::new(RoutedClients { clients: built }))),
+        }
+    }
+
+    /// Like [`routed`](Self::routed), but when no config builds, return a
+    /// [`Unavailable`](Self::Unavailable) stand-in (after a warning) instead of an
+    /// error, for jobs that never grab.
+    #[must_use]
+    pub fn routed_or_unavailable(configs: &[DownloadClientConfig]) -> Self {
+        match Self::routed(configs) {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(error = %e, "no download client could be built; continuing without one");
+                Self::Unavailable(e.to_string())
+            }
         }
     }
 
@@ -376,6 +394,7 @@ impl DownloadClient for ConfiguredDownloadClient {
             Self::Nzbget(c) => <NzbgetClient as DownloadClient>::name(c),
             Self::Blackhole(c) => <BlackholeClient as DownloadClient>::name(c),
             Self::Routed(r) => r.clients[0].1.name(),
+            Self::Unavailable(_) => "unavailable",
             #[cfg(feature = "plugins")]
             Self::Plugin(c) => DownloadClient::name(c),
             #[cfg(feature = "plugins")]
@@ -397,6 +416,7 @@ impl DownloadClient for ConfiguredDownloadClient {
             Self::Nzbget(c) => DownloadClient::add(c, grab).await,
             Self::Blackhole(c) => DownloadClient::add(c, grab).await,
             Self::Routed(r) => Box::pin(DownloadClient::add(r.pick(&grab.release), grab)).await,
+            Self::Unavailable(why) => Err(DownloadError::Config(why.clone())),
             #[cfg(feature = "plugins")]
             Self::Plugin(c) => DownloadClient::add(c, grab)
                 .await
@@ -427,6 +447,7 @@ impl DownloadClient for ConfiguredDownloadClient {
                 }
                 Err(DownloadError::NotFound(missing.unwrap_or_default()))
             }
+            Self::Unavailable(why) => Err(DownloadError::Config(why.clone())),
             #[cfg(feature = "plugins")]
             Self::Plugin(c) => DownloadClient::status(c, download_id)
                 .await
@@ -457,6 +478,7 @@ impl DownloadClient for ConfiguredDownloadClient {
                 }
                 Err(DownloadError::NotFound(missing.unwrap_or_default()))
             }
+            Self::Unavailable(why) => Err(DownloadError::Config(why.clone())),
             #[cfg(feature = "plugins")]
             Self::Plugin(c) => DownloadClient::remove(c, download_id, delete_data)
                 .await
@@ -602,6 +624,25 @@ mod tests {
             ConfiguredDownloadClient::from_config(&c),
             Err(DownloadClientFactoryError::UnsupportedKind { .. })
         ));
+    }
+
+    #[tokio::test]
+    async fn only_unbuildable_clients_give_an_unavailable_stand_in() {
+        let bad = config("applemusicarrdownloadclient", json!({}));
+        let c = ConfiguredDownloadClient::routed_or_unavailable(&[bad]);
+        assert!(matches!(c, ConfiguredDownloadClient::Unavailable(_)));
+        assert!(DownloadClient::status(&c, "x").await.is_err());
+    }
+
+    #[test]
+    fn an_unbuildable_client_is_skipped_beside_a_good_one() {
+        let bad = config("applemusicarrdownloadclient", json!({}));
+        let good = config(
+            "blackhole",
+            json!({"watch_folder": "/tmp/w", "completed_folder": "/tmp/c"}),
+        );
+        let c = ConfiguredDownloadClient::routed_or_unavailable(&[bad, good]);
+        assert!(!matches!(c, ConfiguredDownloadClient::Unavailable(_)));
     }
 
     #[test]

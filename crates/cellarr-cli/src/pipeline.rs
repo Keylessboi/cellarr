@@ -110,6 +110,16 @@ pub trait PipelineEnv: Send + Sync {
         &self,
         content: &ContentRef,
     ) -> Result<Option<(Self::Indexer, Self::Client, RunnerConfig)>, String>;
+
+    /// Like [`resolve`](Self::resolve), for a job that never grabs (the library
+    /// rescan): a download client that cannot be built must not stop it. The
+    /// default is `resolve`.
+    async fn resolve_for_rescan(
+        &self,
+        content: &ContentRef,
+    ) -> Result<Option<(Self::Indexer, Self::Client, RunnerConfig)>, String> {
+        self.resolve(content).await
+    }
 }
 
 /// The [`JobHandler`] the daemon injects: drives the real pipeline on every fired
@@ -1066,7 +1076,7 @@ impl<E: PipelineEnv> LivePipelineHandler<E> {
                     continue;
                 }
             };
-            let resolved = match self.env.resolve(&probe).await {
+            let resolved = match self.env.resolve_for_rescan(&probe).await {
                 Ok(r) => r,
                 Err(detail) => {
                     tracing::warn!(library = %library.id, error = %detail, "rescan: env resolve failed; skipping");
@@ -2464,6 +2474,17 @@ impl LivePipelineEnv {
         &self,
         content_tags: &[u32],
     ) -> Result<Option<(ConfiguredDownloadClient, String)>, String> {
+        self.resolve_client_with(content_tags, false).await
+    }
+
+    /// [`resolve_client`](Self::resolve_client); with `lenient`, eligible clients
+    /// that all fail to build yield an unavailable stand-in (logged) instead of an
+    /// error, for jobs that never grab.
+    async fn resolve_client_with(
+        &self,
+        content_tags: &[u32],
+        lenient: bool,
+    ) -> Result<Option<(ConfiguredDownloadClient, String)>, String> {
         let mut clients = self
             .db
             .config()
@@ -2477,8 +2498,12 @@ impl LivePipelineEnv {
         };
         // Every eligible client is built so each release can be handed to the one
         // that fits it; the run's category is the top-priority client's.
-        let client = ConfiguredDownloadClient::routed(&clients)
-            .map_err(|e| format!("building download client '{}': {e}", config.name))?;
+        let client = if lenient {
+            ConfiguredDownloadClient::routed_or_unavailable(&clients)
+        } else {
+            ConfiguredDownloadClient::routed(&clients)
+                .map_err(|e| format!("building download client '{}': {e}", config.name))?
+        };
         Ok(Some((client, config.category.clone())))
     }
 
@@ -2748,9 +2773,28 @@ impl PipelineEnv for LivePipelineEnv {
         &self,
         content: &ContentRef,
     ) -> Result<Option<(Self::Indexer, Self::Client, RunnerConfig)>, String> {
+        self.resolve_with(content, false).await
+    }
+
+    async fn resolve_for_rescan(
+        &self,
+        content: &ContentRef,
+    ) -> Result<Option<(Self::Indexer, Self::Client, RunnerConfig)>, String> {
+        self.resolve_with(content, true).await
+    }
+}
+
+impl LivePipelineEnv {
+    async fn resolve_with(
+        &self,
+        content: &ContentRef,
+        lenient: bool,
+    ) -> Result<Option<(DbIndexerSet, ConfiguredDownloadClient, RunnerConfig)>, String> {
         // The node's tag ids scope which download client / indexers apply.
         let (content_tag_ids, _) = self.content_tags(content).await?;
-        let Some((client, client_category)) = self.resolve_client(&content_tag_ids).await? else {
+        let Some((client, client_category)) =
+            self.resolve_client_with(&content_tag_ids, lenient).await?
+        else {
             return Ok(None);
         };
         let Some(config) = self.resolve_config(content, client_category).await? else {
