@@ -12,6 +12,8 @@
 //! - [`NzbgetClient`] — Usenet, JSON-RPC positional params + HTTP Basic.
 //! - [`SlskdClient`] / [`SlskdIndexer`] — Soulseek through slskd's HTTP API, search and
 //!   download natively (see [`slskd`]).
+//! - [`AppleMusicClient`] / [`AppleMusicIndexer`] — Apple Music: catalogue search natively,
+//!   downloads through the `applemusic-decryptor` service (see [`applemusic`]).
 //! - [`BlackholeClient`] — the *universal* client: a watch/completed folder pair
 //!   that works with **any** download client (no client API at all). See
 //!   [`blackhole`].
@@ -40,6 +42,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod applemusic;
 pub mod blackhole;
 pub mod deluge;
 pub mod error;
@@ -53,6 +56,7 @@ pub mod slskd;
 pub mod source;
 pub mod transmission;
 
+pub use applemusic::{AppleMusicClient, AppleMusicIndexer, AppleMusicSettings};
 pub use blackhole::{BlackholeClient, BlackholeSettings};
 pub use deluge::{DelugeClient, DelugeSettings};
 pub use error::DownloadError;

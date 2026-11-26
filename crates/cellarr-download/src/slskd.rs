@@ -147,7 +147,7 @@ impl SlskdSettings {
 
 const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
-fn b64_encode(data: &[u8]) -> String {
+pub(crate) fn b64_encode(data: &[u8]) -> String {
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
         let n = (u32::from(chunk[0]) << 16)
@@ -160,7 +160,7 @@ fn b64_encode(data: &[u8]) -> String {
     out
 }
 
-fn b64_decode(s: &str) -> Option<Vec<u8>> {
+pub(crate) fn b64_decode(s: &str) -> Option<Vec<u8>> {
     let mut out = Vec::with_capacity(s.len() * 3 / 4);
     let (mut acc, mut bits) = (0u32, 0u32);
     for c in s.bytes() {
@@ -176,7 +176,7 @@ fn b64_decode(s: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
-fn pct(s: &str) -> String {
+pub(crate) fn pct(s: &str) -> String {
     let mut out = String::new();
     for b in s.bytes() {
         if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
@@ -254,7 +254,7 @@ pub fn is_slskd_url(url: &str) -> bool {
     url.starts_with(SLSKD_SCHEME)
 }
 
-fn last_component(path: &str) -> &str {
+pub(crate) fn last_component(path: &str) -> &str {
     path.rsplit(['\\', '/'])
         .find(|p| !p.is_empty())
         .unwrap_or("")
