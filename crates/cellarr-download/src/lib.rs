@@ -10,6 +10,8 @@
 //! - [`RtorrentClient`] — torrent, XML-RPC over HTTP (`/RPC2`/httprpc) + `d.custom1` label.
 //! - [`SabnzbdClient`] — Usenet, `mode=` HTTP API + `apikey=` + `output=json`.
 //! - [`NzbgetClient`] — Usenet, JSON-RPC positional params + HTTP Basic.
+//! - [`SlskdClient`] / [`SlskdIndexer`] — Soulseek through slskd's HTTP API, search and
+//!   download natively (see [`slskd`]).
 //! - [`BlackholeClient`] — the *universal* client: a watch/completed folder pair
 //!   that works with **any** download client (no client API at all). See
 //!   [`blackhole`].
@@ -47,6 +49,7 @@ pub mod nzbget;
 pub mod qbittorrent;
 pub mod rtorrent;
 pub mod sabnzbd;
+pub mod slskd;
 pub mod source;
 pub mod transmission;
 
@@ -59,6 +62,7 @@ pub use nzbget::{NzbgetClient, NzbgetSettings};
 pub use qbittorrent::{QbittorrentClient, QbittorrentSettings};
 pub use rtorrent::{RtorrentClient, RtorrentSettings};
 pub use sabnzbd::{SabnzbdClient, SabnzbdSettings};
+pub use slskd::{SlskdApi, SlskdClient, SlskdIndexer, SlskdSettings, SlskdTarget};
 pub use source::TorrentSource;
 pub use transmission::{TransmissionClient, TransmissionSettings};
 

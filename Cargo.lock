@@ -452,6 +452,7 @@ name = "cellarr-download"
 version = "0.0.0"
 dependencies = [
  "async-trait",
+ "axum",
  "cellarr-core",
  "reqwest",
  "serde",
