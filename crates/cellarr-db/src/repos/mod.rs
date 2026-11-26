@@ -34,6 +34,7 @@ pub use config::ConfigRepo;
 pub use content::ContentRepo;
 pub use decision_log::DecisionLogRepo;
 pub use grab::GrabRepo;
+pub use music::WantedCache;
 pub use history::HistoryRepo;
 pub use import_list::ImportListRepo;
 pub use managed_config::{ManagedConfigRepo, ManagedEntity};

@@ -798,7 +798,33 @@ pub(crate) async fn get_album(
 ) -> ApiResult<Json<Value>> {
     let state = app(&fs);
     let al = album_or_404(state, id).await?;
+    let al = with_releases(state, al).await?;
     Ok(Json(album_resources(state, &[al], true).await?.remove(0)))
+}
+
+/// The longest an add or a read waits for the metadata source to supply an album's
+/// pressings; past it the album is answered with whatever it has.
+const RELEASES_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// Make sure `al` has its pressings (and track list) stored, as real Lidarr's albums
+/// always do, so a client that adds an album and reads it straight back sees
+/// `releases` with a monitored one. A slow or failing metadata source leaves the
+/// album as it was: no pressings yet, retried on the next read.
+async fn with_releases(state: &AppState, al: Album) -> ApiResult<Album> {
+    let Some(catalogue) = &state.music else {
+        return Ok(al);
+    };
+    match tokio::time::timeout(RELEASES_TIMEOUT, catalogue.ensure_releases(al.content_id)).await {
+        Ok(Ok(())) => album_or_404(state, al.id).await,
+        Ok(Err(e)) => {
+            tracing::warn!(album = al.id, error = %e, "could not fetch the album's releases");
+            Ok(al)
+        }
+        Err(_) => {
+            tracing::warn!(album = al.id, "timed out fetching the album's releases");
+            Ok(al)
+        }
+    }
 }
 
 pub(crate) async fn update_album(
@@ -948,6 +974,7 @@ pub(crate) async fn add_album(
         .filter(|s| !s.is_empty())
         .ok_or_else(|| ApiError::BadRequest("foreignAlbumId is required".into()))?;
     if let Some(existing) = state.db.music().album_by_mbid(mbid).await? {
+        let existing = with_releases(state, existing).await?;
         return Ok(Json(
             album_resources(state, &[existing], true).await?.remove(0),
         ));
@@ -1042,6 +1069,7 @@ pub(crate) async fn add_album(
             .await?;
     }
     let fresh = album_or_404(state, album.id).await?;
+    let fresh = with_releases(state, fresh).await?;
     Ok(Json(
         album_resources(state, &[fresh], true).await?.remove(0),
     ))

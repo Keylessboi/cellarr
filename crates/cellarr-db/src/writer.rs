@@ -11,6 +11,8 @@
 
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use tokio::sync::{mpsc, oneshot};
 
@@ -38,6 +40,12 @@ struct WriteMessage {
 #[derive(Clone)]
 pub struct WriterHandle {
     tx: mpsc::Sender<WriteMessage>,
+    /// Bumped after every write job, committed or not. Every mutation in this
+    /// process runs through the writer, so it is a conservative change marker
+    /// for derived data (see [`crate::repos::WantedCache`]).
+    generation: Arc<AtomicU64>,
+    /// The wanted/missing id lists, shared by every handle clone.
+    pub(crate) wanted: Arc<Mutex<crate::repos::WantedCache>>,
 }
 
 /// Control side of the writer task, held by [`crate::Database`] (once, behind an
@@ -79,6 +87,8 @@ impl WriterHandle {
     pub fn spawn(pool: DbPool, bound: usize) -> (Self, WriterShutdown) {
         let (tx, mut rx) = mpsc::channel::<WriteMessage>(bound);
         let (stop_tx, mut stop_rx) = oneshot::channel::<()>();
+        let generation = Arc::new(AtomicU64::new(0));
+        let actor_generation = Arc::clone(&generation);
 
         let join = tokio::spawn(async move {
             // Hold a dedicated connection for the actor's life; this is the one
@@ -102,6 +112,9 @@ impl WriterHandle {
                     msg = rx.recv() => match msg {
                         Some(WriteMessage { job, reply }) => {
                             let outcome = run_in_immediate(&mut conn, job).await;
+                            // After the commit and before the reply, so a caller that
+                            // awaited its write always sees the new generation.
+                            actor_generation.fetch_add(1, Ordering::SeqCst);
                             // The receiver may have given up; ignore a closed channel.
                             let _ = reply.send(outcome);
                         }
@@ -116,12 +129,23 @@ impl WriterHandle {
         });
 
         (
-            Self { tx },
+            Self {
+                tx,
+                generation,
+                wanted: Arc::default(),
+            },
             WriterShutdown {
                 stop: Some(stop_tx),
                 join,
             },
         )
+    }
+
+    /// The number of write jobs this process has finished; changes whenever the
+    /// database may have.
+    #[must_use]
+    pub fn generation(&self) -> u64 {
+        self.generation.load(Ordering::SeqCst)
     }
 
     /// Submit a write job and await its result.

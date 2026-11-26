@@ -700,3 +700,141 @@ async fn the_standard_metadata_profile_exists_before_any_is_stored() {
     );
     assert!(db.music().metadata_profile(2).await.unwrap().is_some());
 }
+
+#[tokio::test]
+async fn wanted_pages_slice_one_ordering_and_follow_every_write() {
+    let db = common::test_database().await;
+    let lib = music_library(&db).await;
+    let a = db
+        .music()
+        .add_artist(lib, artist("Radiohead", "mb-a1"))
+        .await
+        .unwrap();
+    let albums = db
+        .music()
+        .upsert_albums(
+            lib,
+            a.content_id,
+            vec![
+                album("Delta", "mb-rg1", "2001-01-01"),
+                album("Alpha", "mb-rg2", "2003-01-01"),
+                album("Charlie", "mb-rg3", "2001-01-01"),
+                album("Bravo", "mb-rg4", "2002-01-01"),
+                album("Echo", "mb-rg5", "2004-01-01"),
+            ],
+        )
+        .await
+        .unwrap();
+    let mut tracks = Vec::new();
+    for al in &albums {
+        tracks.push(
+            db.music()
+                .set_album_tracks(lib, al.content_id, None, vec![track(1, 1, "One")])
+                .await
+                .unwrap(),
+        );
+    }
+    let page = |sort, asc, offset, limit| {
+        let db = db.clone();
+        async move {
+            db.music()
+                .wanted_albums("2026-01-01", sort, asc, offset, limit)
+                .await
+                .unwrap()
+        }
+    };
+    for sort in [AlbumSort::Id, AlbumSort::ReleaseDate, AlbumSort::Title] {
+        for asc in [true, false] {
+            let (total, all) = page(sort, asc, 0, 10).await;
+            assert_eq!(total, 5);
+            let mut stitched = Vec::new();
+            for offset in [0, 2, 4, 6] {
+                let (t, rows) = page(sort, asc, offset, 2).await;
+                assert_eq!(t, 5, "the total does not depend on the page");
+                stitched.extend(rows.into_iter().map(|r| r.id));
+            }
+            let all: Vec<_> = all.into_iter().map(|r| r.id).collect();
+            assert_eq!(stitched, all);
+        }
+    }
+    // Date order breaks the 2001 tie by id; title order is alphabetical.
+    let (_, by_date) = page(AlbumSort::ReleaseDate, true, 0, 10).await;
+    assert_eq!(
+        by_date.iter().map(|r| r.title.as_str()).collect::<Vec<_>>(),
+        ["Delta", "Charlie", "Bravo", "Alpha", "Echo"]
+    );
+    let (_, by_title) = page(AlbumSort::Title, false, 0, 10).await;
+    assert_eq!(by_title[0].title, "Echo");
+
+    // A write that changes wanted-ness shows on the very next read, whichever
+    // table it touches.
+    db.music()
+        .set_monitored(vec![albums[0].content_id], false)
+        .await
+        .unwrap();
+    assert_eq!(page(AlbumSort::Id, true, 0, 10).await.0, 4);
+    db.music()
+        .record_track_file(tracks[1][0].content_id, file("/m/a.flac", 1), None, None)
+        .await
+        .unwrap();
+    let (total, rows) = page(AlbumSort::Id, true, 0, 10).await;
+    assert_eq!(total, 3);
+    assert!(rows.iter().all(|r| r.id != albums[1].id));
+    db.music()
+        .set_release_monitored(albums[2].content_id, false)
+        .await
+        .unwrap();
+    assert_eq!(page(AlbumSort::Id, true, 0, 10).await.0, 2);
+    // Past the end is an empty page with the true total.
+    let (total, rows) = page(AlbumSort::Id, true, 50, 10).await;
+    assert_eq!((total, rows.len()), (2, 0));
+}
+
+/// Timing harness for `wanted/missing` on a large database; not a regression test.
+/// `CELLARR_WANTED_BENCH_DB=<migrated sqlite file> cargo test --release -p cellarr-db
+/// --test music wanted_bench -- --ignored --nocapture`
+#[tokio::test]
+#[ignore = "needs CELLARR_WANTED_BENCH_DB, a large pre-populated database"]
+async fn wanted_bench() {
+    let Ok(path) = std::env::var("CELLARR_WANTED_BENCH_DB") else {
+        return;
+    };
+    let db = Database::open(&path).await.unwrap();
+    for (name, sort) in [
+        ("id", AlbumSort::Id),
+        ("releaseDate", AlbumSort::ReleaseDate),
+        ("title", AlbumSort::Title),
+    ] {
+        for page in [0u64, 100, 250, 500] {
+            let t = std::time::Instant::now();
+            let (total, rows) = db
+                .music()
+                .wanted_albums("2026-11-26", sort, true, page * 100, 100)
+                .await
+                .unwrap();
+            eprintln!(
+                "BENCH sort={name} page={page} total={total} rows={} {:?}",
+                rows.len(),
+                t.elapsed()
+            );
+        }
+    }
+    let t = std::time::Instant::now();
+    let mut seen = 0;
+    let pages = std::env::var("CELLARR_BENCH_PAGES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(520u64);
+    for page in 0..pages {
+        let (_, rows) = db
+            .music()
+            .wanted_albums("2026-11-26", AlbumSort::ReleaseDate, true, page * 100, 100)
+            .await
+            .unwrap();
+        seen += rows.len();
+    }
+    eprintln!(
+        "BENCH sync of {pages} pages (releaseDate): {seen} rows in {:?}",
+        t.elapsed()
+    );
+}

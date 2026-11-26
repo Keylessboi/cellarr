@@ -32,6 +32,11 @@ pub fn fixture(name: &str) -> Vec<u8> {
 }
 
 pub async fn start(auth: AuthConfig) -> Lidarr {
+    start_with(auth, true).await
+}
+
+/// `start`, optionally with a MusicBrainz that cannot answer release (pressing) queries.
+pub async fn start_with(auth: AuthConfig, releases: bool) -> Lidarr {
     let dir = tempfile::tempdir().unwrap();
     let db = Database::open(dir.path().join("t.sqlite").to_str().unwrap())
         .await
@@ -56,11 +61,15 @@ pub async fn start(auth: AuthConfig) -> Lidarr {
         .with_body(
             &format!("{BASE}/release-group/"),
             fixture("mb_release_group_lookup.json"),
-        )
-        .with_body(
+        );
+    let fetcher = if releases {
+        fetcher.with_body(
             &format!("{BASE}/release?release-group="),
             fixture("mb_releases_ok_computer.json"),
-        );
+        )
+    } else {
+        fetcher
+    };
     let catalogue = Arc::new(MusicSync::new(
         db.clone(),
         MusicBrainzSource::with_base_url(fetcher, BASE),
