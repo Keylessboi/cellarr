@@ -3470,6 +3470,101 @@ impl cellarr_api::manual_import::ManualImport for LiveManualImport {
         }
         Ok((imported, errors))
     }
+
+    async fn scan_artist_folder(
+        &self,
+        artist: cellarr_core::ContentId,
+        folder: String,
+    ) -> Result<(usize, Vec<String>), String> {
+        if !std::path::Path::new(&folder).is_dir() {
+            // Lidarr skips an artist whose folder does not exist yet.
+            return Ok((0, Vec::new()));
+        }
+        let candidates = self
+            .scan_music(cellarr_api::manual_import::MusicScanRequest {
+                folder: Some(folder),
+                download_id: None,
+                artist: Some(artist),
+            })
+            .await?;
+        let held = self
+            .db
+            .music()
+            .track_files_for_artist(artist)
+            .await
+            .map_err(|e| format!("track files: {e}"))?;
+        let tracked: std::collections::HashSet<String> =
+            held.iter().map(|f| f.file.path.clone()).collect();
+        let mut filled: std::collections::HashSet<cellarr_core::ContentId> =
+            held.iter().map(|f| f.track_content_id).collect();
+        // Only an untracked file that its tags place, without doubt, on tracks
+        // that have no file: never a second copy of a track, never an upgrade.
+        let mut by_album: std::collections::BTreeMap<
+            cellarr_core::ContentId,
+            Vec<(std::path::PathBuf, cellarr_core::ContentId)>,
+        > = std::collections::BTreeMap::new();
+        for c in candidates {
+            let Some(album) = c.album else { continue };
+            if !c.rejections.is_empty()
+                || c.tracks.is_empty()
+                || tracked.contains(&c.path)
+                || c.tracks.iter().any(|t| filled.contains(t))
+            {
+                continue;
+            }
+            filled.extend(c.tracks.iter().copied());
+            let path = std::path::PathBuf::from(&c.path);
+            for t in c.tracks {
+                by_album.entry(album).or_default().push((path.clone(), t));
+            }
+        }
+        let mut taken = 0;
+        let mut errors = Vec::new();
+        for (album, files) in by_album {
+            let Some(album_ref) = self
+                .db
+                .content()
+                .get(album)
+                .await
+                .map_err(|e| format!("album: {e}"))?
+            else {
+                continue;
+            };
+            let mut placements = Vec::with_capacity(files.len());
+            for (path, track) in files {
+                match self.db.content().get(track).await {
+                    Ok(Some(track_ref)) => placements.push((path, track_ref)),
+                    _ => errors.push(format!("{}: track {track} is gone", path.display())),
+                }
+            }
+            if placements.is_empty() {
+                continue;
+            }
+            let Some((_, client, config)) = self.env.resolve(&album_ref).await? else {
+                errors.push(format!("album {album}: no library configuration"));
+                continue;
+            };
+            let indexer = DbIndexerSet::new(self.db.clone());
+            let runner = PipelineRunner::new(
+                &indexer,
+                &client,
+                &self.registry,
+                &self.db,
+                &self.clock,
+                &config,
+            );
+            let n = placements.len();
+            let folder = common_folder(&placements);
+            match runner
+                .adopt_music_files(&album_ref, &folder, placements)
+                .await
+            {
+                Ok(_) => taken += n,
+                Err(e) => errors.push(format!("album {album}: {e}")),
+            }
+        }
+        Ok((taken, errors))
+    }
 }
 
 /// The folder holding every file of a placement list.

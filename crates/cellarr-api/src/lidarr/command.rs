@@ -545,6 +545,7 @@ pub(crate) async fn create(
         .to_string();
     let mut body = body;
     let mut manual: Option<(String, Vec<MusicImportFile>)> = None;
+    let mut disk_scan: Option<(String, Artist)> = None;
     let jobs = if name.eq_ignore_ascii_case("manualimport") {
         let (task, files) = start_manual_import(state, &body).await?;
         set_task(&task, TaskState::Running);
@@ -558,7 +559,22 @@ pub(crate) async fn create(
         }
         jobs
     } else {
-        jobs_for(state, &name, &body).await?.unwrap_or_default()
+        let mut jobs = jobs_for(state, &name, &body).await?.unwrap_or_default();
+        // Lidarr's RefreshArtist ends with a disk scan of the artist's folder,
+        // which is how a tool that copies an album in (lidarr-downloader) gets it
+        // imported. The scan is a task of the command, so a client polling it
+        // sees it finish.
+        if name.eq_ignore_ascii_case("refreshartist") && state.manual_import.is_some() {
+            if let Some(id) = body.get("artistId").and_then(Value::as_i64) {
+                if let Some(artist) = state.db.music().artist(id).await? {
+                    let task = uuid::Uuid::new_v4().to_string();
+                    set_task(&task, TaskState::Running);
+                    jobs.push(format!("task:{task}"));
+                    disk_scan = Some((task, artist));
+                }
+            }
+        }
+        jobs
     };
     let id = state
         .lidarr_commands
@@ -579,6 +595,36 @@ pub(crate) async fn create(
                     format!("Imported {n} file(s); {}", errors.join("; ")),
                 ),
                 Err(e) => (TaskState::Failed, e),
+            };
+            state2.lidarr_commands.set_message(id, &message);
+            set_task(&task, outcome);
+        });
+    }
+    if let (Some((task, artist)), Some(seam)) = (disk_scan, state.manual_import.clone()) {
+        let state2 = state.clone();
+        tokio::spawn(async move {
+            let (outcome, message) = match seam
+                .scan_artist_folder(artist.content_id, artist.path.clone())
+                .await
+            {
+                Ok((n, errors)) if errors.is_empty() => (
+                    TaskState::Done,
+                    format!("Imported {n} file(s) found in the artist folder"),
+                ),
+                Ok((n, errors)) => {
+                    tracing::warn!(artist = %artist.name, ?errors, "disk scan: some files were not imported");
+                    (
+                        TaskState::Done,
+                        format!(
+                            "Imported {n} file(s) found in the artist folder; {}",
+                            errors.join("; ")
+                        ),
+                    )
+                }
+                Err(e) => {
+                    tracing::warn!(artist = %artist.name, error = %e, "disk scan failed");
+                    (TaskState::Failed, e)
+                }
             };
             state2.lidarr_commands.set_message(id, &message);
             set_task(&task, outcome);

@@ -110,6 +110,22 @@ pub trait ManualImport: Send + Sync {
     ) -> Result<(usize, Vec<String>), String> {
         Err("music manual import is not available".into())
     }
+
+    /// Music: Lidarr's disk scan of one artist's folder. Audio files under
+    /// `folder` that no track file records yet, whose tags place them on a track
+    /// of this artist's albums that has no file, are taken where they are:
+    /// nothing is moved, copied or renamed. Returns how many files were taken
+    /// and what failed.
+    ///
+    /// # Errors
+    /// A short human string for an infrastructure failure.
+    async fn scan_artist_folder(
+        &self,
+        _artist: cellarr_core::ContentId,
+        _folder: String,
+    ) -> Result<(usize, Vec<String>), String> {
+        Err("music disk scan is not available".into())
+    }
 }
 
 /// What to scan for a music manual import.

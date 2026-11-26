@@ -1057,6 +1057,92 @@ async fn manual_import_lists_a_download_and_imports_a_folder_as_the_maintenance_
     serve.await.unwrap().expect("clean shutdown");
 }
 
+/// lidarr-downloader copies an album into the artist's folder and sends
+/// `RefreshArtist`; Lidarr's disk scan then takes the files where they are.
+#[tokio::test]
+async fn refresh_artist_takes_an_album_copied_into_the_artist_folder_in_place() {
+    let Fixture {
+        api,
+        library,
+        album_id,
+        stop,
+        serve,
+        _tmp,
+        ..
+    } = fixture_for("A Completely Different Album").await;
+    let album = api.get(&format!("/album/{album_id}")).await;
+    let artist_id = album["artistId"].as_i64().unwrap();
+    let artist_path = PathBuf::from(
+        api.get(&format!("/artist/{artist_id}")).await["path"]
+            .as_str()
+            .unwrap(),
+    );
+    assert!(artist_path.starts_with(&library), "{artist_path:?}");
+    write_download(&artist_path, "Kid A");
+    // A stray file whose tags name no album of the artist stays untouched.
+    write_download(&artist_path.join("stray"), "A Completely Different Album");
+    let mut before: Vec<PathBuf> = walk(&library);
+    before.sort();
+
+    let cmd = api
+        .post_ok(
+            "/command",
+            json!({"name": "RefreshArtist", "artistId": artist_id}),
+        )
+        .await;
+    let cid = cmd["id"].as_i64().unwrap();
+    let done = within(60, || async {
+        let st = api.get(&format!("/command/{cid}")).await;
+        st["status"] == "completed" || st["status"] == "failed"
+    })
+    .await;
+    let st = api.get(&format!("/command/{cid}")).await;
+    assert!(
+        done && st["status"] == "completed",
+        "RefreshArtist ended {st}"
+    );
+
+    let files = api.get(&format!("/trackfile?albumId={album_id}")).await;
+    let mut paths: Vec<String> = files
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["path"].as_str().unwrap().to_string())
+        .collect();
+    paths.sort();
+    let mut expected: Vec<String> = walk(&artist_path.join("Radiohead - Kid A (2000) [FLAC]"))
+        .iter()
+        .map(|p| p.to_string_lossy().to_string())
+        .collect();
+    expected.sort();
+    assert_eq!(expected.len(), 3);
+    assert_eq!(paths, expected, "taken where they are: {files}");
+    let mut after = walk(&library);
+    after.sort();
+    assert_eq!(after, before, "nothing moved, copied or renamed");
+
+    // A second refresh finds nothing new and leaves the files as they are.
+    let again = api
+        .post_ok(
+            "/command",
+            json!({"name": "RefreshArtist", "artistId": artist_id}),
+        )
+        .await;
+    let cid = again["id"].as_i64().unwrap();
+    within(60, || async {
+        let st = api.get(&format!("/command/{cid}")).await;
+        st["status"] == "completed" || st["status"] == "failed"
+    })
+    .await;
+    let st = api.get(&format!("/command/{cid}")).await;
+    assert_eq!(st["status"], "completed", "{st}");
+    let files = api.get(&format!("/trackfile?albumId={album_id}")).await;
+    assert_eq!(files.as_array().unwrap().len(), expected.len());
+
+    stop.send(()).unwrap();
+    serve.await.unwrap().expect("clean shutdown");
+}
+
 fn urlencode(s: &str) -> String {
     s.bytes()
         .map(|b| match b {

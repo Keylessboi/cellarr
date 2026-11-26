@@ -2167,7 +2167,15 @@ where
             None => None,
         };
         match self
-            .import(grab_id, matched_ref, parsed, &content_path, replaced, None)
+            .import(
+                grab_id,
+                matched_ref,
+                parsed,
+                &content_path,
+                replaced,
+                None,
+                false,
+            )
             .await
         {
             Ok(destinations) => {
@@ -2532,6 +2540,9 @@ where
         // An explicit file-to-track mapping (a manual import), used instead of
         // planning one from the files' tags.
         placements_override: Option<Vec<(std::path::PathBuf, ContentRef)>>,
+        // Take each file where it already is, inside the library, instead of
+        // placing a copy at its scheme name (a disk scan of an artist folder).
+        in_place: bool,
     ) -> std::result::Result<Vec<(String, cellarr_core::ContentId)>, ImportFailure> {
         let src = std::path::Path::new(content_path);
         if !src.exists() {
@@ -2603,7 +2614,11 @@ where
             );
             let rel = cellarr_fs::render_name(naming_format, &with_ext_token(&tokens, ext))
                 .map_err(|e| format!("render name: {e}"))?;
-            let dest = self.config.library_root.join(&rel);
+            let dest = if in_place {
+                source.clone()
+            } else {
+                self.config.library_root.join(&rel)
+            };
             let dest_str = dest.to_string_lossy().into_owned();
             let occupied = tokio::fs::try_exists(&dest).await.unwrap_or(false);
             // The TRACKED media_file already at this destination, if any (one lookup,
@@ -2639,6 +2654,9 @@ where
                         replaced_rows.push((path.clone(), *id));
                     }
                 }
+            }
+            if in_place && existing.is_some() {
+                return Err(format!("{dest_str} is already a tracked file").into());
             }
             let adopt = replaces.is_none() && occupied && existing.is_none();
             moves.push(PlannedMove {
@@ -2864,6 +2882,7 @@ where
                 content_path,
                 None,
                 placements_override,
+                false,
             )
             .await?;
         self.persist_imported_files(&parsed, release_type, &destinations)
@@ -2918,6 +2937,34 @@ where
         content_path: &str,
         placements: Vec<(std::path::PathBuf, ContentRef)>,
     ) -> std::result::Result<Vec<String>, ImportFailure> {
+        self.place_music_files(album, content_path, placements, false)
+            .await
+    }
+
+    /// Take audio files already inside the library as the tracks they were
+    /// mapped to, where they are: nothing is moved, copied or renamed. This is
+    /// Lidarr's disk scan of an artist folder, for files another tool put there.
+    ///
+    /// # Errors
+    /// The import failure, per [`ImportFailure`]; a file that is already
+    /// tracked is one.
+    pub async fn adopt_music_files(
+        &self,
+        album: &ContentRef,
+        content_path: &str,
+        placements: Vec<(std::path::PathBuf, ContentRef)>,
+    ) -> std::result::Result<Vec<String>, ImportFailure> {
+        self.place_music_files(album, content_path, placements, true)
+            .await
+    }
+
+    async fn place_music_files(
+        &self,
+        album: &ContentRef,
+        content_path: &str,
+        placements: Vec<(std::path::PathBuf, ContentRef)>,
+        in_place: bool,
+    ) -> std::result::Result<Vec<String>, ImportFailure> {
         let title = self.album_title(album).await;
         let parsed = cellarr_parse::parse_title_for(album.media_type, &title);
         let release_type = cellarr_core::ReleaseType::from_parsed(&parsed);
@@ -2929,6 +2976,7 @@ where
                 content_path,
                 None,
                 Some(placements),
+                in_place,
             )
             .await?;
         self.persist_imported_files(&parsed, release_type, &destinations)

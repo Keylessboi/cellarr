@@ -285,6 +285,13 @@ requests identical. The rest are documented differences:
   honestly needs a scan of the music roots for untracked audio, which is not built; until
   then a client sees an empty list, never a made-up one. Loose files can still be found and
   placed through manual import (`GET /manualimport?folder=`).
+- **Disk scan.** `RefreshArtist` with an `artistId` ends, as in Lidarr, with a scan of
+  that artist's folder: an audio file no track file records yet, whose tags place it on a
+  track of the artist's albums that has no file, is taken where it is (nothing moved,
+  copied or renamed). This is how a tool that copies an album in and then refreshes the
+  artist (lidarr-downloader) gets it imported. Unlike Lidarr, it never replaces or
+  upgrades a file that is already there, and `RescanFolders` and a `RefreshArtist` for
+  every artist do not scan.
 
 Download clients use Lidarr's `musicCategory` field name on this face and the shared
 `category` column internally. The indexer and download-client schemas are recorded from a
