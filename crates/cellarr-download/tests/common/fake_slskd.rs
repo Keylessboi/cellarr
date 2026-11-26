@@ -33,6 +33,9 @@ pub struct Fake {
     /// username -> files: (id, filename, size, state, bytes)
     pub transfers: Vec<(String, String, String, u64, String, u64)>,
     pub deleted: Vec<String>,
+    /// Every transfer reads as `Completed, Succeeded` once listed (the files are
+    /// already on disk in the test).
+    pub auto_complete: bool,
     pub auth_failures: u32,
     next_id: u32,
 }
@@ -131,7 +134,13 @@ pub async fn start(responses: Vec<Value>) -> Server {
         .route(
             "/api/v0/transfers/downloads",
             get(|State(s): State<Shared>| async move {
-                let f = s.lock().unwrap();
+                let mut f = s.lock().unwrap();
+                if f.auto_complete {
+                    for t in &mut f.transfers {
+                        t.4 = "Completed, Succeeded".into();
+                        t.5 = t.3;
+                    }
+                }
                 let mut users: Vec<String> = f.transfers.iter().map(|t| t.0.clone()).collect();
                 users.dedup();
                 let out: Vec<Value> = users

@@ -83,6 +83,70 @@ and ships no Lidarr code or binaries. This keeps cellarr's licence independent o
 (GPLv3). Distributing a bundle that ships Lidarr alongside cellarr would be a separate decision
 for a human to make.
 
+## Native Soulseek (slskd)
+
+Soulseek no longer needs the sidecar. The implementation name `Slskd` (what Tubifarry
+registers, and what a migrated Lidarr database carries) is built natively: cellarr talks to
+slskd's HTTP API itself, as both the indexer and the download client.
+
+A row builds natively when its settings have `baseUrl` and `apiKey` and do not say
+`"native": false`. Any other row (and a row on a build without the native kind) takes the
+sidecar plugin path described above, unchanged.
+
+| Setting | Side | Default | Meaning |
+|---|---|---|---|
+| `baseUrl`, `apiKey` | both | required | slskd's address and an API key (`X-API-Key`). A non-admin key is enough |
+| `downloadRoot` | client | `/data/torrents/soulseek` | where slskd's completed folders are, as cellarr sees them |
+| `searchTimeoutSecs` | indexer | 15 | how long a Soulseek search runs |
+| `minimumFiles` | indexer | 3 | folders with fewer audio files are not albums |
+| `maxReleases` | indexer | 10 | releases kept per search |
+| `blockedUsers` | indexer | none | comma list (or array) of users never downloaded from |
+| `maximumQueueLength` | indexer | 0 (off) | skip peers whose upload queue is longer |
+| `pollIntervalMs` | indexer | 1000 | search poll interval |
+
+How it works (`crates/cellarr-download/src/slskd.rs`):
+
+- **Search.** `POST /api/v0/searches` with `artist album` (and once more with the album's
+  bracketed edition suffix removed if the first finds nothing), poll `GET /searches/{id}` until
+  complete, read `/responses`, delete the search. Files are grouped by (user, folder) and a
+  folder is kept when its last two path parts contain the album title, the artist is in the path
+  or in half the file names, and it has `minimumFiles` unlocked audio files of one format
+  (majority extension, FLAC on a tie). Order: lossless, free upload slot, shorter queue, more
+  files, faster peer, then name. Each folder is a release titled `Artist - Album [FLAC]` /
+  `[MP3 320]`, protocol torrent, size = sum of files, no seeders.
+- **Grab.** The release's `download_url` is `slskd:<base64url json>` naming the user, folder and
+  exact files, so nothing is remembered between search and grab. The client enqueues them with
+  `POST /transfers/downloads/{user}`. The download id carries the same target, so status survives
+  a restart.
+- **Routing.** A `slskd:` release is routed like a plugin protocol (`SoulseekDownloadProtocol`):
+  only a Soulseek client takes it, and a Soulseek client never takes an ordinary release.
+- **Status.** `GET /transfers/downloads`, restricted to this grab's files. Queued/Downloading by
+  state, progress from bytes; any file that ended not-succeeded fails the whole download (with
+  the state and exception in the message, so it is blocklisted and re-searched); all succeeded is
+  Completed.
+- **Where the files are.** slskd's non-admin key cannot read `/options`, so nothing is read from
+  there. The folder is `<downloadRoot>/<user>/<last folder name>`, or
+  `<downloadRoot>/<last folder name>` when only that exists. No remote path mapping is involved.
+  The normal import then adopts or hardlinks from that folder.
+- **Removal.** Each transfer is deleted from slskd (`DELETE .../{user}/{id}?remove=true`, which
+  cancels an active one). With "delete data" only the files this grab fetched are deleted, and
+  the folder if that leaves it empty, never anything outside the download root.
+- **Lidarr face.** `/downloadclient/schema` and `/indexer/schema` list a native `Slskd`
+  template (protocol `SoulseekDownloadProtocol`) unless a plugin already offers `Slskd`.
+- **Migration.** A Lidarr `Slskd` indexer or client row keeps kind `slskd`; `BaseUrl`/`ApiKey`
+  spellings are normalised to `baseUrl`/`apiKey` and the trailing slash is dropped.
+
+Not covered compared with Tubifarry: fuzzy or accent-folding matching (only case, punctuation
+and `&`/`and` are normalised), matching against the album's real track list or count (the
+album's track list is not available to the indexer, so an incomplete folder with at least
+`minimumFiles` tracks can be offered), multi-disc folders split across `CD1`/`CD2`
+subfolders (each disc folder is a separate candidate), retries of failed files (a failed file
+fails the grab and the pipeline re-searches), peer reputation beyond the blocklist and queue
+limit, and extra file types (covers, cue sheets). RSS does not apply to Soulseek.
+
+Tests: `crates/cellarr-download/tests/slskd_api.rs` (a fake slskd over real HTTP),
+`crates/cellarr-jobs/tests/slskd_e2e.rs` (search, grab, status and import through the pipeline).
+
 ## Tests
 
 - `crates/cellarr-plugins/tests/host.rs`: the two example WASM plugins, loaded and run (search,

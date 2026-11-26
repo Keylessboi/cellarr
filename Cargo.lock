@@ -509,6 +509,7 @@ name = "cellarr-jobs"
 version = "0.0.0"
 dependencies = [
  "async-trait",
+ "axum",
  "cellarr-core",
  "cellarr-db",
  "cellarr-decide",
