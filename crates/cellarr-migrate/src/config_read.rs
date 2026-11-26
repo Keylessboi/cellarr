@@ -59,7 +59,10 @@ pub(crate) async fn read_indexers(
         .map(|row| {
             let name: String = row.try_get("Name").unwrap_or_default();
             let implementation = opt_text(row, "Implementation").unwrap_or_default();
-            let settings = native_slskd(&implementation, parse_settings(opt_text(row, "Settings")));
+            let settings = native_apple(
+                &implementation,
+                native_slskd(&implementation, parse_settings(opt_text(row, "Settings"))),
+            );
             let priority: i64 = row.try_get("Priority").unwrap_or(0);
             // All three capabilities, not just RSS. The source models them
             // independently, and reading one to stand for all of them silently
@@ -114,7 +117,10 @@ pub(crate) async fn read_download_clients(
         .map(|row| {
             let name: String = row.try_get("Name").unwrap_or_default();
             let implementation = opt_text(row, "Implementation").unwrap_or_default();
-            let settings = native_slskd(&implementation, parse_settings(opt_text(row, "Settings")));
+            let settings = native_apple(
+                &implementation,
+                native_slskd(&implementation, parse_settings(opt_text(row, "Settings"))),
+            );
             let priority: i64 = row.try_get("Priority").unwrap_or(0);
             let enabled = row.try_get::<i64, _>("Enable").unwrap_or(1) != 0;
             DownloadClientConfig {
@@ -218,6 +224,51 @@ fn native_slskd(implementation: &str, settings: serde_json::Value) -> serde_json
     if let Some(u) = map.get("baseUrl").and_then(|v| v.as_str()) {
         let trimmed = u.trim().trim_end_matches('/').to_string();
         map.insert("baseUrl".to_string(), serde_json::Value::String(trimmed));
+    }
+    serde_json::Value::Object(map)
+}
+
+/// An AppleMusicarr plugin row (indexer or download client), mapped to the
+/// settings cellarr's native Apple Music kind reads. The plugin's own field names
+/// are camelCase already; this accepts a PascalCase spelling too and trims the
+/// decryptor URL. The kind stays what the plugin called itself (lowercased), so a
+/// row the native kind cannot be built from (no developer token, no decryptor
+/// URL, or `native: false`) still resolves to the sidecar plugin.
+fn native_apple(implementation: &str, settings: serde_json::Value) -> serde_json::Value {
+    if !implementation
+        .to_ascii_lowercase()
+        .starts_with("applemusicarr")
+    {
+        return settings;
+    }
+    let serde_json::Value::Object(mut map) = settings else {
+        return settings;
+    };
+    for want in [
+        "developerToken",
+        "musicUserToken",
+        "storefront",
+        "earlyReleaseLimit",
+        "searchLimit",
+        "decryptorUrl",
+        "downloadPath",
+        "preferredQuality",
+        "decryptorTimeoutMinutes",
+        "baseUrl",
+    ] {
+        if !map.contains_key(want) {
+            let pascal = format!("{}{}", want[..1].to_ascii_uppercase(), &want[1..]);
+            if let Some(v) = map.get(&pascal).cloned() {
+                map.insert(want.to_string(), v);
+            }
+        }
+    }
+    if let Some(u) = map.get("decryptorUrl").and_then(|v| v.as_str()) {
+        let trimmed = u.trim().trim_end_matches('/').to_string();
+        map.insert(
+            "decryptorUrl".to_string(),
+            serde_json::Value::String(trimmed),
+        );
     }
     serde_json::Value::Object(map)
 }

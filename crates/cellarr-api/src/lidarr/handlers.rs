@@ -2295,16 +2295,145 @@ fn slskd_template(client: bool) -> Value {
     v
 }
 
+/// The native Apple Music template, unless a plugin already offers an
+/// `AppleMusicarr*` implementation (the sidecar's entry then stands; rows of
+/// either serve the same way).
+fn with_native_apple(
+    mut list: Value,
+    kind: cellarr_plugins::catalog::EntryKind,
+    template: Value,
+) -> Value {
+    let offered = cellarr_plugins::catalog::of_kind(kind)
+        .iter()
+        .any(|e| cellarr_download::applemusic::is_apple_kind(&e.name));
+    if !offered {
+        if let Some(a) = list.as_array_mut() {
+            a.push(template);
+        }
+    }
+    list
+}
+
+fn apple_template(client: bool) -> Value {
+    let field =
+        |order: u32, name: &str, label: &str, kind: &str, value: Value, help: &str, adv: bool| {
+            let secret = name == "developerToken" || name == "musicUserToken";
+            json!({"order": order, "name": name, "label": label, "type": kind, "value": value,
+               "helpText": help, "advanced": adv, "isFloat": false,
+               "privacy": if secret { "password" } else { "normal" }})
+        };
+    let mut fields = vec![
+        field(
+            0,
+            "developerToken",
+            "Developer Token",
+            "password",
+            json!(""),
+            "Apple Music API developer token (a MusicKit JWT, starts with eyJ)",
+            false,
+        ),
+        field(
+            1,
+            "musicUserToken",
+            "Music-User-Token",
+            "password",
+            json!(""),
+            if client {
+                "Required to download: sent to the decryptor with each album"
+            } else {
+                "Optional for search; downloads need it on the download client"
+            },
+            !client,
+        ),
+        field(
+            2,
+            "storefront",
+            "Storefront",
+            "textbox",
+            json!("us"),
+            "Two-letter storefront code (us, gb, de, ...)",
+            false,
+        ),
+    ];
+    if client {
+        fields.push(field(
+            3,
+            "decryptorUrl",
+            "Decryptor URL",
+            "textbox",
+            json!(""),
+            "The applemusic-decryptor service, e.g. http://applemusic-decryptor.lidarr.svc.cluster.local:8080. All decryption happens there",
+            false,
+        ));
+        fields.push(field(
+            4,
+            "downloadPath",
+            "Download Path",
+            "textbox",
+            json!(cellarr_download::applemusic::DEFAULT_DOWNLOAD_DIR),
+            "Where the decryptor's albums are, as cellarr sees them (the decryptor's OUTPUT_DIR volume)",
+            false,
+        ));
+        fields.push(field(
+            5,
+            "decryptorTimeoutMinutes",
+            "Decryptor Timeout (minutes)",
+            "number",
+            json!(180),
+            "How long to wait for one album before failing it",
+            true,
+        ));
+    } else {
+        fields.push(field(
+            3,
+            "earlyReleaseLimit",
+            "Early Release Limit",
+            "number",
+            json!(14),
+            "Ignore albums releasing further than this many days ahead (0 = released only)",
+            true,
+        ));
+        fields.push(field(
+            4,
+            "searchLimit",
+            "Search Limit",
+            "number",
+            json!(25),
+            "Albums requested per search query (1-100)",
+            true,
+        ));
+    }
+    let mut v = json!({
+        "name": "", "implementation": "AppleMusicarr", "implementationName": "AppleMusicarr",
+        "configContract": "AppleMusicarrSettings", "infoLink": "",
+        "protocol": cellarr_download::applemusic::APPLE_PROTOCOL,
+        "fields": fields, "tags": [], "presets": [],
+    });
+    if client {
+        v["enable"] = json!(true);
+        v["priority"] = json!(1);
+    } else {
+        v["enableRss"] = json!(false);
+        v["enableAutomaticSearch"] = json!(true);
+        v["enableInteractiveSearch"] = json!(true);
+        v["supportsRss"] = json!(false);
+        v["supportsSearch"] = json!(true);
+        v["priority"] = json!(25);
+    }
+    v
+}
+
 pub(crate) async fn download_client_schema() -> Json<Value> {
     use cellarr_plugins::catalog::EntryKind;
     let list = schema_with_plugins(
         include_str!("templates/downloadclient_schema.json"),
         EntryKind::DownloadClient,
     );
-    Json(with_native_slskd(
+    let list = with_native_slskd(list, EntryKind::DownloadClient, slskd_template(true));
+    Json(with_native_apple(
         list,
         EntryKind::DownloadClient,
-        slskd_template(true),
+        apple_template(true),
     ))
 }
 
@@ -2314,10 +2443,11 @@ pub(crate) async fn indexer_schema() -> Json<Value> {
         include_str!("templates/indexer_schema.json"),
         EntryKind::Indexer,
     );
-    Json(with_native_slskd(
+    let list = with_native_slskd(list, EntryKind::Indexer, slskd_template(false));
+    Json(with_native_apple(
         list,
         EntryKind::Indexer,
-        slskd_template(false),
+        apple_template(false),
     ))
 }
 
@@ -2643,4 +2773,63 @@ pub(crate) async fn manual_import(
         }));
     }
     Ok(Json(out))
+}
+
+#[cfg(test)]
+mod apple_schema_tests {
+    use super::*;
+
+    #[test]
+    fn the_native_apple_templates_carry_the_plugin_field_names_and_hide_the_secrets() {
+        let names = |client: bool| -> Vec<String> {
+            apple_template(client)["fields"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|f| f["name"].as_str().unwrap().to_string())
+                .collect()
+        };
+        let ix = names(false);
+        for n in [
+            "developerToken",
+            "musicUserToken",
+            "storefront",
+            "earlyReleaseLimit",
+            "searchLimit",
+        ] {
+            assert!(ix.contains(&n.to_string()), "indexer lacks {n}");
+        }
+        let dc = names(true);
+        for n in [
+            "developerToken",
+            "musicUserToken",
+            "decryptorUrl",
+            "downloadPath",
+        ] {
+            assert!(dc.contains(&n.to_string()), "client lacks {n}");
+        }
+        let t = apple_template(true);
+        assert_eq!(t["protocol"], json!("AppleMusicarrDownloadProtocol"));
+        let secret = t["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["name"] == "developerToken")
+            .unwrap();
+        assert_eq!(secret["privacy"], json!("password"));
+        let path = t["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["name"] == "downloadPath")
+            .unwrap();
+        assert_eq!(path["value"], json!("/data/torrents/apple"));
+        // With no plugin offering AppleMusicarr, the template is appended.
+        let list = with_native_apple(
+            json!([]),
+            cellarr_plugins::catalog::EntryKind::Indexer,
+            apple_template(false),
+        );
+        assert_eq!(list.as_array().unwrap().len(), 1);
+    }
 }

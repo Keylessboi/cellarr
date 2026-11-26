@@ -464,3 +464,40 @@ async fn tubifarry_slskd_rows_map_to_the_native_soulseek_kind() {
     assert_eq!(ix.settings["baseUrl"], "http://slskd.downloads:5030");
     assert!(!ix.enable_rss && ix.enable_interactive_search);
 }
+
+#[tokio::test]
+async fn applemusicarr_rows_keep_their_plugin_fields_for_the_native_kind() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = lidarr_db(dir.path()).await;
+    let opts = SqliteConnectOptions::from_str(&format!("sqlite://{}", src)).unwrap();
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(opts)
+        .await
+        .unwrap();
+    // The plugin's own settings JSON (camelCase), plus one row in PascalCase.
+    // The token values are placeholders, not credentials.
+    for sql in [
+        r#"INSERT INTO DownloadClients VALUES (8, 1, 'AppleMusicarr', 'AppleMusicarrDownloadClient', '{"downloadPath":"/data/torrents/apple","preferredQuality":1,"decryptorUrl":"http://applemusic-decryptor.lidarr.svc.cluster.local:8080/","decryptorTimeoutMinutes":180,"developerToken":"dev-placeholder","musicUserToken":"user-placeholder","storefront":"us","musicCategory":"music"}', 'AppleMusicarrDownloadClientSettings', 3, 1, 1, '[]')"#,
+        r#"INSERT INTO Indexers VALUES (8, 'AppleMusicarr', 'AppleMusicarrIndexer', '{"baseUrl":"https://api.music.apple.com/v1/","DeveloperToken":"dev-placeholder","Storefront":"gb","earlyReleaseLimit":14,"searchLimit":25}', 'AppleMusicarrIndexerSettings', 0, 0, 1, 25, '[]', 0)"#,
+    ] {
+        sqlx::query(sql).execute(&pool).await.unwrap();
+    }
+    pool.close().await;
+    let db = dest(dir.path()).await;
+    import(&[&src], &db).await.unwrap();
+    let dc = db.config().list_download_clients().await.unwrap();
+    let dc = dc.iter().find(|c| c.name == "AppleMusicarr").unwrap();
+    assert_eq!(dc.kind, "applemusicarrdownloadclient");
+    assert_eq!(
+        dc.settings["decryptorUrl"],
+        "http://applemusic-decryptor.lidarr.svc.cluster.local:8080"
+    );
+    assert_eq!(dc.settings["downloadPath"], "/data/torrents/apple");
+    assert_eq!(dc.category, "music");
+    let ix = db.config().list_indexers().await.unwrap();
+    let ix = ix.iter().find(|c| c.name == "AppleMusicarr").unwrap();
+    assert_eq!(ix.kind, "applemusicarrindexer");
+    assert_eq!(ix.settings["developerToken"], "dev-placeholder");
+    assert_eq!(ix.settings["storefront"], "gb");
+}

@@ -2608,6 +2608,8 @@ pub(crate) fn v3_indexer(ix: &cellarr_core::IndexerConfig) -> Value {
         p.name
     } else if ix.kind.eq_ignore_ascii_case("slskd") {
         "Slskd".to_string()
+    } else if cellarr_download::applemusic::is_apple_kind(&ix.kind) {
+        apple_implementation(&ix.kind)
     } else {
         "Torznab".to_string()
     };
@@ -2835,6 +2837,7 @@ pub(crate) fn indexer_from_body(
         (Some(i), _) if i.eq_ignore_ascii_case("newznab") => "newznab".to_string(),
         (Some(i), _) if i.eq_ignore_ascii_case("cardigann") => "cardigann".to_string(),
         (Some(i), _) if i.eq_ignore_ascii_case("slskd") => "slskd".to_string(),
+        (Some(i), _) if cellarr_download::applemusic::is_apple_kind(i) => i.to_ascii_lowercase(),
         _ => "torznab".to_string(),
     };
     let protocol = match body.protocol.as_deref() {
@@ -3169,7 +3172,21 @@ pub(crate) fn dc_protocol(dc: &cellarr_core::DownloadClientConfig) -> String {
     if dc.kind.eq_ignore_ascii_case("slskd") {
         return cellarr_download::slskd::SOULSEEK_PROTOCOL.to_string();
     }
+    if cellarr_download::applemusic::is_apple_kind(&dc.kind) {
+        return cellarr_download::applemusic::APPLE_PROTOCOL.to_string();
+    }
     protocol_str(dc.protocol).to_string()
+}
+
+/// The v3 `implementation` of an Apple Music row: the plugin's own class name
+/// when the kind carries it (a migrated row), else `AppleMusicarr`.
+fn apple_implementation(kind: &str) -> String {
+    match kind.to_ascii_lowercase().as_str() {
+        "applemusicarrindexer" => "AppleMusicarrIndexer",
+        "applemusicarrdownloadclient" => "AppleMusicarrDownloadClient",
+        _ => "AppleMusicarr",
+    }
+    .to_string()
 }
 
 /// The v3 `implementation` string for a cellarr download-client kind. The
@@ -3193,6 +3210,9 @@ pub(crate) fn dc_implementation(kind: &str, protocol: cellarr_core::Protocol) ->
         "sabnzbd" => "Sabnzbd",
         "nzbget" => "Nzbget",
         "slskd" => "Slskd",
+        k if cellarr_download::applemusic::is_apple_kind(k) => {
+            return apple_implementation(k);
+        }
         _ => "Blackhole",
     }
     .to_string()
@@ -8536,6 +8556,26 @@ mod plugin_client_protocol_tests {
         let v = v3_download_client(&dc);
         assert_eq!(v["implementation"], json!("Slskd"));
         assert_eq!(v["protocol"], json!("SoulseekDownloadProtocol"));
+        // Native Apple Music (no plugin loaded): its own kind and protocol.
+        let body: DownloadClientBody = serde_json::from_value(json!({
+            "name": "a", "implementation": "AppleMusicarr",
+            "protocol": "AppleMusicarrDownloadProtocol", "enable": true,
+            "fields": [{"name": "developerToken", "value": "t"},
+                       {"name": "decryptorUrl", "value": "http://d"}],
+        }))
+        .unwrap();
+        let dc = download_client_from_body(&body, cellarr_core::DownloadClientId::new());
+        assert_eq!(dc.kind, "applemusicarr");
+        let v = v3_download_client(&dc);
+        assert_eq!(v["implementation"], json!("AppleMusicarr"));
+        assert_eq!(v["protocol"], json!("AppleMusicarrDownloadProtocol"));
+        // A migrated row keeps the plugin's class name on the face.
+        let mut migrated = dc.clone();
+        migrated.kind = "applemusicarrdownloadclient".into();
+        assert_eq!(
+            v3_download_client(&migrated)["implementation"],
+            json!("AppleMusicarrDownloadClient")
+        );
         // A plain client keeps torrent/usenet.
         let body: DownloadClientBody = serde_json::from_value(json!({
             "name": "q", "implementation": "QBittorrent", "protocol": "torrent", "enable": true,

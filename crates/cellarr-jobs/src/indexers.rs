@@ -263,6 +263,21 @@ impl DbIndexerSet {
                 )));
             }
         }
+        // Native Apple Music: searches the catalogue directly. A row without a
+        // developer token (or with `native: false`) falls through to the sidecar.
+        if cellarr_download::applemusic::is_apple_kind(&config.kind) {
+            if let Ok(settings) =
+                cellarr_download::AppleMusicSettings::from_json_indexer(&config.settings)
+            {
+                return Ok(NabAdapter::AppleMusic(
+                    cellarr_download::AppleMusicIndexer::new(
+                        config.id,
+                        config.name.clone(),
+                        settings,
+                    ),
+                ));
+            }
+        }
         // A loaded plugin implements this kind: it takes its own settings.
         #[cfg(feature = "plugins")]
         if let (Some(entry), Some(sidecar)) = (
@@ -415,6 +430,8 @@ pub enum NabAdapter {
     Cardigann(CardigannIndexer),
     /// Soulseek, searched natively through slskd's API.
     Slskd(cellarr_download::SlskdIndexer),
+    /// Apple Music, searched natively through the public catalogue API.
+    AppleMusic(cellarr_download::AppleMusicIndexer),
     /// A WASM plugin indexer.
     #[cfg(feature = "plugins")]
     Plugin(cellarr_plugins::PluginIndexer),
@@ -432,6 +449,10 @@ fn slskd_err(e: cellarr_download::DownloadError) -> IndexerError {
     IndexerError::Unsupported(format!("slskd: {e}"))
 }
 
+fn apple_err(e: cellarr_download::DownloadError) -> IndexerError {
+    IndexerError::Unsupported(format!("applemusic: {e}"))
+}
+
 impl NabAdapter {
     async fn search(&self, terms: &SearchTerms) -> cellarr_indexers::Result<Vec<Release>> {
         match self {
@@ -439,6 +460,7 @@ impl NabAdapter {
             NabAdapter::Newznab(a) => a.search(terms).await,
             NabAdapter::Cardigann(a) => a.search(terms).await,
             NabAdapter::Slskd(a) => a.search(terms).await.map_err(slskd_err),
+            NabAdapter::AppleMusic(a) => a.search(terms).await.map_err(apple_err),
             #[cfg(feature = "plugins")]
             NabAdapter::Plugin(a) => a.search(terms).await.map_err(plugin_err),
             #[cfg(feature = "plugins")]
@@ -451,7 +473,7 @@ impl NabAdapter {
             NabAdapter::Torznab(a) => a.latest().await,
             NabAdapter::Newznab(a) => a.latest().await,
             NabAdapter::Cardigann(a) => a.latest().await,
-            NabAdapter::Slskd(_) => Ok(Vec::new()),
+            NabAdapter::Slskd(_) | NabAdapter::AppleMusic(_) => Ok(Vec::new()),
             #[cfg(feature = "plugins")]
             NabAdapter::Plugin(a) => a.latest().await.map_err(plugin_err),
             #[cfg(feature = "plugins")]
@@ -464,7 +486,7 @@ impl NabAdapter {
             NabAdapter::Torznab(a) => a.resolve(release).await,
             NabAdapter::Newznab(a) => a.resolve(release).await,
             NabAdapter::Cardigann(a) => a.resolve(release).await,
-            NabAdapter::Slskd(_) => Ok(release),
+            NabAdapter::Slskd(_) | NabAdapter::AppleMusic(_) => Ok(release),
             #[cfg(feature = "plugins")]
             NabAdapter::Plugin(_) => Ok(release),
             #[cfg(feature = "plugins")]

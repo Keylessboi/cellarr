@@ -19,10 +19,10 @@
 use async_trait::async_trait;
 use cellarr_core::{DownloadClient, DownloadClientConfig, DownloadStatus, GrabRequest, Protocol};
 use cellarr_download::{
-    BlackholeClient, BlackholeSettings, DelugeClient, DelugeSettings, DownloadError, NzbgetClient,
-    NzbgetSettings, QbittorrentClient, QbittorrentSettings, RtorrentClient, RtorrentSettings,
-    SabnzbdClient, SabnzbdSettings, SlskdClient, SlskdSettings, TransmissionClient,
-    TransmissionSettings,
+    AppleMusicClient, AppleMusicSettings, BlackholeClient, BlackholeSettings, DelugeClient,
+    DelugeSettings, DownloadError, NzbgetClient, NzbgetSettings, QbittorrentClient,
+    QbittorrentSettings, RtorrentClient, RtorrentSettings, SabnzbdClient, SabnzbdSettings,
+    SlskdClient, SlskdSettings, TransmissionClient, TransmissionSettings,
 };
 
 /// A failure building a download client from its persisted configuration.
@@ -75,6 +75,8 @@ pub enum ConfiguredDownloadClient {
     Blackhole(BlackholeClient),
     /// Soulseek through slskd's own HTTP API (native; no sidecar).
     Slskd(SlskdClient),
+    /// Apple Music: catalogue lookups natively, audio through the decryptor service.
+    AppleMusic(AppleMusicClient),
     /// Several eligible clients, in priority order; each release is handed to
     /// the one that fits it (see [`choose_client`]).
     Routed(Box<RoutedClients>),
@@ -170,11 +172,17 @@ fn release_sidecar_wire(release: &cellarr_core::Release) -> Option<String> {
     if cellarr_download::slskd::is_slskd_url(&release.download_url) {
         return Some(cellarr_download::slskd::SOULSEEK_PROTOCOL.to_string());
     }
+    if cellarr_download::applemusic::is_apple_url(&release.download_url) {
+        return Some(cellarr_download::applemusic::APPLE_PROTOCOL.to_string());
+    }
     cellarr_plugins::sidecar::global().and_then(|s| s.release_wire_protocol(release))
 }
 
 #[cfg(not(feature = "plugins"))]
 fn release_sidecar_wire(release: &cellarr_core::Release) -> Option<String> {
+    if cellarr_download::applemusic::is_apple_url(&release.download_url) {
+        return Some(cellarr_download::applemusic::APPLE_PROTOCOL.to_string());
+    }
     cellarr_download::slskd::is_slskd_url(&release.download_url)
         .then(|| cellarr_download::slskd::SOULSEEK_PROTOCOL.to_string())
 }
@@ -229,6 +237,12 @@ impl ConfiguredDownloadClient {
             return ClientTraits {
                 protocol: config.protocol,
                 sidecar_wire: Some(cellarr_download::slskd::SOULSEEK_PROTOCOL.to_string()),
+            };
+        }
+        if matches!(self, Self::AppleMusic(_)) {
+            return ClientTraits {
+                protocol: config.protocol,
+                sidecar_wire: Some(cellarr_download::applemusic::APPLE_PROTOCOL.to_string()),
             };
         }
         #[cfg(feature = "plugins")]
@@ -312,6 +326,17 @@ impl ConfiguredDownloadClient {
                 let settings =
                     SlskdSettings::from_json(&config.settings).map_err(&misconfigured)?;
                 Ok(Self::Slskd(SlskdClient::new(name, settings)))
+            }
+            // Native Apple Music, when the row names a developer token, a
+            // Music-User-Token and the decryptor's URL. Anything less (or
+            // `native: false`) falls through to the AppleMusicarr plugin.
+            other
+                if cellarr_download::applemusic::is_apple_kind(other)
+                    && AppleMusicSettings::from_json_client(&config.settings).is_ok() =>
+            {
+                let settings = AppleMusicSettings::from_json_client(&config.settings)
+                    .map_err(&misconfigured)?;
+                Ok(Self::AppleMusic(AppleMusicClient::new(name, settings)))
             }
             #[cfg(feature = "plugins")]
             other
@@ -417,6 +442,7 @@ impl DownloadClient for ConfiguredDownloadClient {
             Self::Nzbget(c) => <NzbgetClient as DownloadClient>::name(c),
             Self::Blackhole(c) => <BlackholeClient as DownloadClient>::name(c),
             Self::Slskd(c) => <SlskdClient as DownloadClient>::name(c),
+            Self::AppleMusic(c) => <AppleMusicClient as DownloadClient>::name(c),
             Self::Routed(r) => r.clients[0].1.name(),
             Self::Unavailable(_) => "unavailable",
             #[cfg(feature = "plugins")]
@@ -440,6 +466,7 @@ impl DownloadClient for ConfiguredDownloadClient {
             Self::Nzbget(c) => DownloadClient::add(c, grab).await,
             Self::Blackhole(c) => DownloadClient::add(c, grab).await,
             Self::Slskd(c) => DownloadClient::add(c, grab).await,
+            Self::AppleMusic(c) => DownloadClient::add(c, grab).await,
             Self::Routed(r) => Box::pin(DownloadClient::add(r.pick(&grab.release), grab)).await,
             Self::Unavailable(why) => Err(DownloadError::Config(why.clone())),
             #[cfg(feature = "plugins")]
@@ -463,6 +490,7 @@ impl DownloadClient for ConfiguredDownloadClient {
             Self::Nzbget(c) => DownloadClient::status(c, download_id).await,
             Self::Blackhole(c) => DownloadClient::status(c, download_id).await,
             Self::Slskd(c) => DownloadClient::status(c, download_id).await,
+            Self::AppleMusic(c) => DownloadClient::status(c, download_id).await,
             Self::Routed(r) => {
                 let mut missing = None;
                 for (_, c) in &r.clients {
@@ -495,6 +523,7 @@ impl DownloadClient for ConfiguredDownloadClient {
             Self::Nzbget(c) => DownloadClient::remove(c, download_id, delete_data).await,
             Self::Blackhole(c) => DownloadClient::remove(c, download_id, delete_data).await,
             Self::Slskd(c) => DownloadClient::remove(c, download_id, delete_data).await,
+            Self::AppleMusic(c) => DownloadClient::remove(c, download_id, delete_data).await,
             Self::Routed(r) => {
                 let mut missing = None;
                 for (_, c) in &r.clients {
@@ -761,6 +790,81 @@ mod tests {
         };
         assert_eq!(choose_client(&c, &r), Some(1));
         // And an ordinary torrent never goes to the Soulseek client.
+        assert_eq!(choose_client(&c, &rel_plain()), Some(0));
+    }
+
+    fn apple_client_row() -> serde_json::Value {
+        json!({"developerToken": "dev-placeholder", "musicUserToken": "user-placeholder",
+               "decryptorUrl": "http://decryptor:8080"})
+    }
+
+    #[test]
+    fn an_apple_row_with_its_fields_builds_the_native_client_under_any_plugin_kind() {
+        for kind in [
+            "applemusicarr",
+            "applemusicarrdownloadclient",
+            "AppleMusicarr",
+        ] {
+            let c =
+                ConfiguredDownloadClient::from_config(&config(kind, apple_client_row())).unwrap();
+            assert!(
+                matches!(c, ConfiguredDownloadClient::AppleMusic(_)),
+                "{kind}"
+            );
+            let t = c.traits(&config(kind, json!({})));
+            assert_eq!(
+                t.sidecar_wire.as_deref(),
+                Some("AppleMusicarrDownloadProtocol")
+            );
+        }
+    }
+
+    #[test]
+    fn an_apple_row_missing_a_field_or_asking_for_the_plugin_is_not_native() {
+        let mut no_decryptor = apple_client_row();
+        no_decryptor["decryptorUrl"] = json!("");
+        let mut no_user = apple_client_row();
+        no_user["musicUserToken"] = json!("");
+        let mut plugin = apple_client_row();
+        plugin["native"] = json!(false);
+        for settings in [json!({}), no_decryptor, no_user, plugin] {
+            // No sidecar in this process: unsupported means it took the plugin
+            // path rather than the native one.
+            let r = ConfiguredDownloadClient::from_config(&config(
+                "applemusicarrdownloadclient",
+                settings,
+            ));
+            assert!(
+                matches!(r, Err(DownloadClientFactoryError::UnsupportedKind { .. })),
+                "{:?}",
+                r.err()
+            );
+        }
+    }
+
+    #[test]
+    fn an_apple_link_routes_only_to_an_apple_client() {
+        let rel = cellarr_core::Release {
+            indexer_id: cellarr_core::IndexerId::new(),
+            title: "A - B [AAC] [256]".into(),
+            download_url: "applemusicarr://album/1?quality=aac256".into(),
+            guid: None,
+            protocol: Protocol::Torrent,
+            size: None,
+            seeders: None,
+            indexer_flags: vec![],
+        };
+        let wire = release_sidecar_wire(&rel);
+        assert_eq!(wire.as_deref(), Some("AppleMusicarrDownloadProtocol"));
+        let c = [
+            native(Protocol::Torrent),
+            plugin("AppleMusicarrDownloadProtocol"),
+        ];
+        let r = ReleaseTraits {
+            protocol: Protocol::Torrent,
+            sidecar_wire: wire,
+        };
+        assert_eq!(choose_client(&c, &r), Some(1));
         assert_eq!(choose_client(&c, &rel_plain()), Some(0));
     }
 
