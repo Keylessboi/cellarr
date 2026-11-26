@@ -252,6 +252,17 @@ impl DbIndexerSet {
         if config.kind.eq_ignore_ascii_case("cardigann") {
             return self.build_cardigann(config);
         }
+        // Native Soulseek: searches slskd directly. A row it cannot be built from
+        // (no URL/key, or `native: false`) falls through to the sidecar plugin.
+        if config.kind.eq_ignore_ascii_case("slskd") {
+            if let Ok(settings) = cellarr_download::SlskdSettings::from_json(&config.settings) {
+                return Ok(NabAdapter::Slskd(cellarr_download::SlskdIndexer::new(
+                    config.id,
+                    config.name.clone(),
+                    settings,
+                )));
+            }
+        }
         // A loaded plugin implements this kind: it takes its own settings.
         #[cfg(feature = "plugins")]
         if let (Some(entry), Some(sidecar)) = (
@@ -402,6 +413,8 @@ pub enum NabAdapter {
     Newznab(NewznabIndexer),
     /// A Cardigann-definition tracker (HTML-scrape, interpreted from YAML).
     Cardigann(CardigannIndexer),
+    /// Soulseek, searched natively through slskd's API.
+    Slskd(cellarr_download::SlskdIndexer),
     /// A WASM plugin indexer.
     #[cfg(feature = "plugins")]
     Plugin(cellarr_plugins::PluginIndexer),
@@ -415,12 +428,17 @@ fn plugin_err(e: cellarr_plugins::PluginError) -> IndexerError {
     IndexerError::Unsupported(format!("plugin: {e}"))
 }
 
+fn slskd_err(e: cellarr_download::DownloadError) -> IndexerError {
+    IndexerError::Unsupported(format!("slskd: {e}"))
+}
+
 impl NabAdapter {
     async fn search(&self, terms: &SearchTerms) -> cellarr_indexers::Result<Vec<Release>> {
         match self {
             NabAdapter::Torznab(a) => a.search(terms).await,
             NabAdapter::Newznab(a) => a.search(terms).await,
             NabAdapter::Cardigann(a) => a.search(terms).await,
+            NabAdapter::Slskd(a) => a.search(terms).await.map_err(slskd_err),
             #[cfg(feature = "plugins")]
             NabAdapter::Plugin(a) => a.search(terms).await.map_err(plugin_err),
             #[cfg(feature = "plugins")]
@@ -433,6 +451,7 @@ impl NabAdapter {
             NabAdapter::Torznab(a) => a.latest().await,
             NabAdapter::Newznab(a) => a.latest().await,
             NabAdapter::Cardigann(a) => a.latest().await,
+            NabAdapter::Slskd(_) => Ok(Vec::new()),
             #[cfg(feature = "plugins")]
             NabAdapter::Plugin(a) => a.latest().await.map_err(plugin_err),
             #[cfg(feature = "plugins")]
@@ -445,6 +464,7 @@ impl NabAdapter {
             NabAdapter::Torznab(a) => a.resolve(release).await,
             NabAdapter::Newznab(a) => a.resolve(release).await,
             NabAdapter::Cardigann(a) => a.resolve(release).await,
+            NabAdapter::Slskd(_) => Ok(release),
             #[cfg(feature = "plugins")]
             NabAdapter::Plugin(_) => Ok(release),
             #[cfg(feature = "plugins")]

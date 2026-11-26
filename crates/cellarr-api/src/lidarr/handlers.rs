@@ -2173,17 +2173,151 @@ fn schema_with_plugins(template: &str, kind: cellarr_plugins::catalog::EntryKind
     Value::Array(list)
 }
 
+/// The native Soulseek template, unless a plugin already offers `Slskd` (the
+/// sidecar's Tubifarry entry then stands; rows of either serve the same way).
+fn with_native_slskd(
+    mut list: Value,
+    kind: cellarr_plugins::catalog::EntryKind,
+    template: Value,
+) -> Value {
+    let offered = cellarr_plugins::catalog::of_kind(kind)
+        .iter()
+        .any(|e| e.name.eq_ignore_ascii_case("slskd"));
+    if !offered {
+        if let Some(a) = list.as_array_mut() {
+            a.push(template);
+        }
+    }
+    list
+}
+
+fn slskd_template(client: bool) -> Value {
+    let field =
+        |order: u32, name: &str, label: &str, kind: &str, value: Value, help: &str, adv: bool| {
+            json!({"order": order, "name": name, "label": label, "type": kind, "value": value,
+               "helpText": help, "advanced": adv, "isFloat": false,
+               "privacy": if name == "apiKey" { "apiKey" } else { "normal" }})
+        };
+    let mut fields = vec![
+        field(
+            0,
+            "baseUrl",
+            "URL",
+            "textbox",
+            json!(""),
+            "slskd's address, e.g. http://slskd:5030",
+            false,
+        ),
+        field(
+            1,
+            "apiKey",
+            "API Key",
+            "textbox",
+            json!(""),
+            "An slskd API key (a non-admin key is enough)",
+            false,
+        ),
+    ];
+    if client {
+        fields.push(field(
+            2,
+            "downloadRoot",
+            "Download Root",
+            "textbox",
+            json!(cellarr_download::slskd::DEFAULT_DOWNLOAD_ROOT),
+            "Where slskd's completed downloads are, as cellarr sees them (<root>/<user>/<folder>)",
+            false,
+        ));
+    } else {
+        fields.push(field(
+            2,
+            "searchTimeoutSecs",
+            "Search Time",
+            "number",
+            json!(15),
+            "Seconds a Soulseek search runs",
+            true,
+        ));
+        fields.push(field(
+            3,
+            "minimumFiles",
+            "Minimum Files",
+            "number",
+            json!(3),
+            "Folders with fewer audio files are not albums",
+            true,
+        ));
+        fields.push(field(
+            4,
+            "maxReleases",
+            "Max Releases",
+            "number",
+            json!(10),
+            "Releases kept per search",
+            true,
+        ));
+        fields.push(field(
+            5,
+            "blockedUsers",
+            "Blocked Users",
+            "textbox",
+            json!(""),
+            "Comma separated Soulseek users never downloaded from",
+            true,
+        ));
+        fields.push(field(
+            6,
+            "maximumQueueLength",
+            "Maximum Queue Length",
+            "number",
+            json!(0),
+            "Skip users with a longer upload queue (0 = no limit)",
+            true,
+        ));
+    }
+    let mut v = json!({
+        "name": "", "implementation": "Slskd", "implementationName": "Slskd",
+        "configContract": "SlskdSettings", "infoLink": "",
+        "protocol": cellarr_download::slskd::SOULSEEK_PROTOCOL,
+        "fields": fields, "tags": [], "presets": [],
+    });
+    if client {
+        v["enable"] = json!(true);
+        v["priority"] = json!(1);
+    } else {
+        v["enableRss"] = json!(false);
+        v["enableAutomaticSearch"] = json!(true);
+        v["enableInteractiveSearch"] = json!(true);
+        v["supportsRss"] = json!(false);
+        v["supportsSearch"] = json!(true);
+        v["priority"] = json!(25);
+    }
+    v
+}
+
 pub(crate) async fn download_client_schema() -> Json<Value> {
-    Json(schema_with_plugins(
+    use cellarr_plugins::catalog::EntryKind;
+    let list = schema_with_plugins(
         include_str!("templates/downloadclient_schema.json"),
-        cellarr_plugins::catalog::EntryKind::DownloadClient,
+        EntryKind::DownloadClient,
+    );
+    Json(with_native_slskd(
+        list,
+        EntryKind::DownloadClient,
+        slskd_template(true),
     ))
 }
 
 pub(crate) async fn indexer_schema() -> Json<Value> {
-    Json(schema_with_plugins(
+    use cellarr_plugins::catalog::EntryKind;
+    let list = schema_with_plugins(
         include_str!("templates/indexer_schema.json"),
-        cellarr_plugins::catalog::EntryKind::Indexer,
+        EntryKind::Indexer,
+    );
+    Json(with_native_slskd(
+        list,
+        EntryKind::Indexer,
+        slskd_template(false),
     ))
 }
 

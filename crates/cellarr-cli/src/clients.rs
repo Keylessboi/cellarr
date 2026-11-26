@@ -21,7 +21,8 @@ use cellarr_core::{DownloadClient, DownloadClientConfig, DownloadStatus, GrabReq
 use cellarr_download::{
     BlackholeClient, BlackholeSettings, DelugeClient, DelugeSettings, DownloadError, NzbgetClient,
     NzbgetSettings, QbittorrentClient, QbittorrentSettings, RtorrentClient, RtorrentSettings,
-    SabnzbdClient, SabnzbdSettings, TransmissionClient, TransmissionSettings,
+    SabnzbdClient, SabnzbdSettings, SlskdClient, SlskdSettings, TransmissionClient,
+    TransmissionSettings,
 };
 
 /// A failure building a download client from its persisted configuration.
@@ -72,6 +73,8 @@ pub enum ConfiguredDownloadClient {
     Nzbget(NzbgetClient),
     /// Blackhole / watch-folder (universal).
     Blackhole(BlackholeClient),
+    /// Soulseek through slskd's own HTTP API (native; no sidecar).
+    Slskd(SlskdClient),
     /// Several eligible clients, in priority order; each release is handed to
     /// the one that fits it (see [`choose_client`]).
     Routed(Box<RoutedClients>),
@@ -160,14 +163,20 @@ impl RoutedClients {
     }
 }
 
+/// A Soulseek release (a `slskd:` link) routes by its own protocol name, the same
+/// way a plugin protocol does, so only a Soulseek client takes it.
 #[cfg(feature = "plugins")]
 fn release_sidecar_wire(release: &cellarr_core::Release) -> Option<String> {
+    if cellarr_download::slskd::is_slskd_url(&release.download_url) {
+        return Some(cellarr_download::slskd::SOULSEEK_PROTOCOL.to_string());
+    }
     cellarr_plugins::sidecar::global().and_then(|s| s.release_wire_protocol(release))
 }
 
 #[cfg(not(feature = "plugins"))]
-fn release_sidecar_wire(_release: &cellarr_core::Release) -> Option<String> {
-    None
+fn release_sidecar_wire(release: &cellarr_core::Release) -> Option<String> {
+    cellarr_download::slskd::is_slskd_url(&release.download_url)
+        .then(|| cellarr_download::slskd::SOULSEEK_PROTOCOL.to_string())
 }
 
 impl ConfiguredDownloadClient {
@@ -216,6 +225,12 @@ impl ConfiguredDownloadClient {
     }
 
     fn traits(&self, config: &DownloadClientConfig) -> ClientTraits {
+        if matches!(self, Self::Slskd(_)) {
+            return ClientTraits {
+                protocol: config.protocol,
+                sidecar_wire: Some(cellarr_download::slskd::SOULSEEK_PROTOCOL.to_string()),
+            };
+        }
         #[cfg(feature = "plugins")]
         if let Self::Sidecar(c) = self {
             return ClientTraits {
@@ -289,6 +304,14 @@ impl ConfiguredDownloadClient {
                     category,
                     config.protocol,
                 )))
+            }
+            // Native Soulseek, when the row names slskd's URL and key. A row the
+            // native client cannot be built from (or one that says `native: false`)
+            // falls through to the Tubifarry plugin in the sidecar below.
+            "slskd" if SlskdSettings::from_json(&config.settings).is_ok() => {
+                let settings =
+                    SlskdSettings::from_json(&config.settings).map_err(&misconfigured)?;
+                Ok(Self::Slskd(SlskdClient::new(name, settings)))
             }
             #[cfg(feature = "plugins")]
             other
@@ -393,6 +416,7 @@ impl DownloadClient for ConfiguredDownloadClient {
             Self::Sabnzbd(c) => <SabnzbdClient as DownloadClient>::name(c),
             Self::Nzbget(c) => <NzbgetClient as DownloadClient>::name(c),
             Self::Blackhole(c) => <BlackholeClient as DownloadClient>::name(c),
+            Self::Slskd(c) => <SlskdClient as DownloadClient>::name(c),
             Self::Routed(r) => r.clients[0].1.name(),
             Self::Unavailable(_) => "unavailable",
             #[cfg(feature = "plugins")]
@@ -415,6 +439,7 @@ impl DownloadClient for ConfiguredDownloadClient {
             Self::Sabnzbd(c) => DownloadClient::add(c, grab).await,
             Self::Nzbget(c) => DownloadClient::add(c, grab).await,
             Self::Blackhole(c) => DownloadClient::add(c, grab).await,
+            Self::Slskd(c) => DownloadClient::add(c, grab).await,
             Self::Routed(r) => Box::pin(DownloadClient::add(r.pick(&grab.release), grab)).await,
             Self::Unavailable(why) => Err(DownloadError::Config(why.clone())),
             #[cfg(feature = "plugins")]
@@ -437,6 +462,7 @@ impl DownloadClient for ConfiguredDownloadClient {
             Self::Sabnzbd(c) => DownloadClient::status(c, download_id).await,
             Self::Nzbget(c) => DownloadClient::status(c, download_id).await,
             Self::Blackhole(c) => DownloadClient::status(c, download_id).await,
+            Self::Slskd(c) => DownloadClient::status(c, download_id).await,
             Self::Routed(r) => {
                 let mut missing = None;
                 for (_, c) in &r.clients {
@@ -468,6 +494,7 @@ impl DownloadClient for ConfiguredDownloadClient {
             Self::Sabnzbd(c) => DownloadClient::remove(c, download_id, delete_data).await,
             Self::Nzbget(c) => DownloadClient::remove(c, download_id, delete_data).await,
             Self::Blackhole(c) => DownloadClient::remove(c, download_id, delete_data).await,
+            Self::Slskd(c) => DownloadClient::remove(c, download_id, delete_data).await,
             Self::Routed(r) => {
                 let mut missing = None;
                 for (_, c) in &r.clients {
@@ -679,6 +706,66 @@ mod tests {
         let c = [native(Protocol::Torrent), native(Protocol::Usenet)];
         assert_eq!(choose_client(&c, &rel(Protocol::Usenet, None)), Some(1));
         assert_eq!(choose_client(&c, &rel(Protocol::Torrent, None)), Some(0));
+    }
+
+    #[test]
+    fn a_slskd_row_with_url_and_key_builds_the_native_client() {
+        let c = ConfiguredDownloadClient::from_config(&config(
+            "slskd",
+            json!({"baseUrl": "http://slskd:5030", "apiKey": "k"}),
+        ))
+        .unwrap();
+        assert!(matches!(c, ConfiguredDownloadClient::Slskd(_)));
+        let t = c.traits(&config("slskd", json!({})));
+        assert_eq!(t.sidecar_wire.as_deref(), Some("SoulseekDownloadProtocol"));
+    }
+
+    #[test]
+    fn a_slskd_row_without_a_key_or_asking_for_the_plugin_is_not_native() {
+        for settings in [
+            json!({"baseUrl": "http://slskd:5030"}),
+            json!({"baseUrl": "http://slskd:5030", "apiKey": "k", "native": false}),
+        ] {
+            // No sidecar in this process: it is unsupported, i.e. it took the
+            // plugin path rather than the native one.
+            let r = ConfiguredDownloadClient::from_config(&config("slskd", settings));
+            assert!(
+                matches!(r, Err(DownloadClientFactoryError::UnsupportedKind { .. })),
+                "{:?}",
+                r.err()
+            );
+        }
+    }
+
+    #[test]
+    fn a_slskd_link_routes_to_the_native_client_below_a_torrent_client() {
+        let rel = cellarr_core::Release {
+            indexer_id: cellarr_core::IndexerId::new(),
+            title: "A - B [FLAC]".into(),
+            download_url: "slskd:abc".into(),
+            guid: None,
+            protocol: Protocol::Torrent,
+            size: None,
+            seeders: None,
+            indexer_flags: vec![],
+        };
+        let wire = release_sidecar_wire(&rel);
+        assert_eq!(wire.as_deref(), Some("SoulseekDownloadProtocol"));
+        let c = [
+            native(Protocol::Torrent),
+            plugin("SoulseekDownloadProtocol"),
+        ];
+        let r = ReleaseTraits {
+            protocol: Protocol::Torrent,
+            sidecar_wire: wire,
+        };
+        assert_eq!(choose_client(&c, &r), Some(1));
+        // And an ordinary torrent never goes to the Soulseek client.
+        assert_eq!(choose_client(&c, &rel_plain()), Some(0));
+    }
+
+    fn rel_plain() -> ReleaseTraits {
+        rel(Protocol::Torrent, None)
     }
 
     #[test]

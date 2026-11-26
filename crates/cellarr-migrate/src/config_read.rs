@@ -59,7 +59,7 @@ pub(crate) async fn read_indexers(
         .map(|row| {
             let name: String = row.try_get("Name").unwrap_or_default();
             let implementation = opt_text(row, "Implementation").unwrap_or_default();
-            let settings = parse_settings(opt_text(row, "Settings"));
+            let settings = native_slskd(&implementation, parse_settings(opt_text(row, "Settings")));
             let priority: i64 = row.try_get("Priority").unwrap_or(0);
             // All three capabilities, not just RSS. The source models them
             // independently, and reading one to stand for all of them silently
@@ -114,7 +114,7 @@ pub(crate) async fn read_download_clients(
         .map(|row| {
             let name: String = row.try_get("Name").unwrap_or_default();
             let implementation = opt_text(row, "Implementation").unwrap_or_default();
-            let settings = parse_settings(opt_text(row, "Settings"));
+            let settings = native_slskd(&implementation, parse_settings(opt_text(row, "Settings")));
             let priority: i64 = row.try_get("Priority").unwrap_or(0);
             let enabled = row.try_get::<i64, _>("Enable").unwrap_or(1) != 0;
             DownloadClientConfig {
@@ -192,6 +192,34 @@ fn category_of(settings: &serde_json::Value) -> Option<String> {
         .map(str::trim)
         .filter(|c| !c.is_empty())
         .map(str::to_string)
+}
+
+/// A Tubifarry `Slskd` indexer or client row, mapped to the settings cellarr's
+/// native Soulseek kind reads (`baseUrl`, `apiKey`). The kind stays `slskd`: the
+/// same name resolves to the native client when the row has a URL and key, and to
+/// the sidecar plugin when it does not. Everything else in the row is kept.
+fn native_slskd(implementation: &str, settings: serde_json::Value) -> serde_json::Value {
+    if !implementation.eq_ignore_ascii_case("slskd") {
+        return settings;
+    }
+    let serde_json::Value::Object(mut map) = settings else {
+        return settings;
+    };
+    for (want, aliases) in [
+        ("baseUrl", ["BaseUrl", "baseURL", "url"]),
+        ("apiKey", ["ApiKey", "apikey", "api_key"]),
+    ] {
+        if !map.contains_key(want) {
+            if let Some(v) = aliases.iter().find_map(|a| map.get(*a).cloned()) {
+                map.insert(want.to_string(), v);
+            }
+        }
+    }
+    if let Some(u) = map.get("baseUrl").and_then(|v| v.as_str()) {
+        let trimmed = u.trim().trim_end_matches('/').to_string();
+        map.insert("baseUrl".to_string(), serde_json::Value::String(trimmed));
+    }
+    serde_json::Value::Object(map)
 }
 
 fn parse_settings(raw: Option<String>) -> serde_json::Value {

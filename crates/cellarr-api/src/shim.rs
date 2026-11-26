@@ -2606,6 +2606,8 @@ pub(crate) fn v3_indexer(ix: &cellarr_core::IndexerConfig) -> Value {
         .filter(|e| e.kind == cellarr_plugins::catalog::EntryKind::Indexer)
     {
         p.name
+    } else if ix.kind.eq_ignore_ascii_case("slskd") {
+        "Slskd".to_string()
     } else {
         "Torznab".to_string()
     };
@@ -2832,6 +2834,7 @@ pub(crate) fn indexer_from_body(
         (_, Some(p)) => p.name.to_ascii_lowercase(),
         (Some(i), _) if i.eq_ignore_ascii_case("newznab") => "newznab".to_string(),
         (Some(i), _) if i.eq_ignore_ascii_case("cardigann") => "cardigann".to_string(),
+        (Some(i), _) if i.eq_ignore_ascii_case("slskd") => "slskd".to_string(),
         _ => "torznab".to_string(),
     };
     let protocol = match body.protocol.as_deref() {
@@ -3163,6 +3166,9 @@ pub(crate) fn dc_protocol(dc: &cellarr_core::DownloadClientConfig) -> String {
     {
         return e.protocol;
     }
+    if dc.kind.eq_ignore_ascii_case("slskd") {
+        return cellarr_download::slskd::SOULSEEK_PROTOCOL.to_string();
+    }
     protocol_str(dc.protocol).to_string()
 }
 
@@ -3186,6 +3192,7 @@ pub(crate) fn dc_implementation(kind: &str, protocol: cellarr_core::Protocol) ->
         "rtorrent" => "RTorrent",
         "sabnzbd" => "Sabnzbd",
         "nzbget" => "Nzbget",
+        "slskd" => "Slskd",
         _ => "Blackhole",
     }
     .to_string()
@@ -8517,6 +8524,18 @@ mod plugin_client_protocol_tests {
             .unwrap()
             .iter()
             .all(|f| f["name"] != json!("__protocol")));
+        // Native Soulseek (no plugin loaded): kind slskd, its own protocol.
+        let body: DownloadClientBody = serde_json::from_value(json!({
+            "name": "s", "implementation": "Slskd", "protocol": "SoulseekDownloadProtocol",
+            "enable": true,
+            "fields": [{"name": "baseUrl", "value": "http://s"}, {"name": "apiKey", "value": "k"}],
+        }))
+        .unwrap();
+        let dc = download_client_from_body(&body, cellarr_core::DownloadClientId::new());
+        assert_eq!(dc.kind, "slskd");
+        let v = v3_download_client(&dc);
+        assert_eq!(v["implementation"], json!("Slskd"));
+        assert_eq!(v["protocol"], json!("SoulseekDownloadProtocol"));
         // A plain client keeps torrent/usenet.
         let body: DownloadClientBody = serde_json::from_value(json!({
             "name": "q", "implementation": "QBittorrent", "protocol": "torrent", "enable": true,

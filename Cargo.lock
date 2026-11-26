@@ -335,6 +335,7 @@ dependencies = [
  "cellarr-core",
  "cellarr-db",
  "cellarr-decide",
+ "cellarr-download",
  "cellarr-fs",
  "cellarr-indexers",
  "cellarr-jobs",

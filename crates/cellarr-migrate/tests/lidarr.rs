@@ -431,3 +431,36 @@ async fn a_root_folders_defaults_are_imported_with_the_profile_id_kept() {
     let profile = d.quality_profile.expect("profile resolved");
     assert_eq!(db.music().profile_seq(profile).await.unwrap(), 4);
 }
+
+#[tokio::test]
+async fn tubifarry_slskd_rows_map_to_the_native_soulseek_kind() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = lidarr_db(dir.path()).await;
+    // Add the Tubifarry rows beside the fixture's, as Lidarr stores them.
+    let opts = SqliteConnectOptions::from_str(&format!("sqlite://{}", src)).unwrap();
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(opts)
+        .await
+        .unwrap();
+    for sql in [
+        r#"INSERT INTO DownloadClients VALUES (7, 1, 'Slskd', 'Slskd', '{"BaseUrl":"http://slskd.downloads:5030/","apiKey":"k","musicCategory":"music"}', 'SlskdSettings', 3, 1, 1, '[]')"#,
+        r#"INSERT INTO Indexers VALUES (7, 'Slskd', 'Slskd', '{"baseUrl":"http://slskd.downloads:5030","apiKey":"k"}', 'SlskdSettings', 0, 1, 1, 25, '[]', 0)"#,
+    ] {
+        sqlx::query(sql).execute(&pool).await.unwrap();
+    }
+    pool.close().await;
+    let db = dest(dir.path()).await;
+    import(&[&src], &db).await.unwrap();
+    let dc = db.config().list_download_clients().await.unwrap();
+    let dc = dc.iter().find(|c| c.name == "Slskd").unwrap();
+    assert_eq!(dc.kind, "slskd");
+    assert_eq!(dc.settings["baseUrl"], "http://slskd.downloads:5030");
+    assert_eq!(dc.settings["apiKey"], "k");
+    assert_eq!(dc.category, "music");
+    let ix = db.config().list_indexers().await.unwrap();
+    let ix = ix.iter().find(|c| c.name == "Slskd").unwrap();
+    assert_eq!(ix.kind, "slskd");
+    assert_eq!(ix.settings["baseUrl"], "http://slskd.downloads:5030");
+    assert!(!ix.enable_rss && ix.enable_interactive_search);
+}
