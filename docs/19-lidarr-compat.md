@@ -33,6 +33,12 @@ clients' Lidarr URL at cellarr and nothing else changes. The same face is always
 The API key is cellarr's (`api.api_key`). To keep existing clients' stored key working, set
 cellarr's key to Lidarr's.
 
+**Authentication.** When an API key is configured, the Lidarr face (the dedicated port and
+`/lidarr/api/v1`) requires it on every request except `/ping`, as Lidarr does: send it as
+`X-Api-Key` or `?apikey=`, otherwise the answer is `401`. Web-auth (Forms/Basic) is not a
+substitute on this face. `/ping` stays open, so kubelet probes need no key. With no key
+configured the face is open, as on a first run.
+
 ## Migrating
 
 ```sh

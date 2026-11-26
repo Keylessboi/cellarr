@@ -47,14 +47,15 @@ use serde_json::{json, Value};
 
 pub use command::CommandLog;
 
-use crate::auth::require_api_key;
+use crate::auth::require_api_key_strict;
 use crate::error::ApiError;
 use crate::shim::{self, Face, FaceState, LIDARR_VERSION};
 use crate::state::AppState;
 
 /// Build the Lidarr face's router (every path relative to `/api/v1`).
 ///
-/// Every route requires the API key, as in Lidarr itself.
+/// Every route except `/ping` requires the API key whenever one is configured
+/// (`401` otherwise), as in Lidarr itself; web-auth does not substitute for it.
 pub fn router(state: AppState) -> Router {
     // Lidarr matches routes case-insensitively, and clients rely on it: Octo
     // and the queue-maintenance script both ask for `/trackFile`. Lower-case the
@@ -404,7 +405,7 @@ fn routes(state: AppState) -> Router {
         .route("/command", get(command::list).post(command::create))
         .route("/command/{id}", get(command::get).delete(command::cancel))
         .with_state(fs.clone())
-        .layer(middleware::from_fn_with_state(state, require_api_key))
+        .layer(middleware::from_fn_with_state(state, require_api_key_strict))
         .fallback(not_found)
         .layer(middleware::from_fn(compat))
         .layer(middleware::from_fn(version_header))

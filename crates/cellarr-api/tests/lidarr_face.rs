@@ -444,3 +444,86 @@ async fn a_put_that_monitors_no_release_leaves_the_album_nothing_to_want() {
     assert_eq!(saved["statistics"]["trackCount"], 12);
     assert!(missing(&l.get("/wanted/missing?pageSize=100").await));
 }
+
+#[tokio::test]
+async fn with_a_key_configured_the_face_answers_401_without_it() {
+    let l = start(AuthConfig::with_key(KEY)).await;
+    for path in ["/system/status", "/artist", "/rootfolder", "/command"] {
+        let r = l
+            .client
+            .get(format!("{}/api/v1{path}", l.base))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 401, "GET {path} without a key");
+    }
+    let wrong = l
+        .client
+        .get(format!("{}/api/v1/system/status", l.base))
+        .header("X-Api-Key", "not-the-key")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(wrong.status(), 401);
+    let write = l
+        .client
+        .post(format!("{}/api/v1/tag", l.base))
+        .json(&json!({"label": "x"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(write.status(), 401);
+}
+
+#[tokio::test]
+async fn the_key_is_accepted_as_a_header_or_as_a_query_parameter() {
+    let l = start(AuthConfig::with_key(KEY)).await;
+    let header = l
+        .client
+        .get(format!("{}/api/v1/system/status", l.base))
+        .header("X-Api-Key", KEY)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(header.status(), 200);
+    let query = l
+        .client
+        .get(format!("{}/api/v1/system/status?apikey={KEY}", l.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(query.status(), 200);
+}
+
+#[tokio::test]
+async fn ping_stays_open_with_a_key_configured() {
+    let l = start(AuthConfig::with_key(KEY)).await;
+    for path in ["/ping", "/api/v1/ping"] {
+        let r = l
+            .client
+            .get(format!("{}{path}", l.base))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 200, "{path}");
+    }
+    let head = l
+        .client
+        .head(format!("{}/ping", l.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(head.status(), 200);
+}
+
+#[tokio::test]
+async fn with_no_key_configured_the_face_is_open() {
+    let l = start(AuthConfig::disabled()).await;
+    let r = l
+        .client
+        .get(format!("{}/api/v1/system/status", l.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+}

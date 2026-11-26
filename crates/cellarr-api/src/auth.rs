@@ -36,6 +36,12 @@ impl AuthConfig {
         Self { key: None }
     }
 
+    /// Whether an API key is configured (auth is enforced).
+    #[must_use]
+    pub fn is_enabled(&self) -> bool {
+        self.key.is_some()
+    }
+
     /// Whether a presented key is valid. Constant-time when a key is configured.
     #[must_use]
     pub fn accepts(&self, presented: Option<&str>) -> bool {
@@ -102,6 +108,28 @@ pub async fn require_api_key(
     if state.auth.accepts(presented.as_deref())
         || crate::webauth::request_is_web_authenticated(&state, req.headers()).await
     {
+        Ok(next.run(req).await)
+    } else {
+        Err(ApiError::Unauthorized)
+    }
+}
+
+/// Middleware for the Lidarr face: whenever an API key is configured it is
+/// **required**, with no web-auth fallback, and a missing or wrong key is `401`,
+/// exactly as Lidarr answers. With no key configured the face is open (zero-config
+/// first run), as before. `/ping` stays open: Lidarr serves it without a key and
+/// kubelet probes rely on it.
+pub async fn require_api_key_strict(
+    State(state): State<AppState>,
+    req: Request,
+    next: Next,
+) -> Result<Response, ApiError> {
+    let is_ping = req
+        .uri()
+        .path()
+        .trim_end_matches('/')
+        .eq_ignore_ascii_case("/ping");
+    if is_ping || state.auth.accepts(presented_key(&req).as_deref()) {
         Ok(next.run(req).await)
     } else {
         Err(ApiError::Unauthorized)
