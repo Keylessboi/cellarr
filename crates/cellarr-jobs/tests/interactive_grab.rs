@@ -433,7 +433,10 @@ async fn grab_selected_release_grabs_the_pick_without_rediscovering() {
 
     // The held pick was grabbed + imported despite the indexer offering nothing.
     let grabbed = client.grabbed_title.lock().unwrap().clone().unwrap();
-    assert!(grabbed.contains("720p"), "the picked release must be grabbed, got {grabbed:?}");
+    assert!(
+        grabbed.contains("720p"),
+        "the picked release must be grabbed, got {grabbed:?}"
+    );
     assert_eq!(destinations.len(), 1);
     assert!(PathBuf::from(&destinations[0]).starts_with(&library_root));
     let grab = GrabRepository::get(&db.grabs(), grab_id)

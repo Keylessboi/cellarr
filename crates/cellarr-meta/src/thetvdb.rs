@@ -655,8 +655,14 @@ mod title_pref_tests {
             vec!["Naruto".to_string(), "ナルト".to_string()],
         );
         assert_eq!(title, "Naruto");
-        assert!(aliases.iter().any(|a| a == "NARUTO－ナルト－"), "canonical kept as alias");
-        assert!(!aliases.iter().any(|a| a == "Naruto"), "chosen title removed from aliases");
+        assert!(
+            aliases.iter().any(|a| a == "NARUTO－ナルト－"),
+            "canonical kept as alias"
+        );
+        assert!(
+            !aliases.iter().any(|a| a == "Naruto"),
+            "chosen title removed from aliases"
+        );
     }
 
     #[test]
@@ -683,13 +689,18 @@ mod title_pref_tests {
             }
         });
         let meta = super::normalize_series(&value).expect("normalizes");
-        assert_eq!(meta.title, "Kill la Kill", "English translation promoted to title");
+        assert_eq!(
+            meta.title, "Kill la Kill",
+            "English translation promoted to title"
+        );
         assert!(
             meta.aliases.iter().any(|a| a == "キルラキル"),
             "canonical kept as alias for matching"
         );
         assert!(
-            meta.aliases.iter().any(|a| a == "Kiru ra kiru: KILL la KILL"),
+            meta.aliases
+                .iter()
+                .any(|a| a == "Kiru ra kiru: KILL la KILL"),
             "bare alias retained"
         );
     }
@@ -706,7 +717,8 @@ mod title_pref_tests {
 
     #[test]
     fn keeps_non_latin_canonical_when_no_latin_alias() {
-        let (title, aliases) = prefer_latin_title("日本語".to_string(), vec!["にほんご".to_string()]);
+        let (title, aliases) =
+            prefer_latin_title("日本語".to_string(), vec!["にほんご".to_string()]);
         assert_eq!(title, "日本語", "no more-Latin alternative, so unchanged");
         assert_eq!(aliases, vec!["にほんご".to_string()]);
     }
@@ -716,7 +728,10 @@ mod title_pref_tests {
         assert!((latin_ratio("Naruto") - 1.0).abs() < f64::EPSILON);
         assert!((latin_ratio("Pokémon") - 1.0).abs() < f64::EPSILON); // accents are Latin
         let mixed = latin_ratio("NARUTO－ナルト－");
-        assert!(mixed > 0.0 && mixed < 1.0, "mixed script is partial: {mixed}");
+        assert!(
+            mixed > 0.0 && mixed < 1.0,
+            "mixed script is partial: {mixed}"
+        );
         assert!((latin_ratio("11.22.63") - 1.0).abs() < f64::EPSILON); // digits are neutral
     }
 }

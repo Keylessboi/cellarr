@@ -621,10 +621,18 @@ mod tests {
             error_string: String::new(),
         };
         let p = progress_from_torrent(&t);
-        assert_eq!(p.state, DownloadState::Downloading, "no metadata => not complete");
+        assert_eq!(
+            p.state,
+            DownloadState::Downloading,
+            "no metadata => not complete"
+        );
         assert_eq!(p.progress, 0.0, "no metadata => 0%, not 100%");
         assert!(p.content_path.is_none(), "no content to import yet");
-        assert_eq!(p.peers, Some(12), "the real connected-peer count is reported");
+        assert_eq!(
+            p.peers,
+            Some(12),
+            "the real connected-peer count is reported"
+        );
     }
 
     #[test]
@@ -645,7 +653,10 @@ mod tests {
         };
         let p = progress_from_torrent(&t);
         assert_eq!(p.state, DownloadState::Failed);
-        assert!(p.error_string.is_some(), "a fatal local error surfaces its detail");
+        assert!(
+            p.error_string.is_some(),
+            "a fatal local error surfaces its detail"
+        );
     }
 
     #[test]
@@ -669,8 +680,15 @@ mod tests {
                 error_string: "Tracker gave HTTP response code 404".into(),
             };
             let p = progress_from_torrent(&t);
-            assert_eq!(p.state, DownloadState::Downloading, "tracker error {code} must not fail");
-            assert!(p.error_string.is_none(), "a benign tracker warning is not surfaced as an error");
+            assert_eq!(
+                p.state,
+                DownloadState::Downloading,
+                "tracker error {code} must not fail"
+            );
+            assert!(
+                p.error_string.is_none(),
+                "a benign tracker warning is not surfaced as an error"
+            );
         }
     }
 

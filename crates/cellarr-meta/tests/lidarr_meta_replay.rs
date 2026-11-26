@@ -25,7 +25,11 @@ async fn an_artist_search_carries_biography_links_and_artwork() {
     let src = source("/search?type=artist", "lm_search_artist.json");
     let hits = src.search_artists("radiohead", 5).await.unwrap();
     assert_eq!(hits[0].mbid, RADIOHEAD);
-    assert!(hits[0].overview.as_deref().unwrap().contains("English rock band"));
+    assert!(hits[0]
+        .overview
+        .as_deref()
+        .unwrap()
+        .contains("English rock band"));
     assert!(!hits[0].links.is_empty());
     assert!(hits[0].score >= hits[1].score);
 }

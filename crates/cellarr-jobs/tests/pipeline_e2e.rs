@@ -1254,7 +1254,9 @@ async fn a_season_pack_imports_as_its_individual_episodes() {
 
     // A pack carrying both episodes plus a file for an episode this series does not
     // have — packs routinely carry extras, and one must not sink the whole import.
-    let completed = tmp.path().join("downloads/complete/The.Show.S02.1080p.WEB-DL");
+    let completed = tmp
+        .path()
+        .join("downloads/complete/The.Show.S02.1080p.WEB-DL");
     std::fs::create_dir_all(&completed).unwrap();
     for name in [
         "The.Show.S02E01.1080p.WEB-DL.x264-GROUP.mkv",
@@ -1402,8 +1404,10 @@ async fn unseeded_torrents_are_dropped_without_being_mistaken_for_nothing_found(
             "the reason must name the seeder problem, got: {reason}"
         ),
         RunOutcome::NothingFound => {
-            panic!("an all-unseeded result must not be reported as nothing found — \
-                    that would back the node off as though the indexers do not carry it")
+            panic!(
+                "an all-unseeded result must not be reported as nothing found — \
+                    that would back the node off as though the indexers do not carry it"
+            )
         }
         other => panic!("expected a seeder rejection, got {other:?}"),
     }
@@ -1411,10 +1415,7 @@ async fn unseeded_torrents_are_dropped_without_being_mistaken_for_nothing_found(
     // One aggregate row, not one per dead release: cutting that volume is the point.
     let reason = db.content().missing_reason(node.id).await.unwrap();
     assert!(
-        matches!(
-            reason,
-            cellarr_core::MissingReason::OnlyDeadTorrents { .. }
-        ),
+        matches!(reason, cellarr_core::MissingReason::OnlyDeadTorrents { .. }),
         "the item must be explainable as 'only dead torrents', got {reason:?}"
     );
 }
@@ -1473,7 +1474,10 @@ async fn releases_with_no_reported_seeder_count_still_pass() {
     let runner = PipelineRunner::new(&indexer, &client, &registry, &db, &clock, &config);
     let outcome = runner.run(&node).await.unwrap();
     assert!(
-        !matches!(outcome, RunOutcome::Rejected { .. } | RunOutcome::NothingFound),
+        !matches!(
+            outcome,
+            RunOutcome::Rejected { .. } | RunOutcome::NothingFound
+        ),
         "an unknown seeder count is not a dead torrent; got {outcome:?}"
     );
 }
@@ -1782,7 +1786,11 @@ async fn the_search_funnel_accounts_for_every_candidate_that_never_reached_decid
     };
     let completed = tmp.path().join("done");
     std::fs::create_dir_all(&completed).unwrap();
-    std::fs::write(completed.join("The.Show.S01E01.1080p.WEB-DL-GOOD.mkv"), b"x").unwrap();
+    std::fs::write(
+        completed.join("The.Show.S01E01.1080p.WEB-DL-GOOD.mkv"),
+        b"x",
+    )
+    .unwrap();
     let client = FakeDownloadClient {
         content_path: completed.to_string_lossy().into_owned(),
     };
@@ -1799,7 +1807,10 @@ async fn the_search_funnel_accounts_for_every_candidate_that_never_reached_decid
     // The run still succeeds on the one good candidate — the funnel must not change
     // behaviour, only make the losses visible.
     assert!(
-        matches!(outcome, RunOutcome::Imported { .. } | RunOutcome::Grabbed { .. }),
+        matches!(
+            outcome,
+            RunOutcome::Imported { .. } | RunOutcome::Grabbed { .. }
+        ),
         "the good candidate should still be acted on, got {outcome:?}"
     );
 

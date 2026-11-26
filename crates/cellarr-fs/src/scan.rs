@@ -184,10 +184,8 @@ where
     F: Fn(&Path) -> bool + Send + 'static,
 {
     let root = root.into();
-    match tokio::task::spawn_blocking(move || {
-        scan_incremental_blocking(&root, &keep, &known_dirs)
-    })
-    .await
+    match tokio::task::spawn_blocking(move || scan_incremental_blocking(&root, &keep, &known_dirs))
+        .await
     {
         Ok(r) => r,
         Err(e) => Err(FsError::TaskJoin(e.to_string())),
@@ -324,9 +322,7 @@ mod tests {
 
         // First run (no known dirs): reads everything, finds both files, records
         // the directory tree.
-        let keep = |p: &std::path::Path| {
-            p.extension().and_then(|e| e.to_str()) == Some("mkv")
-        };
+        let keep = |p: &std::path::Path| p.extension().and_then(|e| e.to_str()) == Some("mkv");
         let (inv1, dirs1) = scan_incremental(root.to_path_buf(), keep, HashMap::new())
             .await
             .unwrap();
@@ -335,9 +331,7 @@ mod tests {
 
         // Second run with the recorded tree and nothing changed on disk: finds NO
         // files (every directory's mtime is unchanged, so none are re-read).
-        let keep2 = |p: &std::path::Path| {
-            p.extension().and_then(|e| e.to_str()) == Some("mkv")
-        };
+        let keep2 = |p: &std::path::Path| p.extension().and_then(|e| e.to_str()) == Some("mkv");
         let (inv2, dirs2) = scan_incremental(root.to_path_buf(), keep2, dirs1.clone())
             .await
             .unwrap();
@@ -357,9 +351,7 @@ mod tests {
         // caller dedups already-seen ones), but the untouched B/ is skipped
         // entirely — so we see A's two episodes and nothing from B.
         std::fs::write(root.join("A/Season 01/ep2.mkv"), b"hij").unwrap();
-        let keep3 = |p: &std::path::Path| {
-            p.extension().and_then(|e| e.to_str()) == Some("mkv")
-        };
+        let keep3 = |p: &std::path::Path| p.extension().and_then(|e| e.to_str()) == Some("mkv");
         let (inv3, _dirs3) = scan_incremental(root.to_path_buf(), keep3, dirs2)
             .await
             .unwrap();
@@ -435,19 +427,33 @@ mod tests {
     async fn scan_filtered_keeps_only_matches_and_honors_the_limit() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        for name in ["a.mkv", "b.mkv", "c.mkv", "d.mkv", "notes.txt", "poster.jpg"] {
+        for name in [
+            "a.mkv",
+            "b.mkv",
+            "c.mkv",
+            "d.mkv",
+            "notes.txt",
+            "poster.jpg",
+        ] {
             std::fs::write(root.join(name), b"z").unwrap();
         }
         // `keep` selects only .mkv — the non-video files are never inventoried.
         let is_mkv = |p: &Path| p.extension().and_then(|e| e.to_str()) == Some("mkv");
 
         // Unbounded: every .mkv, no .txt/.jpg.
-        let all = scan_filtered(root.to_path_buf(), is_mkv, None).await.unwrap();
+        let all = scan_filtered(root.to_path_buf(), is_mkv, None)
+            .await
+            .unwrap();
         assert_eq!(all.entries.len(), 4, "only the four videos are kept");
-        assert!(all.entries.iter().all(|e| e.path.extension().unwrap() == "mkv"));
+        assert!(all
+            .entries
+            .iter()
+            .all(|e| e.path.extension().unwrap() == "mkv"));
 
         // Bounded: stops after `limit` matches.
-        let two = scan_filtered(root.to_path_buf(), is_mkv, Some(2)).await.unwrap();
+        let two = scan_filtered(root.to_path_buf(), is_mkv, Some(2))
+            .await
+            .unwrap();
         assert_eq!(two.entries.len(), 2, "the limit caps the kept entries");
     }
 }

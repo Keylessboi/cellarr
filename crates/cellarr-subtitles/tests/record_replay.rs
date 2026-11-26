@@ -60,7 +60,8 @@ const SEARCH_BODY: &str = r#"{
 
 #[tokio::test]
 async fn search_normalizes_matches_and_drops_fileless_entries() {
-    let fetcher = RecordedFetcher::new().with_body(&format!("{BASE}/api/v1/subtitles"), SEARCH_BODY);
+    let fetcher =
+        RecordedFetcher::new().with_body(&format!("{BASE}/api/v1/subtitles"), SEARCH_BODY);
     let os = OpenSubtitles::new(fetcher, config("key", None, None));
 
     let q = SubtitleQuery {
@@ -77,7 +78,10 @@ async fn search_normalizes_matches_and_drops_fileless_entries() {
     assert_eq!(top.provider, "opensubtitles");
     assert_eq!(top.id, "987654");
     assert_eq!(top.language, "en");
-    assert_eq!(top.release_name.as_deref(), Some("The.Matrix.1999.1080p.BluRay.x264"));
+    assert_eq!(
+        top.release_name.as_deref(),
+        Some("The.Matrix.1999.1080p.BluRay.x264")
+    );
     assert!(!top.forced);
     assert!(!top.hearing_impaired);
     assert_eq!(top.format, "srt");
@@ -140,8 +144,8 @@ async fn download_logs_in_then_fetches_the_link_bytes() {
 
 #[tokio::test]
 async fn download_without_login_credentials_is_no_credential() {
-    let fetcher = RecordedFetcher::new()
-        .with_body(&format!("{BASE}/api/v1/download"), r#"{"link":"x"}"#);
+    let fetcher =
+        RecordedFetcher::new().with_body(&format!("{BASE}/api/v1/download"), r#"{"link":"x"}"#);
     // api key present, but no username/password → cannot mint the download token.
     let os = OpenSubtitles::new(fetcher, config("key", None, None));
     let m = SubtitleMatch {

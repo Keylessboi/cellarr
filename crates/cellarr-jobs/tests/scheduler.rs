@@ -168,14 +168,22 @@ async fn manual_submit_pulls_a_future_scheduled_recurring_job_forward() {
         .submit_now(JobKind::RssSync, RetryPolicy::default())
         .await
         .unwrap();
-    assert_eq!(store.load_all().await.unwrap().len(), 1, "no duplicate job created");
+    assert_eq!(
+        store.load_all().await.unwrap().len(),
+        1,
+        "no duplicate job created"
+    );
     assert_eq!(
         sched.tick().await.unwrap(),
         1,
         "the manual trigger made the recurring job due now"
     );
     sched.join_in_flight().await;
-    assert_eq!(handler.call_count(), 2, "the job actually ran on the manual trigger");
+    assert_eq!(
+        handler.call_count(),
+        2,
+        "the job actually ran on the manual trigger"
+    );
 
     // It rescheduled to the next interval from the manual run (t=100+3600=3700), so
     // it does not auto-fire again before then.

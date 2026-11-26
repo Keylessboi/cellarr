@@ -64,9 +64,8 @@ static MARKER: LazyLock<Regex> = LazyLock::new(|| {
 // Separators tolerated between the title-year and the real year include brackets,
 // so a bracketed real year (`1917 (2019)`, normalized to `1917 ( 2019 )`) is still
 // recognized as the two-year case and the title keeps its number.
-static TWO_YEARS: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\b((?:19|20)\d{2})[\s._\-()\[\]{}]*((?:19|20)\d{2})\b").unwrap()
-});
+static TWO_YEARS: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\b((?:19|20)\d{2})[\s._\-()\[\]{}]*((?:19|20)\d{2})\b").unwrap());
 
 // Release-modifier keywords (editions, language/dub, audio) can also legitimately
 // BEGIN a real title — `Uncut Gems`, `Extended Family`, `Limited Partners`. A hard
@@ -223,7 +222,10 @@ mod tests {
     fn edition_keyword_that_begins_a_real_title_survives() {
         // `Uncut` is a release-edition keyword, but here it's the actual title —
         // cutting at it stranded the movie with an empty title.
-        assert_eq!(title("Uncut Gems (2019).mkv"), Some("Uncut Gems".to_string()));
+        assert_eq!(
+            title("Uncut Gems (2019).mkv"),
+            Some("Uncut Gems".to_string())
+        );
         // A genuine edition tag AFTER a real title still cuts correctly.
         assert_eq!(
             title("Blade Runner 1982 The Final Cut 1080p BluRay"),

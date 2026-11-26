@@ -386,3 +386,61 @@ async fn an_ep_added_by_hand_is_listed_though_the_metadata_profile_excludes_eps(
     assert_eq!(found["albumType"], "EP");
     assert_eq!(found["monitored"], true);
 }
+
+#[tokio::test]
+async fn a_put_that_monitors_no_release_leaves_the_album_nothing_to_want() {
+    let l = start(AuthConfig::disabled()).await;
+    let profile = l.flac_profile().await;
+    l.add_radiohead(profile).await;
+    let id = l.get(&format!("/album?foreignAlbumId={OK_COMPUTER}")).await[0]["id"]
+        .as_i64()
+        .unwrap();
+    l.get(&format!("/track?albumId={id}")).await;
+    let missing = |page: &Value| -> bool {
+        page["records"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["id"] == json!(id))
+    };
+    assert!(missing(&l.get("/wanted/missing?pageSize=100").await));
+
+    // Lidarr's album page: every pressing unticked, then saved.
+    let mut album = l.get(&format!("/album/{id}")).await;
+    let monitored = album["releases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .position(|r| r["monitored"] == json!(true))
+        .expect("one pressing is monitored");
+    for r in album["releases"].as_array_mut().unwrap() {
+        r["monitored"] = json!(false);
+    }
+    let r = l
+        .send(reqwest::Method::PUT, &format!("/album/{id}"), &album)
+        .await;
+    assert!(r.status().is_success());
+    let saved = l.get(&format!("/album/{id}")).await;
+    assert!(saved["releases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|r| r["monitored"] == json!(false)));
+    assert!(
+        saved.get("statistics").is_none(),
+        "Lidarr gives it no statistics"
+    );
+    assert!(!missing(&l.get("/wanted/missing?pageSize=100").await));
+
+    // Ticking the same pressing again brings it back.
+    let mut album = saved;
+    album["releases"][monitored]["monitored"] = json!(true);
+    let r = l
+        .send(reqwest::Method::PUT, &format!("/album/{id}"), &album)
+        .await;
+    assert!(r.status().is_success());
+    let saved = l.get(&format!("/album/{id}")).await;
+    assert_eq!(saved["releases"][monitored]["monitored"], json!(true));
+    assert_eq!(saved["statistics"]["trackCount"], 12);
+    assert!(missing(&l.get("/wanted/missing?pageSize=100").await));
+}

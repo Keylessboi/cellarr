@@ -86,7 +86,10 @@ impl<F: Fetcher> OpenSubtitles<F> {
         };
         let url = format!("{}/api/v1/login", self.config.base_url);
         let body = serde_json::json!({ "username": user, "password": pass });
-        let resp = self.fetcher.post_json(&url, &body, &self.api_headers()).await?;
+        let resp = self
+            .fetcher
+            .post_json(&url, &body, &self.api_headers())
+            .await?;
         if !resp.is_success() {
             return Err(SubtitleError::Http {
                 src: SOURCE,
@@ -125,7 +128,10 @@ impl<F: Fetcher> SubtitleProvider for OpenSubtitles<F> {
         // carries series-level external ids); movies key off the film's own id.
         let is_tv = query.media_type == Some(MediaType::Tv);
         if let Some(imdb) = query.imdb_id.as_deref().map(strip_tt) {
-            params.push((if is_tv { "parent_imdb_id" } else { "imdb_id" }.into(), imdb));
+            params.push((
+                if is_tv { "parent_imdb_id" } else { "imdb_id" }.into(),
+                imdb,
+            ));
         } else if let Some(tmdb) = query.tmdb_id.as_deref() {
             params.push((
                 if is_tv { "parent_tmdb_id" } else { "tmdb_id" }.into(),
@@ -172,11 +178,10 @@ impl<F: Fetcher> SubtitleProvider for OpenSubtitles<F> {
         headers.push(("Authorization", auth.as_str()));
 
         let url = format!("{}/api/v1/download", self.config.base_url);
-        let file_id: Value = m
-            .id
-            .parse::<i64>()
-            .map(Value::from)
-            .unwrap_or_else(|_| Value::from(m.id.clone()));
+        let file_id: Value =
+            m.id.parse::<i64>()
+                .map(Value::from)
+                .unwrap_or_else(|_| Value::from(m.id.clone()));
         let body = serde_json::json!({ "file_id": file_id });
         let resp = self.fetcher.post_json(&url, &body, &headers).await?;
         if !resp.is_success() {
@@ -186,13 +191,13 @@ impl<F: Fetcher> SubtitleProvider for OpenSubtitles<F> {
             });
         }
         let json: Value = decode(&resp.body)?;
-        let link = json
-            .get("link")
-            .and_then(Value::as_str)
-            .ok_or_else(|| SubtitleError::Decode {
-                src: SOURCE,
-                detail: "download response missing link".to_string(),
-            })?;
+        let link =
+            json.get("link")
+                .and_then(Value::as_str)
+                .ok_or_else(|| SubtitleError::Decode {
+                    src: SOURCE,
+                    detail: "download response missing link".to_string(),
+                })?;
         // The link is a one-shot CDN URL; fetch the raw subtitle bytes.
         let file = self.fetcher.get(link, &[]).await?;
         if !file.is_success() {

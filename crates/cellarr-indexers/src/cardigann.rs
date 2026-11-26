@@ -1278,7 +1278,10 @@ impl CardigannIndexer {
         for release in releases.iter_mut() {
             // A row with no link but a details url is one the resolver can fetch.
             if release.download_url.trim().is_empty()
-                && release.guid.as_deref().is_some_and(|g| !g.trim().is_empty())
+                && release
+                    .guid
+                    .as_deref()
+                    .is_some_and(|g| !g.trim().is_empty())
             {
                 release.download_url = cellarr_core::DEFERRED_LINK.to_string();
                 deferred += 1;

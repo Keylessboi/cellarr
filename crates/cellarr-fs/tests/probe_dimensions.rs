@@ -47,12 +47,20 @@ fn anything_it_cannot_read_declines_to_answer() {
     assert_eq!(probe_video(&unsupported), None, "an unhandled container");
 
     let truncated = dir.path().join("half.mkv");
-    std::fs::write(&truncated, &std::fs::read(fixture("probe_1080p.mkv")).unwrap()[..40]).unwrap();
+    std::fs::write(
+        &truncated,
+        &std::fs::read(fixture("probe_1080p.mkv")).unwrap()[..40],
+    )
+    .unwrap();
     assert_eq!(probe_video(&truncated), None, "a truncated header");
 
     let garbage = dir.path().join("noise.mp4");
     std::fs::write(&garbage, vec![0xA5u8; 4096]).unwrap();
-    assert_eq!(probe_video(&garbage), None, "bytes that are not a container");
+    assert_eq!(
+        probe_video(&garbage),
+        None,
+        "bytes that are not a container"
+    );
 
     let empty = dir.path().join("empty.mkv");
     std::fs::write(&empty, b"").unwrap();
@@ -75,7 +83,11 @@ fn a_letterboxed_encode_is_graded_by_width_not_height() {
     };
     // Scope and flat framings of the same nominal resolution agree.
     assert_eq!(band(3840, 2160), "2160p", "4K full frame");
-    assert_eq!(band(3840, 1600), "2160p", "4K at 2.40:1 — the case height gets wrong");
+    assert_eq!(
+        band(3840, 1600),
+        "2160p",
+        "4K at 2.40:1 — the case height gets wrong"
+    );
     assert_eq!(band(1920, 1080), "1080p", "1080p full frame");
     assert_eq!(band(1920, 800), "1080p", "1080p at 2.40:1");
     assert_eq!(band(1280, 720), "720p", "720p full frame");

@@ -265,7 +265,11 @@ async fn scan_returns_parsed_and_identified_candidates_and_moves_nothing() {
     std::fs::write(&junk, b"junk-bytes").unwrap();
     // Sidecars are not media files: a subtitle and an nfo alongside the videos
     // must be filtered out of the candidate list, not offered for import.
-    std::fs::write(loose.join("The.Matrix.1999.1080p.BluRay.x264-GROUP.srt"), b"subs").unwrap();
+    std::fs::write(
+        loose.join("The.Matrix.1999.1080p.BluRay.x264-GROUP.srt"),
+        b"subs",
+    )
+    .unwrap();
     std::fs::write(loose.join("movie.nfo"), b"<nfo/>").unwrap();
 
     let indexer = FakeIndexer;
@@ -274,7 +278,10 @@ async fn scan_returns_parsed_and_identified_candidates_and_moves_nothing() {
     let config = runner_config(lib_root.clone());
     let runner = PipelineRunner::new(&indexer, &client, &registry, &db, &clock, &config);
 
-    let candidates = runner.scan_manual_import(Some(&loose), None, false, false).await.unwrap();
+    let candidates = runner
+        .scan_manual_import(Some(&loose), None, false, false)
+        .await
+        .unwrap();
     assert_eq!(
         candidates.len(),
         2,
@@ -282,7 +289,10 @@ async fn scan_returns_parsed_and_identified_candidates_and_moves_nothing() {
     );
 
     // The interactive cap truncates: asking for one candidate returns exactly one.
-    let capped = runner.scan_manual_import(Some(&loose), Some(1), false, false).await.unwrap();
+    let capped = runner
+        .scan_manual_import(Some(&loose), Some(1), false, false)
+        .await
+        .unwrap();
     assert_eq!(capped.len(), 1, "the limit caps the candidate count");
 
     // The identifiable file suggests the seeded movie node, carries its parsed
@@ -942,9 +952,16 @@ async fn rescan_adopts_confident_in_library_files_and_surfaces_the_rest() {
     // A second rescan is idempotent: the now-tracked file is filtered out, so it is
     // neither re-adopted nor errored; only the still-unmatched file remains.
     let again = runner.rescan().await.unwrap();
-    assert_eq!(again.adopted, 0, "an already-tracked file is not re-adopted");
+    assert_eq!(
+        again.adopted, 0,
+        "an already-tracked file is not re-adopted"
+    );
     assert_eq!(again.unmatched, 1, "the junk file still surfaces");
-    assert!(again.errors.is_empty(), "no errors on re-run: {:?}", again.errors);
+    assert!(
+        again.errors.is_empty(),
+        "no errors on re-run: {:?}",
+        again.errors
+    );
     assert_eq!(
         db.media_files()
             .list_for_content(node.id)
@@ -983,7 +1000,11 @@ async fn recorded_unmatched_files_are_skipped_by_the_background_rescan() {
     // First pass: the junk file is unmatched and reported for recording.
     let report = runner.rescan().await.unwrap();
     assert_eq!(report.unmatched, 1);
-    assert_eq!(report.unmatched_paths.len(), 1, "the unplaceable file is reported for recording");
+    assert_eq!(
+        report.unmatched_paths.len(),
+        1,
+        "the unplaceable file is reported for recording"
+    );
 
     // Record it (what the RescanLibrary handler does at the end of the pass).
     db.media_files()
@@ -993,7 +1014,10 @@ async fn recorded_unmatched_files_are_skipped_by_the_background_rescan() {
 
     // Second pass: the recorded file is now SKIPPED — not re-walked, not reported.
     let again = runner.rescan().await.unwrap();
-    assert_eq!(again.unmatched, 0, "a recorded-unmatched file is skipped next pass");
+    assert_eq!(
+        again.unmatched, 0,
+        "a recorded-unmatched file is skipped next pass"
+    );
     assert_eq!(again.unmatched_paths.len(), 0);
 
     // The manual-import screen (skip_unmatched = false) still surfaces it, so a
@@ -1002,7 +1026,11 @@ async fn recorded_unmatched_files_are_skipped_by_the_background_rescan() {
         .scan_manual_import(Some(&lib_root), None, false, false)
         .await
         .unwrap();
-    assert_eq!(manual.len(), 1, "the manual screen still shows the unmatched file");
+    assert_eq!(
+        manual.len(),
+        1,
+        "the manual screen still shows the unmatched file"
+    );
     assert!(junk.exists(), "the file itself is never touched");
 }
 
@@ -1046,7 +1074,11 @@ async fn prune_removes_rows_for_vanished_files_but_respects_mount_safety() {
         "no accessible root => prune is a no-op"
     );
     assert_eq!(
-        db.media_files().list_for_content(node.id).await.unwrap().len(),
+        db.media_files()
+            .list_for_content(node.id)
+            .await
+            .unwrap()
+            .len(),
         1,
         "the row survives when its root is inaccessible"
     );
@@ -1059,7 +1091,11 @@ async fn prune_removes_rows_for_vanished_files_but_respects_mount_safety() {
         "the vanished file's row is pruned"
     );
     assert!(
-        db.media_files().list_for_content(node.id).await.unwrap().is_empty(),
+        db.media_files()
+            .list_for_content(node.id)
+            .await
+            .unwrap()
+            .is_empty(),
         "content is now missing a file"
     );
     // Idempotent: a second prune finds nothing to do.
@@ -1138,27 +1174,46 @@ async fn match_content_lands_a_loose_episode_file_on_its_episode_node() {
     let (series_id, series) = mk(
         ContentKind::Series,
         None,
-        Coordinates::Episode { season: 1, episode: 1, absolute: None },
+        Coordinates::Episode {
+            season: 1,
+            episode: 1,
+            absolute: None,
+        },
     );
     let (season_id, season) = mk(
         ContentKind::Season,
         Some(series_id),
-        Coordinates::Episode { season: 2, episode: 0, absolute: None },
+        Coordinates::Episode {
+            season: 2,
+            episode: 0,
+            absolute: None,
+        },
     );
     let (e5_id, e5) = mk(
         ContentKind::Episode,
         Some(season_id),
-        Coordinates::Episode { season: 2, episode: 5, absolute: None },
+        Coordinates::Episode {
+            season: 2,
+            episode: 5,
+            absolute: None,
+        },
     );
     let (e6_id, e6) = mk(
         ContentKind::Episode,
         Some(season_id),
-        Coordinates::Episode { season: 2, episode: 6, absolute: None },
+        Coordinates::Episode {
+            season: 2,
+            episode: 6,
+            absolute: None,
+        },
     );
     for node in [&series, &season, &e5, &e6] {
         db.content().upsert(node).await.unwrap();
         // Episodes carry the SERIES title as their indexed identity (as expand_series does).
-        db.content().index_title(node.id, "X-Men '97").await.unwrap();
+        db.content()
+            .index_title(node.id, "X-Men '97")
+            .await
+            .unwrap();
     }
 
     // Register a TV module whose lookup returns the series + both episode nodes as
@@ -1172,9 +1227,30 @@ async fn match_content_lands_a_loose_episode_file_on_its_episode_node() {
     registry.register(TvModule::new(
         TvMockLookup {
             candidates: vec![
-                candidate(series_id, Coordinates::Episode { season: 1, episode: 1, absolute: None }),
-                candidate(e5_id, Coordinates::Episode { season: 2, episode: 5, absolute: None }),
-                candidate(e6_id, Coordinates::Episode { season: 2, episode: 6, absolute: None }),
+                candidate(
+                    series_id,
+                    Coordinates::Episode {
+                        season: 1,
+                        episode: 1,
+                        absolute: None,
+                    },
+                ),
+                candidate(
+                    e5_id,
+                    Coordinates::Episode {
+                        season: 2,
+                        episode: 5,
+                        absolute: None,
+                    },
+                ),
+                candidate(
+                    e6_id,
+                    Coordinates::Episode {
+                        season: 2,
+                        episode: 6,
+                        absolute: None,
+                    },
+                ),
             ],
         },
         MockMetadata { movie: None },
@@ -1188,13 +1264,22 @@ async fn match_content_lands_a_loose_episode_file_on_its_episode_node() {
 
     // A loose S02E05 file must resolve to the S02E05 EPISODE node — never the
     // series container (whose placeholder coords S01E01 would fail adoption).
-    let parsed = cellarr_parse::parse_title("X-Men '97 (2024) - S02E05 - Weapon X [WEBRip-1080p].mkv");
+    let parsed =
+        cellarr_parse::parse_title("X-Men '97 (2024) - S02E05 - Weapon X [WEBRip-1080p].mkv");
     let matched = runner.match_content(&parsed).await;
     assert_eq!(
         matched,
         Some(e5_id),
         "the S02E05 file must land on the S02E05 episode node, not the series ({series_id}) or S02E06"
     );
-    assert_ne!(matched, Some(series_id), "must not adopt onto the series container");
-    assert_ne!(matched, Some(e6_id), "must not adopt onto the wrong episode");
+    assert_ne!(
+        matched,
+        Some(series_id),
+        "must not adopt onto the series container"
+    );
+    assert_ne!(
+        matched,
+        Some(e6_id),
+        "must not adopt onto the wrong episode"
+    );
 }

@@ -852,7 +852,7 @@ async fn apply_release_choice(state: &AppState, al: &Album, body: &Value) -> Api
         })
         .map(|p| p.mbid.clone());
     let current = al.release_mbid.clone();
-    match wanted {
+    match wanted.clone() {
         Some(mbid) if Some(&mbid) != current.as_ref() => {
             let catalogue = state
                 .music
@@ -867,10 +867,29 @@ async fn apply_release_choice(state: &AppState, al: &Album, body: &Value) -> Api
             state
                 .db
                 .music()
-                .pin_release(al.content_id, current, any_ok)
+                .pin_release(al.content_id, current.clone(), any_ok)
                 .await?;
         }
         _ => {}
+    }
+    // Lidarr saves each release's monitored flag as sent: a PUT that lists the
+    // pressings with none monitored leaves the album with no tracks to want, and
+    // one that monitors the pinned pressing again restores them.
+    if let Some(list) = body.get("releases").and_then(Value::as_array) {
+        let none_monitored = !list.is_empty() && list.iter().all(|r| r["monitored"] != json!(true));
+        if none_monitored {
+            state
+                .db
+                .music()
+                .set_release_monitored(al.content_id, false)
+                .await?;
+        } else if !al.release_monitored && wanted.is_some() && wanted == current {
+            state
+                .db
+                .music()
+                .set_release_monitored(al.content_id, true)
+                .await?;
+        }
     }
     Ok(())
 }

@@ -245,7 +245,9 @@ pub fn album(
     if let Some(a) = artist {
         v["artist"] = a;
     }
-    if let Some(stats) = stats {
+    // An album with no monitored release has no tracks in Lidarr, so no
+    // statistics: Lidarr serializes them as null.
+    if let Some(stats) = stats.filter(|_| al.release_monitored) {
         v["statistics"] = statistics(stats, false);
     }
     v
@@ -517,6 +519,36 @@ mod tests {
         p.primary_types.sort();
         p.secondary_types.sort();
         assert_eq!(back, p);
+    }
+
+    #[test]
+    fn an_album_with_no_monitored_release_has_no_statistics() {
+        let mut al: Album = serde_json::from_value(json!({
+            "id": 7,
+            "content_id": ContentId::new(),
+            "artist_content_id": ContentId::new(),
+            "mbid": "mb-rg1",
+            "title": "Kid A",
+            "disambiguation": null,
+            "album_type": "Album",
+            "secondary_types": [],
+            "release_date": "2000",
+            "monitored": true,
+            "release_mbid": null,
+            "added_at": "2026-01-01T00:00:00Z",
+            "tracks_fetched_at": null,
+        }))
+        .unwrap();
+        let stats = MusicStats {
+            album_count: 1,
+            track_count: 10,
+            ..MusicStats::default()
+        };
+        assert!(album(&al, 1, None, Some(stats), None, &[])["statistics"].is_object());
+        al.release_monitored = false;
+        assert!(album(&al, 1, None, Some(stats), None, &[])
+            .get("statistics")
+            .is_none());
     }
 
     #[test]

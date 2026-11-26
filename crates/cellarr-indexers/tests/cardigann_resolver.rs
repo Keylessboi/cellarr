@@ -12,12 +12,12 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use cellarr_core::Release;
 use cellarr_core::{Indexer, IndexerId, SearchTerms};
 use cellarr_indexers::cardigann::CardigannIndexer;
 use cellarr_indexers::http::Fetcher;
 use cellarr_indexers::resolve::DownloadResolver;
 use cellarr_indexers::{Definition, ExtTorrentsResolver, HostRateLimiter, IndexerError, Result};
-use cellarr_core::Release;
 
 const DEFINITION: &str = include_str!("fixtures/cardigann_signedtracker.yml");
 const LISTING_HTML: &str = include_str!("fixtures/cardigann_signedtracker.html");
@@ -115,7 +115,6 @@ fn indexer(fetcher: Arc<SignedTrackerFetcher>) -> CardigannIndexer {
         "signedtracker.example".to_string(),
     ])))
 }
-
 
 /// Search, then resolve exactly the rows the engine deferred — what the pipeline
 /// does, except the pipeline only ever resolves the ONE release it chose to grab.

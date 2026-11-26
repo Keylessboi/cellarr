@@ -489,7 +489,9 @@ fn an_unreadable_quality_and_an_excluded_quality_reject_for_different_reasons() 
             quality, "WEBDL-1080p",
             "the refused quality must be the one that was read"
         ),
-        other => panic!("a quality the profile excludes must reject as QualityNotAllowed, got {other:?}"),
+        other => {
+            panic!("a quality the profile excludes must reject as QualityNotAllowed, got {other:?}")
+        }
     }
 
     // No source and no resolution: nothing to compare against the profile at all.

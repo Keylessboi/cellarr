@@ -1225,6 +1225,7 @@ impl MusicRepo {
         for row in sqlx::query(&pq("SELECT al.artist_content_id AS k, CAST(sum(g.n) AS BIGINT) AS n
              FROM (SELECT album_content_id, count(*) AS n FROM track_meta GROUP BY album_content_id) g
              JOIN album_meta al ON al.content_id = g.album_content_id
+             WHERE al.release_monitored = 1
              GROUP BY al.artist_content_id"))
         .fetch_all(&self.pool)
         .await?
@@ -1263,7 +1264,7 @@ impl MusicRepo {
                 .join(",");
             let queries = [
                 format!("SELECT artist_content_id AS k, count(*) AS n FROM album_meta WHERE artist_content_id IN ({marks}) GROUP BY artist_content_id"),
-                format!("SELECT al.artist_content_id AS k, count(*) AS n FROM track_meta t JOIN album_meta al ON al.content_id = t.album_content_id WHERE al.artist_content_id IN ({marks}) GROUP BY al.artist_content_id"),
+                format!("SELECT al.artist_content_id AS k, count(*) AS n FROM track_meta t JOIN album_meta al ON al.content_id = t.album_content_id WHERE al.artist_content_id IN ({marks}) AND al.release_monitored = 1 GROUP BY al.artist_content_id"),
                 format!("SELECT tf.artist_content_id AS k, count(*) AS n, CAST(COALESCE(sum(mf.size), 0) AS BIGINT) AS bytes FROM track_file tf JOIN media_file mf ON mf.id = tf.media_file_id WHERE tf.artist_content_id IN ({marks}) GROUP BY tf.artist_content_id"),
             ];
             for (i, sql) in queries.iter().enumerate() {

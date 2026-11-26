@@ -1494,7 +1494,9 @@ mod tests {
         // a download that never leaves this state (Soulseek, stuck at 100%).
         assert_eq!(s.content_path.as_deref(), Some("/downloads/Kid A"));
         // A running download has no path yet.
-        let s = status_of(&json!({"status": "downloading", "size": 100.0, "sizeleft": 50.0, "outputPath": "/downloads/x"}));
+        let s = status_of(
+            &json!({"status": "downloading", "size": 100.0, "sizeleft": 50.0, "outputPath": "/downloads/x"}),
+        );
         assert_eq!(s.content_path, None);
         // The sidecar could not stage it: cellarr takes the download folder.
         let s = status_of(&json!({

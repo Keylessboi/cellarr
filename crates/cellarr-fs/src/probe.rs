@@ -238,9 +238,10 @@ fn walk_boxes(file: &mut File, start: u64, end: u64, depth: u32, best: &mut Opti
             b"moov" | b"trak" => walk_boxes(file, body, body_end, depth + 1, best),
             b"tkhd" => {
                 if let Some(probe) = read_tkhd(file, body, body_end) {
-                    if best.is_none_or(|b| u64::from(probe.width) * u64::from(probe.height)
-                        > u64::from(b.width) * u64::from(b.height))
-                    {
+                    if best.is_none_or(|b| {
+                        u64::from(probe.width) * u64::from(probe.height)
+                            > u64::from(b.width) * u64::from(b.height)
+                    }) {
                         *best = Some(probe);
                     }
                 }

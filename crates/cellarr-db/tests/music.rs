@@ -598,6 +598,50 @@ async fn statistics_count_albums_tracks_files_and_bytes() {
 }
 
 #[tokio::test]
+async fn an_album_with_no_monitored_release_adds_no_tracks_to_its_artist() {
+    let db = common::test_database().await;
+    let lib = music_library(&db).await;
+    let a = db
+        .music()
+        .add_artist(lib, artist("Radiohead", "mb-a1"))
+        .await
+        .unwrap();
+    let albums = db
+        .music()
+        .upsert_albums(
+            lib,
+            a.content_id,
+            vec![
+                album("OK Computer", "mb-rg1", "1997"),
+                album("Kid A", "mb-rg2", "2000"),
+            ],
+        )
+        .await
+        .unwrap();
+    for al in &albums {
+        db.music()
+            .set_album_tracks(
+                lib,
+                al.content_id,
+                None,
+                vec![track(1, 1, "One"), track(1, 2, "Two")],
+            )
+            .await
+            .unwrap();
+    }
+    db.music()
+        .set_release_monitored(albums[1].content_id, false)
+        .await
+        .unwrap();
+
+    let all = db.music().artist_stats().await.unwrap();
+    let some = db.music().artist_stats_for(&[a.content_id]).await.unwrap();
+    for s in [all[&a.content_id], some[&a.content_id]] {
+        assert_eq!((s.album_count, s.track_count), (2, 2));
+    }
+}
+
+#[tokio::test]
 async fn deleting_an_artist_removes_the_subtree_and_reports_its_files() {
     let db = common::test_database().await;
     let lib = music_library(&db).await;
