@@ -148,6 +148,10 @@ pub trait MusicCatalogue: Send + Sync {
     async fn refresh_artist(&self, artist: ContentId) -> Result<RefreshReport, CatalogueError>;
     /// Make sure an album has its track list, fetching it if it has none.
     async fn ensure_tracks(&self, album: ContentId) -> Result<Vec<Track>, CatalogueError>;
+    /// Make sure an album has its pressings stored (and, if it has no track list
+    /// yet, that list too), fetching them from the metadata source when it has
+    /// none. Does nothing for an album whose pressings are already stored.
+    async fn ensure_releases(&self, album: ContentId) -> Result<(), CatalogueError>;
     /// Pin a pressing (`release_mbid`), switch the album's track list to it, and
     /// say whether any other pressing is acceptable too.
     async fn select_release(
@@ -461,6 +465,28 @@ impl<M: MusicMeta + 'static> MusicCatalogue for MusicSync<M> {
                 tracks_of(release),
             )
             .await?)
+    }
+
+    async fn ensure_releases(&self, album: ContentId) -> Result<(), CatalogueError> {
+        let music = self.db.music();
+        let Some(stored) = music.album_by_content(album).await? else {
+            return Err(CatalogueError::NotFound(format!("no album {album}")));
+        };
+        if music
+            .releases_for_albums(&[album])
+            .await?
+            .get(&album)
+            .is_some_and(|r| !r.is_empty())
+        {
+            return Ok(());
+        }
+        if stored.tracks_fetched_at.is_none() {
+            // Fetching the track list stores the pressings on the way.
+            self.ensure_tracks(album).await?;
+            return Ok(());
+        }
+        let releases = self.mb.releases(&stored.mbid).await?;
+        self.store_releases(album, &releases).await
     }
 
     async fn select_release(
