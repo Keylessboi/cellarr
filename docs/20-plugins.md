@@ -147,6 +147,93 @@ limit, and extra file types (covers, cue sheets). RSS does not apply to Soulseek
 Tests: `crates/cellarr-download/tests/slskd_api.rs` (a fake slskd over real HTTP),
 `crates/cellarr-jobs/tests/slskd_e2e.rs` (search, grab, status and import through the pipeline).
 
+## Native Apple Music (AppleMusicarr)
+
+The AppleMusicarr plugin no longer needs the sidecar either. The kinds `applemusicarr`,
+`applemusicarrindexer` and `applemusicarrdownloadclient` (the last two are what a migrated
+Lidarr row carries, being the plugin's implementation names lowercased) are built natively:
+cellarr searches the Apple Music catalogue itself and hands albums to the existing
+`applemusic-decryptor` service, as both the indexer and the download client.
+
+**DRM decryption stays in the decryptor service.** cellarr only reads the public catalogue and
+drives the decryptor's job API. It does not fetch, decrypt or tag audio.
+
+A row builds natively when it has what its half needs and does not say `"native": false`:
+
+| Side | Needs |
+|---|---|
+| indexer | `developerToken` |
+| download client | `developerToken`, `musicUserToken`, an http(s) `decryptorUrl` |
+
+Any other row (and a row on a build without the native kind) takes the sidecar plugin path
+described above, unchanged. The field names are the plugin's own, so a migrated row works as it
+is; PascalCase spellings are accepted too.
+
+| Setting | Side | Default | Meaning |
+|---|---|---|---|
+| `developerToken` | both | required | MusicKit developer token (a JWT). Secret |
+| `musicUserToken` | client (indexer: web-player tokens only) | required on the client | Sent to the decryptor with every album. Secret |
+| `storefront` | both | `us` | two-letter storefront |
+| `baseUrl` | indexer/client | `https://api.music.apple.com/v1/` | API base; the default is swapped for `amp-api.music.apple.com` when the token is the web player's (`iss` = `AMPWebPlay`), with its `Origin`/`Referer` and `media-user-token` cookie |
+| `earlyReleaseLimit` | indexer | 14 | ignore albums releasing further ahead (days); `null` = no window |
+| `searchLimit` | indexer | 25 | albums per query, 1-100 |
+| `decryptorUrl` | client | required | e.g. `http://applemusic-decryptor.lidarr.svc.cluster.local:8080` |
+| `downloadPath` | client | `/data/torrents/apple` | the decryptor's `OUTPUT_DIR` volume, as cellarr sees it |
+| `preferredQuality` | client | AAC 256 | only for a link that names no quality |
+| `decryptorTimeoutMinutes` | client | 180 | an unfinished job older than this fails |
+
+How it works (`crates/cellarr-download/src/applemusic.rs`):
+
+- **Search.** `GET {api}/catalog/{storefront}/search?term=..&types=albums&limit=..` with the
+  developer token as a bearer. Tiers: `artist album`, then `artist`, then `album`; the first
+  tier that yields a release wins. Only albums whose title equals the wanted one count, after
+  folding case, accents and punctuation and dropping Apple's ` - Single`/` - EP` suffix.
+  Containment is deliberately not used, so a remix of the album is not offered as the album.
+  No match is a valid empty answer. A rejected token is an error (not "no results") and its
+  text diagnoses the token (not a JWT, truncated, expired) without repeating it.
+- **Releases.** One per quality: `Artist - Album [AAC] [256]`, `[ALAC] [LOSSLESS]` and
+  `[AAC] [VBR] [ATMOS]` (the last only unless Apple lists the album's capabilities without
+  Atmos; it parses as AAC VBR, which is what the file reads back as). `download_url` is the
+  plugin's `applemusicarr://album/<id>?quality=<aac256|alac|atmos>`, the guid
+  `applemusicarr:<id>:<quality>`; the size is estimated from the duration and the tier's
+  nominal bitrate.
+- **Routing.** An `applemusicarr://` release is routed like a plugin protocol
+  (`AppleMusicarrDownloadProtocol`): only an Apple Music client takes it.
+- **Grab.** `GET {api}/catalog/{storefront}/albums/{id}?include=tracks` for the track list, then
+  `POST {decryptor}/v1/download` with `albumId`, `artist`, `album`, `storefront`, `quality`,
+  `musicUserToken`, `directory` (`Artist/Album`, sanitised, relative to the decryptor's
+  `OUTPUT_DIR`) and `tracks[{id,title,trackNumber,discNumber}]`; the answer is `{job_id}`. The
+  download id carries the job id, so status survives a restart.
+- **Status.** `GET {decryptor}/v1/job/{id}`: `queued` is Queued, `running` Downloading (progress
+  is its percent), `completed` is Completed with the content path `<downloadPath>/<directory
+  the job reports>` (a directory with `..` or a root is refused), `failed`/`cancelled` is Failed
+  with the job's error. A completed job's partial-success note is logged and the album is
+  imported as it is. A job the decryptor has forgotten (it keeps jobs in memory) is not found.
+- **Removal.** A job that is still running is cancelled (`DELETE /v1/job/{id}`). With "delete
+  data" only the files the job reported are deleted, then the folder if empty, never anything
+  outside the download root.
+- **Lidarr face.** `/downloadclient/schema` and `/indexer/schema` list a native `AppleMusicarr`
+  template (protocol `AppleMusicarrDownloadProtocol`) unless a plugin already offers one.
+- **Migration.** A Lidarr AppleMusicarr row keeps the kind the plugin named itself; its
+  settings are carried verbatim (PascalCase spellings normalised, the decryptor URL's trailing
+  slash dropped).
+- **Secrets.** Both tokens are redacted in `Debug` and never appear in an error message or log.
+
+Not covered compared with the plugin: signing a developer token from a MusicKit `.p8` key
+(`privateKeyPath`/`keyId`/`teamId`; such a row has no `developerToken` and takes the plugin
+path), the `APPLEMUSICARR_*` environment-variable fallbacks, sharing one row's tokens with the
+other half (the client row needs its own `developerToken` and `musicUserToken`), the plugin's
+Lidarr-side Test buttons, the file-name quality marker the plugin used for Lidarr's custom
+formats, and deleting the whole album folder on removal (cellarr deletes only the files the job
+reported). Two deliberate differences: a search whose every query failed (not auth) is an
+error, not an empty result; and a bad-looking token is only diagnosed after Apple refuses it,
+rather than blocking the request.
+
+Tests: `crates/cellarr-download/tests/applemusic_api.rs` (a fake catalogue and a fake decryptor
+over real HTTP; they accept any token and record what they were sent),
+`crates/cellarr-jobs/tests/applemusic_e2e.rs` (search, grab, status and import through the
+pipeline into a temp library). Nothing in the tests contacts Apple or a real decryptor.
+
 ## Tests
 
 - `crates/cellarr-plugins/tests/host.rs`: the two example WASM plugins, loaded and run (search,
