@@ -45,6 +45,6 @@ pub use repos::{
     ContentRepo, DecisionLogRepo, GrabRepo, HistoryRepo, ImportListRepo, ManagedConfigRepo,
     ManagedEntity, MediaFileRepo, MusicHistoryFilter, MusicHistoryRow, MusicRepo, MusicStats,
     NewAlbum, NewArtist, NewRelease, NewTrack, PendingRelease, PendingReleaseRepo, ProfileRepo,
-    TagRepo,
+    RootFolderDefaults, RootFolderDefaultsRepo, TagRepo,
 };
 pub use writer::WriterHandle;

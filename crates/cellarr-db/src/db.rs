@@ -404,6 +404,12 @@ impl Database {
         MusicRepo::new(self.pool.clone(), self.writer.clone())
     }
 
+    /// The per-root-folder defaults for new artists (Lidarr's `RootFolders`).
+    #[must_use]
+    pub fn root_folder_defaults(&self) -> crate::repos::RootFolderDefaultsRepo {
+        crate::repos::RootFolderDefaultsRepo::new(self.pool.clone(), self.writer.clone())
+    }
+
     /// The subtitle repository.
     #[must_use]
     pub fn subtitles(&self) -> SubtitleRepo {

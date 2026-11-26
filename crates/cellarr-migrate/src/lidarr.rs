@@ -328,6 +328,50 @@ fn artist_row(r: &SqliteRow) -> ArtistRow {
     }
 }
 
+/// An enum column Lidarr stores as an integer (or, tolerated, as its name).
+fn enum_name(row: &SqliteRow, col: &str, names: &[&str], default: &str) -> String {
+    if let Ok(i) = row.try_get::<i64, _>(col) {
+        return usize::try_from(i)
+            .ok()
+            .and_then(|i| names.get(i))
+            .map_or_else(|| default.to_string(), |n| (*n).to_string());
+    }
+    opt_text(row, col)
+        .map(|t| t.to_ascii_lowercase())
+        .filter(|t| names.contains(&t.as_str()))
+        .unwrap_or_else(|| default.to_string())
+}
+
+/// One `RootFolders` row as the defaults cellarr keeps for it.
+fn root_folder_defaults(
+    row: &SqliteRow,
+    path: String,
+    profile_ids: &HashMap<i64, QualityProfileId>,
+) -> cellarr_db::RootFolderDefaults {
+    // Lidarr's `MonitorTypes` and `NewItemMonitorTypes`, by their stored integers.
+    const MONITOR: [&str; 7] = [
+        "all", "future", "missing", "existing", "latest", "first", "none",
+    ];
+    const NEW_ITEM: [&str; 3] = ["all", "none", "new"];
+    cellarr_db::RootFolderDefaults {
+        name: opt_text(row, "Name").unwrap_or_default(),
+        path,
+        quality_profile: row
+            .try_get::<i64, _>("DefaultQualityProfileId")
+            .ok()
+            .and_then(|id| profile_ids.get(&id).copied()),
+        metadata_profile_id: row.try_get("DefaultMetadataProfileId").unwrap_or(1),
+        monitor_option: enum_name(row, "DefaultMonitorOption", &MONITOR, "all"),
+        new_item_monitor_option: enum_name(row, "DefaultNewItemMonitorOption", &NEW_ITEM, "all"),
+        tags: parse_json(opt_text(row, "DefaultTags"))
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_i64)
+            .collect(),
+    }
+}
+
 /// Import everything music-related from a Lidarr database into `db`.
 pub(crate) async fn import(pool: &SqlitePool, db: &Database) -> Result<MusicReport> {
     let ranking = QualityRanking::default();
@@ -375,6 +419,21 @@ pub(crate) async fn import(pool: &SqlitePool, db: &Database) -> Result<MusicRepo
             .unwrap_or_else(QualityProfileId::new),
     };
     db.config().upsert_library(&library).await?;
+
+    // --- root folder defaults --------------------------------------------------
+    // What a root folder offers a new artist (profiles, monitor options, tags).
+    // Older Lidarr schemas lack some columns, so each is read tolerantly.
+    for row in sqlx::query("SELECT * FROM RootFolders ORDER BY Id ASC")
+        .fetch_all(pool)
+        .await?
+    {
+        let Ok(path) = row.try_get::<String, _>("Path") else {
+            continue;
+        };
+        db.root_folder_defaults()
+            .upsert(root_folder_defaults(&row, path, &profile_ids))
+            .await?;
+    }
 
     // --- artists and their albums ---------------------------------------------
     let artists: Vec<ArtistRow> = sqlx::query(

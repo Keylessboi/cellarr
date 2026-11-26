@@ -1816,8 +1816,39 @@ pub(crate) async fn create_tag(
 }
 
 pub(crate) async fn root_folders(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {
+    let db = fs.state.db.clone();
     let Json(base) = shim::root_folders(State(fs)).await?;
-    Ok(Json(base.into_iter().map(decorate_root).collect()))
+    // The defaults a root folder offers a new artist, as the migration kept them.
+    let defaults = db.root_folder_defaults().list().await?;
+    let seqs = db.music().profile_seqs().await?;
+    Ok(Json(
+        base.into_iter()
+            .map(|mut root| {
+                let found = root["path"]
+                    .as_str()
+                    .and_then(|p| defaults.iter().find(|d| d.path == p));
+                if let (Some(d), Some(o)) = (found, root.as_object_mut()) {
+                    if !d.name.is_empty() {
+                        o.insert("name".into(), json!(d.name));
+                    }
+                    if let Some(seq) = d.quality_profile.and_then(|p| seqs.get(&p)) {
+                        o.insert("defaultQualityProfileId".into(), json!(seq));
+                    }
+                    o.insert(
+                        "defaultMetadataProfileId".into(),
+                        json!(d.metadata_profile_id),
+                    );
+                    o.insert("defaultMonitorOption".into(), json!(d.monitor_option));
+                    o.insert(
+                        "defaultNewItemMonitorOption".into(),
+                        json!(d.new_item_monitor_option),
+                    );
+                    o.insert("defaultTags".into(), json!(d.tags));
+                }
+                decorate_root(root)
+            })
+            .collect(),
+    ))
 }
 
 pub(crate) async fn diskspace(State(fs): State<FaceState>) -> ApiResult<Json<Vec<Value>>> {

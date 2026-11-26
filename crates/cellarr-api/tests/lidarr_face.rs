@@ -561,3 +561,60 @@ async fn rename_files_is_accepted_and_completes_as_a_no_op() {
         "genuinely unknown commands still 400"
     );
 }
+
+#[tokio::test]
+async fn a_root_folder_reports_its_imported_defaults() {
+    use cellarr_core::{Library, LibraryId, MediaType};
+    let l = start(AuthConfig::disabled()).await;
+    let profile = l.flac_profile().await;
+    let uuid = l
+        .state
+        .db
+        .music()
+        .profile_by_seq(profile)
+        .await
+        .unwrap()
+        .expect("profile has an id");
+    let library = Library {
+        id: LibraryId::new(),
+        media_type: MediaType::Music,
+        name: "Music".into(),
+        root_folders: vec!["/data/media/music".into()],
+        default_quality_profile: uuid,
+    };
+    l.state.db.config().upsert_library(&library).await.unwrap();
+
+    // Not imported yet: Lidarr's own unset defaults.
+    let before = l.get("/rootfolder").await;
+    assert_eq!(before[0]["defaultQualityProfileId"], 0);
+
+    l.state
+        .db
+        .root_folder_defaults()
+        .upsert(cellarr_db::RootFolderDefaults {
+            path: "/data/media/music".into(),
+            name: "Music".into(),
+            quality_profile: Some(uuid),
+            metadata_profile_id: 1,
+            monitor_option: "missing".into(),
+            new_item_monitor_option: "none".into(),
+            tags: vec![3],
+        })
+        .await
+        .unwrap();
+    let roots = l.get("/rootfolder").await;
+    let root = roots
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["path"] == "/data/media/music")
+        .unwrap();
+    assert_eq!(root["defaultQualityProfileId"], profile);
+    assert_eq!(root["defaultMetadataProfileId"], 1);
+    assert_eq!(root["defaultMonitorOption"], "missing");
+    assert_eq!(root["defaultNewItemMonitorOption"], "none");
+    assert_eq!(root["defaultTags"], json!([3]));
+    assert_eq!(root["name"], "Music");
+    let one = l.get(&format!("/rootfolder/{}", root["id"])).await;
+    assert_eq!(one["defaultQualityProfileId"], profile);
+}

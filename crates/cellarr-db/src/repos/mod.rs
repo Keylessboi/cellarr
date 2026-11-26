@@ -23,6 +23,7 @@ mod media_file;
 mod music;
 mod pending_release;
 mod profile;
+mod root_folder_defaults;
 mod subtitle;
 mod tag;
 
@@ -43,5 +44,6 @@ pub use music::{
 };
 pub use pending_release::{PendingRelease, PendingReleaseRepo};
 pub use profile::ProfileRepo;
+pub use root_folder_defaults::{RootFolderDefaults, RootFolderDefaultsRepo};
 pub use subtitle::SubtitleRepo;
 pub use tag::TagRepo;

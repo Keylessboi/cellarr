@@ -19,7 +19,7 @@ async fn lidarr_db(dir: &std::path::Path) -> String {
         .await
         .unwrap();
     let statements = [
-        "CREATE TABLE RootFolders (Id INTEGER PRIMARY KEY, Path TEXT)",
+        "CREATE TABLE RootFolders (Id INTEGER PRIMARY KEY, Path TEXT, Name TEXT, DefaultMetadataProfileId INTEGER, DefaultQualityProfileId INTEGER, DefaultMonitorOption INTEGER, DefaultNewItemMonitorOption INTEGER, DefaultTags TEXT)",
         "CREATE TABLE Indexers (Id INTEGER PRIMARY KEY, Name TEXT, Implementation TEXT, Settings TEXT, ConfigContract TEXT, EnableRss INTEGER, EnableAutomaticSearch INTEGER, EnableInteractiveSearch INTEGER, Priority INTEGER, Tags TEXT, DownloadClientId INTEGER)",
         "CREATE TABLE DownloadClients (Id INTEGER PRIMARY KEY, Enable INTEGER, Name TEXT, Implementation TEXT, Settings TEXT, ConfigContract TEXT, Priority INTEGER, RemoveCompletedDownloads INTEGER, RemoveFailedDownloads INTEGER, Tags TEXT)",
         "CREATE TABLE RemotePathMappings (Id INTEGER PRIMARY KEY, Host TEXT, RemotePath TEXT, LocalPath TEXT)",
@@ -34,7 +34,7 @@ async fn lidarr_db(dir: &std::path::Path) -> String {
         "CREATE TABLE Blocklist (Id INTEGER PRIMARY KEY, ArtistId INTEGER, AlbumIds TEXT, SourceTitle TEXT, Quality TEXT, Date TEXT, PublishedDate TEXT, Size INTEGER, Protocol TEXT, Indexer TEXT, Message TEXT, TorrentInfoHash TEXT, IndexerFlags INTEGER)",
         "CREATE TABLE History (Id INTEGER PRIMARY KEY, AlbumId INTEGER, ArtistId INTEGER, TrackId INTEGER, SourceTitle TEXT, Quality TEXT, Date TEXT, EventType INTEGER, Data TEXT, DownloadId TEXT)",
         // Config
-        "INSERT INTO RootFolders VALUES (1, '/data/media/music')",
+        "INSERT INTO RootFolders VALUES (1, '/data/media/music', 'Music', 1, 4, 2, 1, '[3]')",
         "INSERT INTO RemotePathMappings VALUES (1, 'qbit', '/downloads/', '/data/torrents/')",
         r#"INSERT INTO Indexers VALUES (1, 'Prowlarr TPB', 'Torznab', '{"baseUrl":"http://prowlarr/1","apiKey":"k","categories":[3000]}', 'TorznabSettings', 1, 1, 1, 25, '[]', 0)"#,
         r#"INSERT INTO DownloadClients VALUES (1, 1, 'qBittorrent', 'QBittorrent', '{"host":"qbit","port":8080,"musicCategory":"music"}', 'QBittorrentSettings', 1, 1, 1, '[]')"#,
@@ -409,4 +409,25 @@ async fn history_is_carried_over_row_for_row() {
         .unwrap();
     assert_eq!(total, 1);
     assert!(rows[0].id.is_some(), "Lidarr's id is kept");
+}
+
+#[tokio::test]
+async fn a_root_folders_defaults_are_imported_with_the_profile_id_kept() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = lidarr_db(dir.path()).await;
+    let db = dest(dir.path()).await;
+    import(&[&src], &db).await.unwrap();
+
+    let defaults = db.root_folder_defaults().list().await.unwrap();
+    assert_eq!(defaults.len(), 1);
+    let d = &defaults[0];
+    assert_eq!(d.path, "/data/media/music");
+    assert_eq!(d.name, "Music");
+    assert_eq!(d.metadata_profile_id, 1);
+    assert_eq!(d.monitor_option, "missing");
+    assert_eq!(d.new_item_monitor_option, "none");
+    assert_eq!(d.tags, vec![3]);
+    // Lidarr's quality profile 4 is still 4 in cellarr.
+    let profile = d.quality_profile.expect("profile resolved");
+    assert_eq!(db.music().profile_seq(profile).await.unwrap(), 4);
 }
