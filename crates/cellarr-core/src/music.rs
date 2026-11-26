@@ -158,6 +158,10 @@ pub struct Album {
     /// Whether any pressing will do (`false`: only the pinned `release_mbid`).
     #[serde(default = "yes")]
     pub any_release_ok: bool,
+    /// Whether the pinned release is monitored. Lidarr lets an album have no
+    /// monitored release; such an album has no tracks to want.
+    #[serde(default = "yes")]
+    pub release_monitored: bool,
 }
 
 fn yes() -> bool {

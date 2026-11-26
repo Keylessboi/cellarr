@@ -467,6 +467,71 @@ async fn lidarrs_wanted_list_keeps_partial_albums_and_skips_albums_without_track
 }
 
 #[tokio::test]
+async fn an_album_whose_release_is_unmonitored_is_not_wanted_but_is_still_swept() {
+    let db = common::test_database().await;
+    let lib = music_library(&db).await;
+    let a = db
+        .music()
+        .add_artist(lib, artist("Radiohead", "mb-a1"))
+        .await
+        .unwrap();
+    let albums = db
+        .music()
+        .upsert_albums(
+            lib,
+            a.content_id,
+            vec![album("Chlorine", "mb-rg1", "2020-01-01")],
+        )
+        .await
+        .unwrap();
+    db.music()
+        .set_album_tracks(
+            lib,
+            albums[0].content_id,
+            Some("rel-1".into()),
+            vec![track(1, 1, "One"), track(1, 2, "Two")],
+        )
+        .await
+        .unwrap();
+    let wanted = || async {
+        db.music()
+            .wanted_albums("2026-01-01", AlbumSort::Id, true, 0, 10)
+            .await
+            .unwrap()
+            .0
+    };
+    assert_eq!(wanted().await, 1);
+
+    // Lidarr: no monitored release means no tracks, so nothing to want ...
+    db.music()
+        .set_release_monitored(albums[0].content_id, false)
+        .await
+        .unwrap();
+    assert_eq!(wanted().await, 0);
+    let page = db
+        .music()
+        .wanted_albums("2026-01-01", AlbumSort::Id, true, 0, 10)
+        .await
+        .unwrap()
+        .1;
+    assert!(page.is_empty());
+    // ... while the search sweep still sees an album with no file.
+    let (plain, _) = db
+        .music()
+        .missing_albums("2026-01-01", AlbumSort::Id, true, 0, 10)
+        .await
+        .unwrap();
+    assert_eq!(plain, 1);
+
+    // Choosing a release monitors it again.
+    db.music()
+        .pin_release(albums[0].content_id, Some("rel-1".into()), true)
+        .await
+        .unwrap();
+    assert_eq!(wanted().await, 1);
+}
+
+#[tokio::test]
 async fn statistics_count_albums_tracks_files_and_bytes() {
     let db = common::test_database().await;
     let lib = music_library(&db).await;

@@ -342,6 +342,41 @@ async fn every_pressing_keeps_its_lidarr_id_and_the_pin_survives() {
 }
 
 #[tokio::test]
+async fn an_album_with_no_monitored_release_is_imported_unwanted() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = lidarr_db(dir.path()).await;
+    // Radiohead gets a monitored album whose only release is unmonitored.
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(SqliteConnectOptions::from_str(&format!("sqlite://{src}")).unwrap())
+        .await
+        .unwrap();
+    for sql in [
+        r#"INSERT INTO Albums VALUES (30004, 10, 'rg-chlorine', '[]', 'Chlorine', '', '', '2020-01-01 00:00:00', '[]', '[]', '[]', 'Album', '[]', '{}', 'chlorine', 0, 1, 1, NULL, '2025-06-01 12:00:00', '{}', NULL)"#,
+        "INSERT INTO AlbumReleases VALUES (505, 30004, 'rel-chlorine', 'Chlorine', 'Official', 0, '[]', '', '[]', NULL, '[]', 2, 0)",
+        "INSERT INTO Tracks VALUES (700007, 'ft7', 'rec7', 505, 10, '1', 1, 'One', 100000, 0, '{}', 1, 0)",
+        "INSERT INTO Tracks VALUES (700008, 'ft8', 'rec8', 505, 10, '2', 2, 'Two', 100000, 0, '{}', 1, 0)",
+    ] {
+        sqlx::query(sql).execute(&pool).await.unwrap();
+    }
+    pool.close().await;
+    let db = dest(dir.path()).await;
+    import(&[&src], &db).await.unwrap();
+    let music = db.music();
+    let chlorine = music.album(30004).await.unwrap().unwrap();
+    assert!(!chlorine.release_monitored);
+    assert!(music.album(30001).await.unwrap().unwrap().release_monitored);
+    let (_, wanted) = music
+        .wanted_albums("2026-01-01", cellarr_db::AlbumSort::Id, true, 0, 50)
+        .await
+        .unwrap();
+    assert!(
+        !wanted.iter().any(|a| a.id == 30004),
+        "Lidarr does not want it"
+    );
+}
+
+#[tokio::test]
 async fn download_clients_keep_their_own_category_and_plugin_implementations_carry_over() {
     let dir = tempfile::tempdir().unwrap();
     let src = lidarr_db(dir.path()).await;
