@@ -322,7 +322,10 @@ impl ConfiguredDownloadClient {
             // Native Soulseek, when the row names slskd's URL and key. A row the
             // native client cannot be built from (or one that says `native: false`)
             // falls through to the Tubifarry plugin in the sidecar below.
-            "slskd" if SlskdSettings::from_json(&config.settings).is_ok() => {
+            other
+                if cellarr_download::slskd::is_slskd_kind(other)
+                    && SlskdSettings::from_json(&config.settings).is_ok() =>
+            {
                 let settings =
                     SlskdSettings::from_json(&config.settings).map_err(&misconfigured)?;
                 Ok(Self::Slskd(SlskdClient::new(name, settings)))
@@ -747,6 +750,16 @@ mod tests {
         assert!(matches!(c, ConfiguredDownloadClient::Slskd(_)));
         let t = c.traits(&config("slskd", json!({})));
         assert_eq!(t.sidecar_wire.as_deref(), Some("SoulseekDownloadProtocol"));
+    }
+
+    #[test]
+    fn a_tubifarry_class_name_row_builds_the_native_client() {
+        let c = ConfiguredDownloadClient::from_config(&config(
+            "slskdclient",
+            json!({"baseUrl": "http://slskd:5030", "apiKey": "k"}),
+        ))
+        .unwrap();
+        assert!(matches!(c, ConfiguredDownloadClient::Slskd(_)));
     }
 
     #[test]

@@ -248,6 +248,28 @@ impl SlskdTarget {
     }
 }
 
+/// Whether a config kind is Soulseek: the short name cellarr's own face uses
+/// (`slskd`) or the plugin's class names a Lidarr database carries
+/// (`SlskdClient` for the download client, `SlskdIndexer` for the indexer).
+#[must_use]
+pub fn is_slskd_kind(kind: &str) -> bool {
+    matches!(
+        kind.to_ascii_lowercase().as_str(),
+        "slskd" | "slskdclient" | "slskdindexer"
+    )
+}
+
+/// The v3 `implementation` string for a Soulseek kind: the plugin's own class
+/// name when the kind carries it, so a migrated row reports what production does.
+#[must_use]
+pub fn implementation_name(kind: &str) -> &'static str {
+    match kind.to_ascii_lowercase().as_str() {
+        "slskdclient" => "SlskdClient",
+        "slskdindexer" => "SlskdIndexer",
+        _ => "Slskd",
+    }
+}
+
 /// Whether a release's link is a Soulseek one.
 #[must_use]
 pub fn is_slskd_url(url: &str) -> bool {

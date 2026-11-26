@@ -205,7 +205,10 @@ fn category_of(settings: &serde_json::Value) -> Option<String> {
 /// same name resolves to the native client when the row has a URL and key, and to
 /// the sidecar plugin when it does not. Everything else in the row is kept.
 fn native_slskd(implementation: &str, settings: serde_json::Value) -> serde_json::Value {
-    if !implementation.eq_ignore_ascii_case("slskd") {
+    if !matches!(
+        implementation.to_ascii_lowercase().as_str(),
+        "slskd" | "slskdclient" | "slskdindexer"
+    ) {
         return settings;
     }
     let serde_json::Value::Object(mut map) = settings else {

@@ -2606,12 +2606,21 @@ pub(crate) fn v3_indexer(ix: &cellarr_core::IndexerConfig) -> Value {
         .filter(|e| e.kind == cellarr_plugins::catalog::EntryKind::Indexer)
     {
         p.name
-    } else if ix.kind.eq_ignore_ascii_case("slskd") {
-        "Slskd".to_string()
+    } else if cellarr_download::slskd::is_slskd_kind(&ix.kind) {
+        cellarr_download::slskd::implementation_name(&ix.kind).to_string()
     } else if cellarr_download::applemusic::is_apple_kind(&ix.kind) {
         apple_implementation(&ix.kind)
     } else {
         "Torznab".to_string()
+    };
+    // A native Soulseek / Apple Music indexer reports its plugin's own protocol,
+    // as the Lidarr plugin row it replaces does, not torrent.
+    let protocol = if cellarr_download::slskd::is_slskd_kind(&ix.kind) {
+        cellarr_download::slskd::SOULSEEK_PROTOCOL
+    } else if cellarr_download::applemusic::is_apple_kind(&ix.kind) {
+        cellarr_download::applemusic::APPLE_PROTOCOL
+    } else {
+        protocol_str(ix.protocol)
     };
     json!({
         "id": ix_numeric_id(ix.id),
@@ -2619,7 +2628,7 @@ pub(crate) fn v3_indexer(ix: &cellarr_core::IndexerConfig) -> Value {
         "implementation": implementation,
         "implementationName": implementation,
         "configContract": format!("{implementation}Settings"),
-        "protocol": protocol_str(ix.protocol),
+        "protocol": protocol,
         "priority": ix.priority,
         "enableRss": ix.enabled && ix.enable_rss,
         "enableAutomaticSearch": ix.enabled && ix.enable_automatic_search,
@@ -2836,7 +2845,7 @@ pub(crate) fn indexer_from_body(
         (_, Some(p)) => p.name.to_ascii_lowercase(),
         (Some(i), _) if i.eq_ignore_ascii_case("newznab") => "newznab".to_string(),
         (Some(i), _) if i.eq_ignore_ascii_case("cardigann") => "cardigann".to_string(),
-        (Some(i), _) if i.eq_ignore_ascii_case("slskd") => "slskd".to_string(),
+        (Some(i), _) if cellarr_download::slskd::is_slskd_kind(i) => i.to_ascii_lowercase(),
         (Some(i), _) if cellarr_download::applemusic::is_apple_kind(i) => i.to_ascii_lowercase(),
         _ => "torznab".to_string(),
     };
@@ -3169,7 +3178,7 @@ pub(crate) fn dc_protocol(dc: &cellarr_core::DownloadClientConfig) -> String {
     {
         return e.protocol;
     }
-    if dc.kind.eq_ignore_ascii_case("slskd") {
+    if cellarr_download::slskd::is_slskd_kind(&dc.kind) {
         return cellarr_download::slskd::SOULSEEK_PROTOCOL.to_string();
     }
     if cellarr_download::applemusic::is_apple_kind(&dc.kind) {
@@ -3209,7 +3218,9 @@ pub(crate) fn dc_implementation(kind: &str, protocol: cellarr_core::Protocol) ->
         "rtorrent" => "RTorrent",
         "sabnzbd" => "Sabnzbd",
         "nzbget" => "Nzbget",
-        "slskd" => "Slskd",
+        k if cellarr_download::slskd::is_slskd_kind(k) => {
+            return cellarr_download::slskd::implementation_name(k).to_string();
+        }
         k if cellarr_download::applemusic::is_apple_kind(k) => {
             return apple_implementation(k);
         }
@@ -8575,6 +8586,46 @@ mod plugin_client_protocol_tests {
         assert_eq!(
             v3_download_client(&migrated)["implementation"],
             json!("AppleMusicarrDownloadClient")
+        );
+        // Migrated Tubifarry/AppleMusicarr rows keep the production implementation
+        // strings and plugin protocols on the face, indexers included.
+        let row = |kind: &str| cellarr_core::DownloadClientConfig {
+            kind: kind.into(),
+            settings: json!({}),
+            ..dc.clone()
+        };
+        let v = v3_download_client(&row("slskdclient"));
+        assert_eq!(v["implementation"], json!("SlskdClient"));
+        assert_eq!(v["protocol"], json!("SoulseekDownloadProtocol"));
+        let ix = |kind: &str| cellarr_core::IndexerConfig {
+            id: cellarr_core::IndexerId::new(),
+            name: "i".into(),
+            kind: kind.into(),
+            protocol: cellarr_core::Protocol::Torrent,
+            enabled: true,
+            enable_rss: false,
+            enable_automatic_search: true,
+            enable_interactive_search: true,
+            priority: 25,
+            criteria: Default::default(),
+            tags: vec![],
+            settings: json!({}),
+        };
+        let v = v3_indexer(&ix("slskdindexer"));
+        assert_eq!(v["implementation"], json!("SlskdIndexer"));
+        assert_eq!(v["protocol"], json!("SoulseekDownloadProtocol"));
+        let v = v3_indexer(&ix("applemusicarrindexer"));
+        assert_eq!(v["implementation"], json!("AppleMusicarrIndexer"));
+        assert_eq!(v["protocol"], json!("AppleMusicarrDownloadProtocol"));
+        assert_eq!(v3_indexer(&ix("torznab"))["protocol"], json!("torrent"));
+        // Pushing the same implementation back keeps the kind.
+        let body: IndexerBody = serde_json::from_value(
+            json!({"name": "i", "implementation": "SlskdIndexer", "fields": []}),
+        )
+        .unwrap();
+        assert_eq!(
+            indexer_from_body(&body, cellarr_core::IndexerId::new()).kind,
+            "slskdindexer"
         );
         // A plain client keeps torrent/usenet.
         let body: DownloadClientBody = serde_json::from_value(json!({

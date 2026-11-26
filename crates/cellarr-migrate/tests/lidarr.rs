@@ -501,3 +501,34 @@ async fn applemusicarr_rows_keep_their_plugin_fields_for_the_native_kind() {
     assert_eq!(ix.settings["developerToken"], "dev-placeholder");
     assert_eq!(ix.settings["storefront"], "gb");
 }
+
+#[tokio::test]
+async fn tubifarry_rows_with_their_real_class_names_map_to_the_native_soulseek_kind() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = lidarr_db(dir.path()).await;
+    let opts = SqliteConnectOptions::from_str(&format!("sqlite://{}", src)).unwrap();
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(opts)
+        .await
+        .unwrap();
+    for sql in [
+        r#"INSERT INTO DownloadClients VALUES (9, 1, 'Slskd2', 'SlskdClient', '{"BaseUrl":"http://slskd.downloads:5030/","ApiKey":"k","musicCategory":"music"}', 'SlskdClientSettings', 3, 1, 1, '[]')"#,
+        r#"INSERT INTO Indexers VALUES (9, 'Slskd', 'SlskdIndexer', '{"baseUrl":"http://slskd.downloads:5030/","apiKey":"k"}', 'SlskdIndexerSettings', 0, 1, 1, 25, '[]', 0)"#,
+    ] {
+        sqlx::query(sql).execute(&pool).await.unwrap();
+    }
+    pool.close().await;
+    let db = dest(dir.path()).await;
+    import(&[&src], &db).await.unwrap();
+    let dc = db.config().list_download_clients().await.unwrap();
+    let dc = dc.iter().find(|c| c.name == "Slskd2").unwrap();
+    assert_eq!(dc.kind, "slskdclient");
+    assert_eq!(dc.settings["baseUrl"], "http://slskd.downloads:5030");
+    assert_eq!(dc.settings["apiKey"], "k");
+    assert_eq!(dc.category, "music");
+    let ix = db.config().list_indexers().await.unwrap();
+    let ix = ix.iter().find(|c| c.name == "Slskd").unwrap();
+    assert_eq!(ix.kind, "slskdindexer");
+    assert_eq!(ix.settings["baseUrl"], "http://slskd.downloads:5030");
+}

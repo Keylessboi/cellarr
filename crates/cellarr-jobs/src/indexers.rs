@@ -254,7 +254,7 @@ impl DbIndexerSet {
         }
         // Native Soulseek: searches slskd directly. A row it cannot be built from
         // (no URL/key, or `native: false`) falls through to the sidecar plugin.
-        if config.kind.eq_ignore_ascii_case("slskd") {
+        if cellarr_download::slskd::is_slskd_kind(&config.kind) {
             if let Ok(settings) = cellarr_download::SlskdSettings::from_json(&config.settings) {
                 return Ok(NabAdapter::Slskd(cellarr_download::SlskdIndexer::new(
                     config.id,
