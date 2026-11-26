@@ -418,6 +418,19 @@ async fn jobs_for(state: &AppState, name: &str, body: &Value) -> ApiResult<Optio
         // Recognized housekeeping that has nothing to do here.
         "checkhealth" | "messaging" | "cleanupmediacovers" | "applicationupdate"
         | "housekeeping" => Ok(None),
+        // cellarr has no rename-existing-files mechanism for music (files are named
+        // when they are imported, and `GET /rename` is always empty). Lidarr's
+        // clients only check that the POST is accepted, so accept it and complete
+        // it as a no-op rather than answering 400.
+        "renamefiles" | "renameartist" => {
+            tracing::info!(
+                command = name,
+                artist_id = ?artist_id,
+                album_ids = ?ids(body, "albumIds"),
+                "rename requested; cellarr does not rename existing files, nothing to do"
+            );
+            Ok(None)
+        }
         // Native Lidarr plugins live in the sidecar; installing one is its job.
         "installplugin" | "uninstallplugin" => {
             let sidecar = cellarr_plugins::sidecar::global().ok_or_else(|| {

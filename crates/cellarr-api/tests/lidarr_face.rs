@@ -527,3 +527,37 @@ async fn with_no_key_configured_the_face_is_open() {
         .unwrap();
     assert_eq!(r.status(), 200);
 }
+
+#[tokio::test]
+async fn rename_files_is_accepted_and_completes_as_a_no_op() {
+    let l = start(AuthConfig::disabled()).await;
+    let profile = l.flac_profile().await;
+    let added = l.add_radiohead(profile).await;
+    let artist_id = added["id"].as_i64().unwrap();
+
+    for body in [
+        json!({"name": "RenameFiles", "artistId": artist_id, "albumIds": [1, 2]}),
+        json!({"name": "RenameFiles", "artistId": artist_id}),
+        json!({"name": "RenameArtist", "artistIds": [artist_id]}),
+    ] {
+        let r = l.send(reqwest::Method::POST, "/command", &body).await;
+        assert!(r.status().is_success(), "{body}: {}", r.status());
+        let cmd: Value = r.json().await.unwrap();
+        assert_eq!(cmd["status"], "completed", "{body}");
+        let polled = l.get(&format!("/command/{}", cmd["id"])).await;
+        assert_eq!(polled["status"], "completed");
+    }
+
+    let unknown = l
+        .send(
+            reqwest::Method::POST,
+            "/command",
+            &json!({"name": "NoSuchCommand"}),
+        )
+        .await;
+    assert_eq!(
+        unknown.status(),
+        400,
+        "genuinely unknown commands still 400"
+    );
+}
