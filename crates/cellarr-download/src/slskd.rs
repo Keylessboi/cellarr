@@ -39,7 +39,7 @@ use serde_json::{json, Value};
 
 use crate::error::DownloadError;
 use crate::http::{HttpRequest, HttpTransport, ReqwestTransport};
-use crate::lifecycle::DownloadProgress;
+use crate::lifecycle::{CheckFailure, DownloadProgress};
 
 /// Where slskd's downloads live when the settings do not say.
 pub const DEFAULT_DOWNLOAD_ROOT: &str = "/data/torrents/soulseek";
@@ -359,6 +359,42 @@ struct Transfer {
     size: u64,
     bytes_transferred: u64,
     exception: Option<String>,
+}
+
+/// The Test button for a slskd row (indexer or client): one cheap authenticated
+/// call, `GET /api/v0/application`. A rejected key and an unreachable or
+/// misbehaving server are told apart; nothing in the message is secret.
+///
+/// # Errors
+/// The setting that is wrong and why.
+pub async fn check_connection(
+    settings: SlskdSettings,
+    transport: Box<dyn HttpTransport>,
+) -> Result<(), CheckFailure> {
+    let api = SlskdApi::new(settings, transport);
+    match api.call(api.req("GET", "application")).await {
+        Ok(_) => Ok(()),
+        Err(DownloadError::Auth(_)) => Err(CheckFailure::new(
+            "apiKey",
+            "slskd rejected the API key (HTTP 401/403)",
+        )),
+        Err(e) => Err(CheckFailure::new(
+            "baseUrl",
+            format!("cannot use slskd at that URL: {e}"),
+        )),
+    }
+}
+
+/// [`check_connection`] over a production transport with a short timeout.
+///
+/// # Errors
+/// As [`check_connection`].
+pub async fn check_connection_live(settings: SlskdSettings) -> Result<(), CheckFailure> {
+    check_connection(
+        settings,
+        Box::new(ReqwestTransport::with_timeout(Duration::from_secs(8))),
+    )
+    .await
 }
 
 /// How many polls in a row may find none of a grab's files before the grab is

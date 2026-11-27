@@ -13,6 +13,27 @@
 
 use cellarr_core::{DownloadState, DownloadStatus};
 
+/// Why a connection test failed: which setting is to blame and a message that
+/// never contains a secret. The API turns it into a validation failure.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckFailure {
+    /// The v3 field the failure belongs to (`apiKey`, `baseUrl`, ...).
+    pub property: &'static str,
+    /// What is wrong, readable by the operator.
+    pub message: String,
+}
+
+impl CheckFailure {
+    /// A failure on `property`.
+    #[must_use]
+    pub fn new(property: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            property,
+            message: message.into(),
+        }
+    }
+}
+
 /// The detailed state of one tracked download.
 ///
 /// This is what an adapter knows after polling the client. It projects into the

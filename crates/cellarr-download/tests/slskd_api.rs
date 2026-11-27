@@ -417,3 +417,41 @@ async fn the_indexer_uses_the_wanted_track_list_to_pick_the_folder() {
     let ix = SlskdIndexer::new(IndexerId::new(), "slsk", s);
     assert!(ix.search(&t).await.unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn the_connection_check_tells_a_bad_key_from_a_bad_url() {
+    let srv = start(vec![]).await;
+    // The fake answers /application only through its auth layer; a 404 body is
+    // a reachable slskd, which is not what the check asks, so use the good path
+    // against a route that exists: the key check is what matters here.
+    let mut bad = settings(&srv.url, "/dl");
+    bad.api_key = "wrong".into();
+    let f = cellarr_download::slskd::check_connection(
+        bad,
+        Box::new(cellarr_download::ReqwestTransport::new()),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(f.property, "apiKey");
+    assert!(!f.message.contains("wrong"));
+
+    let mut gone = settings("http://127.0.0.1:1", "/dl");
+    gone.api_key = "secret-key-value".into();
+    let f = cellarr_download::slskd::check_connection(
+        gone,
+        Box::new(cellarr_download::ReqwestTransport::with_timeout(
+            std::time::Duration::from_secs(2),
+        )),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(f.property, "baseUrl");
+    assert!(!f.message.contains("secret-key-value"));
+
+    let ok = cellarr_download::slskd::check_connection(
+        settings(&srv.url, "/dl"),
+        Box::new(cellarr_download::ReqwestTransport::new()),
+    )
+    .await;
+    assert!(ok.is_ok(), "{ok:?}");
+}

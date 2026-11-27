@@ -947,6 +947,36 @@ impl AppleCatalogApi {
             .collect())
     }
 
+    /// The cheap check behind the Test button: a one-result catalogue search in
+    /// the row's storefront, the same call a real search makes, which needs a
+    /// valid developer token and nothing else.
+    ///
+    /// # Errors
+    /// The setting at fault and why; never a token.
+    pub async fn check(&self) -> Result<(), crate::lifecycle::CheckFailure> {
+        use crate::lifecycle::CheckFailure;
+        let url = format!(
+            "{}catalog/{}/search?term=a&types=albums&limit=1",
+            self.base(),
+            self.settings.storefront
+        );
+        match self.get_json::<Value>(url).await {
+            Ok(Some(_)) => Ok(()),
+            Ok(None) => Err(CheckFailure::new(
+                "storefront",
+                format!(
+                    "Apple Music has no storefront '{}'",
+                    self.settings.storefront
+                ),
+            )),
+            Err(DownloadError::Auth(m)) => Err(CheckFailure::new("developerToken", m)),
+            Err(e) => Err(CheckFailure::new(
+                "baseUrl",
+                format!("Apple Music catalogue check failed: {e}"),
+            )),
+        }
+    }
+
     /// One album with its tracks, or `None` when Apple has no such album.
     ///
     /// # Errors
@@ -1102,6 +1132,65 @@ impl DecryptorApi {
             )))
         }
     }
+}
+
+/// The Test button for an Apple Music **indexer** row.
+///
+/// # Errors
+/// The setting at fault and why.
+pub async fn check_indexer(
+    settings: AppleMusicSettings,
+    transport: Box<dyn HttpTransport>,
+) -> Result<(), crate::lifecycle::CheckFailure> {
+    AppleCatalogApi::new(settings, transport).check().await
+}
+
+/// The Test button for an Apple Music **download client** row: the catalogue
+/// check, then the decryptor's `/healthz`.
+///
+/// # Errors
+/// The setting at fault and why.
+pub async fn check_client(
+    settings: AppleMusicSettings,
+    apple: Box<dyn HttpTransport>,
+    decryptor: Box<dyn HttpTransport>,
+) -> Result<(), crate::lifecycle::CheckFailure> {
+    use crate::lifecycle::CheckFailure;
+    let url = settings.decryptor_url.clone();
+    AppleCatalogApi::new(settings, apple).check().await?;
+    DecryptorApi::new(&url, decryptor)
+        .probe()
+        .await
+        .map_err(|e| CheckFailure::new("decryptorUrl", format!("decryptor not healthy: {e}")))
+}
+
+/// [`check_indexer`] over production transports with a short timeout.
+///
+/// # Errors
+/// As [`check_indexer`].
+pub async fn check_indexer_live(
+    settings: AppleMusicSettings,
+) -> Result<(), crate::lifecycle::CheckFailure> {
+    check_indexer(
+        settings,
+        Box::new(ReqwestTransport::with_timeout(Duration::from_secs(8))),
+    )
+    .await
+}
+
+/// [`check_client`] over production transports with a short timeout.
+///
+/// # Errors
+/// As [`check_client`].
+pub async fn check_client_live(
+    settings: AppleMusicSettings,
+) -> Result<(), crate::lifecycle::CheckFailure> {
+    check_client(
+        settings,
+        Box::new(ReqwestTransport::with_timeout(Duration::from_secs(8))),
+        Box::new(ReqwestTransport::with_timeout(Duration::from_secs(8))),
+    )
+    .await
 }
 
 // ----------------------------------------------------------------- indexer

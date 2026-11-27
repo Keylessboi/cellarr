@@ -3013,7 +3013,7 @@ pub(crate) async fn delete_indexer(
 /// v3 `indexer/test` — Prowlarr posts the indexer body to validate it. cellarr
 /// accepts a well-formed body (the shim does no live connectivity check), which
 /// is the success contract Prowlarr needs to proceed with the push.
-pub(crate) async fn test_indexer(Json(body): Json<IndexerBody>) -> ApiResult<Json<Value>> {
+pub(crate) async fn test_indexer_generic(Json(body): Json<IndexerBody>) -> ApiResult<Json<Value>> {
     use cellarr_core::Indexer as _;
 
     let field_str = |name: &str| {
@@ -3121,6 +3121,109 @@ pub(crate) async fn test_indexer(Json(body): Json<IndexerBody>) -> ApiResult<Jso
         return Err(ApiError::BadRequest("indexer baseUrl is required".into()));
     }
     Ok(Json(json!({ "isValid": true, "validationFailures": [] })))
+}
+
+/// A Lidarr-style validation failure answer: HTTP 400 with
+/// `[{propertyName, errorMessage, severity}]`, as real Lidarr answers a failed Test.
+fn validation_failure(property: &str, message: &str) -> axum::response::Response {
+    use axum::response::IntoResponse as _;
+    (
+        axum::http::StatusCode::BAD_REQUEST,
+        Json(json!([{
+            "propertyName": property,
+            "errorMessage": message,
+            "severity": "error",
+        }])),
+    )
+        .into_response()
+}
+
+/// Which v3 field a "cannot use these settings" reason is about.
+fn property_of_reason(reason: &str) -> &'static str {
+    for p in [
+        "apiKey",
+        "baseUrl",
+        "developerToken",
+        "musicUserToken",
+        "decryptorUrl",
+        "storefront",
+    ] {
+        if reason.contains(p) {
+            return p;
+        }
+    }
+    "implementation"
+}
+
+/// The real Test for a native Soulseek or Apple Music row: build it from the
+/// body's settings and make one cheap, short-timeout call. `None` for any other
+/// kind (the caller keeps today's behaviour). Messages never carry a secret.
+async fn native_test(
+    kind: &str,
+    settings: &Value,
+    is_client: bool,
+) -> Option<axum::response::Response> {
+    use axum::response::IntoResponse as _;
+    let ok = || Json(json!({ "isValid": true, "validationFailures": [] })).into_response();
+    let fail = |f: cellarr_download::CheckFailure| validation_failure(f.property, &f.message);
+    if cellarr_download::slskd::is_slskd_kind(kind) {
+        return Some(match cellarr_download::SlskdSettings::from_json(settings) {
+            Err(why) => validation_failure(property_of_reason(&why), &why),
+            Ok(s) => match cellarr_download::slskd::check_connection_live(s).await {
+                Ok(()) => ok(),
+                Err(f) => fail(f),
+            },
+        });
+    }
+    if cellarr_download::applemusic::is_apple_kind(kind) {
+        let parsed = if is_client {
+            cellarr_download::AppleMusicSettings::from_json_client(settings)
+        } else {
+            cellarr_download::AppleMusicSettings::from_json_indexer(settings)
+        };
+        return Some(match parsed {
+            Err(why) => validation_failure(property_of_reason(&why), &why),
+            Ok(s) => {
+                let r = if is_client {
+                    cellarr_download::applemusic::check_client_live(s).await
+                } else {
+                    cellarr_download::applemusic::check_indexer_live(s).await
+                };
+                match r {
+                    Ok(()) => ok(),
+                    Err(f) => fail(f),
+                }
+            }
+        });
+    }
+    None
+}
+
+/// v3 `indexer/test`: a native Soulseek or Apple Music row is really tested
+/// (a bad key, URL or token fails); everything else is the generic check.
+pub(crate) async fn test_indexer(
+    Json(body): Json<IndexerBody>,
+) -> ApiResult<axum::response::Response> {
+    use axum::response::IntoResponse as _;
+    let cfg = indexer_from_body(&body, cellarr_core::IndexerId::new());
+    if let Some(r) = native_test(&cfg.kind, &cfg.settings, false).await {
+        return Ok(r);
+    }
+    Ok(test_indexer_generic(Json(body)).await?.into_response())
+}
+
+/// v3 `downloadclient/test`: as [`test_indexer`], for a native client row.
+pub(crate) async fn test_download_client(
+    Json(body): Json<DownloadClientBody>,
+) -> ApiResult<axum::response::Response> {
+    use axum::response::IntoResponse as _;
+    let cfg = download_client_from_body(&body, cellarr_core::DownloadClientId::new());
+    if let Some(r) = native_test(&cfg.kind, &cfg.settings, true).await {
+        return Ok(r);
+    }
+    Ok(test_download_client_generic(Json(body))
+        .await?
+        .into_response())
 }
 
 /// A v3 indexer-test failure result carrying a human-readable message (the shape
@@ -3499,7 +3602,7 @@ pub(crate) async fn delete_download_client(
 /// v3 `downloadclient/test` — accepts a well-formed body. The blackhole only
 /// needs a watch folder; we validate that one field is present, matching the
 /// success contract the apps expect before saving.
-pub(crate) async fn test_download_client(
+pub(crate) async fn test_download_client_generic(
     Json(body): Json<DownloadClientBody>,
 ) -> ApiResult<Json<Value>> {
     // Plugin implementations carry plugin-specific fields, not a watchFolder/host.

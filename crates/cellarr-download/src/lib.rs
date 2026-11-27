@@ -61,7 +61,7 @@ pub use blackhole::{BlackholeClient, BlackholeSettings};
 pub use deluge::{DelugeClient, DelugeSettings};
 pub use error::DownloadError;
 pub use http::{HttpRequest, HttpResponse, HttpTransport, RawHttpResponse, ReqwestTransport};
-pub use lifecycle::{DownloadProgress, RemovePolicy};
+pub use lifecycle::{CheckFailure, DownloadProgress, RemovePolicy};
 pub use nzbget::{NzbgetClient, NzbgetSettings};
 pub use qbittorrent::{QbittorrentClient, QbittorrentSettings};
 pub use rtorrent::{RtorrentClient, RtorrentSettings};

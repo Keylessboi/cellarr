@@ -325,3 +325,48 @@ async fn a_hostile_album_name_cannot_escape_the_output_directory() {
         DownloadState::Queued
     );
 }
+
+#[tokio::test]
+async fn the_connection_checks_name_the_setting_at_fault_and_never_a_token() {
+    use cellarr_download::applemusic::{check_client, check_indexer};
+    use cellarr_download::ReqwestTransport;
+    let cat = start_catalog(vec![]).await;
+    let dec = start_decryptor(std::env::temp_dir()).await;
+    let s = settings(&cat.url, &dec.url, "/data");
+    let ix = || AppleMusicSettings::from_json_indexer(&s).unwrap();
+    let cl = || AppleMusicSettings::from_json_client(&s).unwrap();
+    let t = || Box::new(ReqwestTransport::new()) as Box<dyn cellarr_download::HttpTransport>;
+
+    assert!(check_indexer(ix(), t()).await.is_ok());
+    assert!(check_client(cl(), t(), t()).await.is_ok());
+
+    // The decryptor is unhealthy: the client fails on decryptorUrl, the indexer does not care.
+    dec.state.lock().unwrap().health_ok = false;
+    let f = check_client(cl(), t(), t()).await.unwrap_err();
+    assert_eq!(f.property, "decryptorUrl");
+    assert!(check_indexer(ix(), t()).await.is_ok());
+    dec.state.lock().unwrap().health_ok = true;
+
+    // Apple refuses the token.
+    cat.state.lock().unwrap().fail_status = Some(401);
+    for f in [
+        check_indexer(ix(), t()).await.unwrap_err(),
+        check_client(cl(), t(), t()).await.unwrap_err(),
+    ] {
+        assert_eq!(f.property, "developerToken");
+        assert!(!f.message.contains(DEV_TOKEN), "{}", f.message);
+        assert!(!f.message.contains(USER_TOKEN), "{}", f.message);
+    }
+    // An unreachable catalogue is a baseUrl problem.
+    let mut dead = s.clone();
+    dead["baseUrl"] = json!("http://127.0.0.1:1/v1");
+    let f = check_indexer(
+        AppleMusicSettings::from_json_indexer(&dead).unwrap(),
+        Box::new(ReqwestTransport::with_timeout(
+            std::time::Duration::from_secs(2),
+        )),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(f.property, "baseUrl");
+}

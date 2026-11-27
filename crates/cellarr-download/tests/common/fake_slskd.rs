@@ -80,6 +80,10 @@ pub async fn start(responses: Vec<Value>) -> Server {
     }));
     let app = Router::new()
         .route(
+            "/api/v0/application",
+            get(|| async { Json(json!({"version": {"current": "0.0.0"}})) }),
+        )
+        .route(
             "/api/v0/searches",
             post(|State(s): State<Shared>, Json(b): Json<Value>| async move {
                 s.lock()
