@@ -229,6 +229,13 @@ reported). Two deliberate differences: a search whose every query failed (not au
 error, not an empty result; and a bad-looking token is only diagnosed after Apple refuses it,
 rather than blocking the request.
 
+Cover art. A `cover.jpg` the decryptor writes next to the audio is not copied into the library.
+This is not specific to Apple Music: the import carries sibling extra files (subtitles, `.nfo`) only
+when they share the media file's stem (`Track.en.srt` beside `Track.flac`), for every download
+client, and no client copies folder-level art such as `cover.jpg` or `folder.jpg`. Library cover art
+comes from cellarr's own metadata/media-cover handling instead. Matching other clients here means
+there is nothing to add; copying folder art would be a general import feature, left out for now.
+
 Tests: `crates/cellarr-download/tests/applemusic_api.rs` (a fake catalogue and a fake decryptor
 over real HTTP; they accept any token and record what they were sent),
 `crates/cellarr-jobs/tests/applemusic_e2e.rs` (search, grab, status and import through the
