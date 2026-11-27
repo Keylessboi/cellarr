@@ -1698,6 +1698,7 @@ mod tests {
             ],
             numbering: vec![("season".into(), "3".into()), ("ep".into(), "7".into())],
             categories: vec![5000],
+            track_titles: Vec::new(),
         };
         let q = query_fields(&terms);
         assert_eq!(q.get("IMDBID").map(String::as_str), Some("tt1"));

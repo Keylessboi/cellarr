@@ -387,3 +387,33 @@ async fn removal_deletes_exactly_this_grabs_transfer_records_and_keeps_files() {
     assert!(f.transfers.iter().any(|t| t.1 == "foreign"));
     assert!(want.join("01 - Track 1.flac").exists(), "files stay");
 }
+
+#[tokio::test]
+async fn the_indexer_uses_the_wanted_track_list_to_pick_the_folder() {
+    // A 6-track and a 3-track folder for a 3-track album: only the 3-track one
+    // matches, the 6-track one cannot be this album's tracks.
+    let srv = start(vec![
+        peer("six", DIR, 6, "flac", None),
+        peer("three", DIR, 3, "mp3", Some(320)),
+    ])
+    .await;
+    let ix = SlskdIndexer::new(IndexerId::new(), "slsk", settings(&srv.url, "/dl"));
+    let mut t = terms();
+    t.track_titles = (1..=3).map(|i| format!("Track {i}")).collect();
+    let found = ix.search(&t).await.unwrap();
+    let users: Vec<String> = found
+        .iter()
+        .map(|r| SlskdTarget::from_url(&r.download_url).unwrap().username)
+        .collect();
+    assert_eq!(
+        users.first().map(String::as_str),
+        Some("three"),
+        "{users:?}"
+    );
+    // And a two-track folder is not offered for it at all.
+    let srv = start(vec![peer("two", DIR, 2, "flac", None)]).await;
+    let mut s = settings(&srv.url, "/dl");
+    s.minimum_files = 1;
+    let ix = SlskdIndexer::new(IndexerId::new(), "slsk", s);
+    assert!(ix.search(&t).await.unwrap().is_empty());
+}

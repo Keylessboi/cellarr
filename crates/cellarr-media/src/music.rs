@@ -41,6 +41,8 @@ pub struct AlbumIdentity {
     pub year: Option<u16>,
     /// How many discs the album's track list spans (0 when tracks are unknown).
     pub disc_count: u32,
+    /// The album's track titles in order (empty when tracks are unknown).
+    pub track_titles: Vec<String>,
     /// The artist's MusicBrainz id, when known.
     pub artist_mbid: Option<String>,
     /// The album's MusicBrainz release-group id, when known.
@@ -139,6 +141,7 @@ where
             .await
             .map_err(MusicModuleError::Lookup)?
             .ok_or_else(|| MediaError::UnresolvedIdentity(content.id.to_string()))?;
+        let (disc_count, track_titles) = (album.disc_count, album.track_titles.clone());
         Ok(SearchTerms {
             // Free text for indexers without a typed music search.
             queries: vec![format!("{} {}", album.artist_name, album.album_title)],
@@ -160,6 +163,13 @@ where
             },
             numbering: Vec::new(),
             categories: vec![AUDIO_CATEGORY],
+            // A multi-disc album is often split into one folder per disc, so a
+            // single folder cannot be held to the album's whole track list.
+            track_titles: if disc_count > 1 {
+                Vec::new()
+            } else {
+                track_titles
+            },
         })
     }
 
@@ -382,6 +392,7 @@ mod tests {
                                 album_title: (*title).to_string(),
                                 year: *year,
                                 disc_count: 1,
+                                track_titles: vec!["One".into(), "Two".into()],
                             },
                         )
                     })
@@ -601,6 +612,11 @@ mod tests {
             .ids
             .contains(&("album".to_string(), "OK Computer".to_string())));
         assert_eq!(terms.categories, vec![3000]);
+        // The track list travels with the search so an indexer can check folders.
+        assert_eq!(
+            terms.track_titles,
+            vec!["One".to_string(), "Two".to_string()]
+        );
     }
 
     #[tokio::test]

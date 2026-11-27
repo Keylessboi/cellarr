@@ -646,6 +646,65 @@ pub struct Candidate {
     pub queue_length: u32,
     /// The peer's upload speed.
     pub upload_speed: u64,
+    /// How well the folder fits the wanted track list: 0 for an exact track
+    /// count (or no track list known), 1 for extra files none of which repeat a
+    /// wanted track, 2 for extra files that duplicate wanted tracks.
+    pub fit: u8,
+}
+
+/// How a folder of audio files fits the wanted album's track list.
+#[derive(Debug, PartialEq, Eq)]
+enum Fit {
+    /// Rejected: fewer files than tracks, or extras that cannot be explained.
+    No,
+    /// Exactly the wanted tracks (or no track list to compare with).
+    Exact,
+    /// More files than tracks, but every wanted track is present once.
+    Extras,
+    /// More files than tracks, with some wanted track present more than once.
+    Duplicates,
+}
+
+/// Whether the file `name` is the track `title` (its words appear in the name
+/// without the extension, brackets set aside as a fallback).
+fn is_track(name: &str, title: &str) -> bool {
+    let base = norm(name.rsplit_once('.').map_or(name, |(b, _)| b));
+    let exact = norm(title);
+    let loose = norm(&strip_brackets(title));
+    (!exact.is_empty() && has_words(&base, &exact))
+        || (!loose.is_empty() && has_words(&base, &loose))
+}
+
+/// Compare a folder's audio files with the wanted track titles. With no titles
+/// the folder is not judged. Fewer files than tracks never fits; more files fit
+/// only when every wanted track can be found among them (the rest are bonus
+/// material), and rank lower when some wanted track appears twice (alternate or
+/// live versions of it).
+fn fit_of(files: &[&ResponseFile], tracks: &[String]) -> Fit {
+    let n = tracks.len();
+    if n == 0 {
+        return Fit::Exact;
+    }
+    if files.len() < n {
+        return Fit::No;
+    }
+    if files.len() == n {
+        return Fit::Exact;
+    }
+    let names: Vec<&str> = files.iter().map(|f| split_dir(&f.filename).1).collect();
+    let mut duplicated = false;
+    for title in tracks {
+        match names.iter().filter(|name| is_track(name, title)).count() {
+            0 => return Fit::No,
+            1 => {}
+            _ => duplicated = true,
+        }
+    }
+    if duplicated {
+        Fit::Duplicates
+    } else {
+        Fit::Extras
+    }
 }
 
 fn format_label(files: &[&ResponseFile], ext: &str) -> String {
@@ -685,6 +744,22 @@ pub fn candidates_from_responses(
     responses: &[SearchResponse],
     artist: &str,
     album: &str,
+    settings: &SlskdSettings,
+) -> Vec<Candidate> {
+    candidates_for_tracks(responses, artist, album, &[], settings)
+}
+
+/// [`candidates_from_responses`] for an album whose track titles are known: a
+/// folder with fewer audio files than tracks is rejected; one with more is kept
+/// only when every wanted track is found in it, and ranks below every folder of
+/// the exact track count (those that repeat a wanted track rank lowest). The
+/// track count is the number of titles; pass none to skip the check.
+#[must_use]
+pub fn candidates_for_tracks(
+    responses: &[SearchResponse],
+    artist: &str,
+    album: &str,
+    tracks: &[String],
     settings: &SlskdSettings,
 ) -> Vec<Candidate> {
     let artist_n = norm(artist);
@@ -755,8 +830,15 @@ pub fn candidates_from_responses(
         if chosen.len() < settings.minimum_files.max(1) {
             continue;
         }
+        let fit = match fit_of(&chosen, tracks) {
+            Fit::No => continue,
+            Fit::Exact => 0,
+            Fit::Extras => 1,
+            Fit::Duplicates => 2,
+        };
         chosen.sort_by(|a, b| a.filename.cmp(&b.filename));
         out.push(Candidate {
+            fit,
             format: format_label(&chosen, &ext),
             lossless: ext == "flac",
             size: chosen.iter().map(|f| f.size).sum(),
@@ -777,8 +859,9 @@ pub fn candidates_from_responses(
         });
     }
     out.sort_by(|a, b| {
-        b.lossless
-            .cmp(&a.lossless)
+        a.fit
+            .cmp(&b.fit)
+            .then(b.lossless.cmp(&a.lossless))
             .then(b.free_slot.cmp(&a.free_slot))
             .then(a.queue_length.cmp(&b.queue_length))
             .then(b.target.files.len().cmp(&a.target.files.len()))
@@ -855,7 +938,13 @@ impl Indexer for SlskdIndexer {
         }
         for q in queries {
             let responses = self.api.search(&q).await?;
-            let found = candidates_from_responses(&responses, &artist, &album, &self.api.settings);
+            let found = candidates_for_tracks(
+                &responses,
+                &artist,
+                &album,
+                &terms.track_titles,
+                &self.api.settings,
+            );
             if !found.is_empty() {
                 return Ok(found
                     .into_iter()
@@ -1285,5 +1374,78 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["amy", "bob"]
         );
+    }
+
+    fn titles() -> Vec<String> {
+        ["Alpha", "Beta", "Gamma"].map(String::from).to_vec()
+    }
+
+    /// A folder of the named tracks, as one peer's response.
+    fn folder(user: &str, dir: &str, names: &[&str], ext: &str) -> SearchResponse {
+        resp(
+            user,
+            names
+                .iter()
+                .enumerate()
+                .map(|(i, n)| file(&format!("{dir}\\{:02} {n}.{ext}", i + 1), 10, None))
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn a_folder_with_fewer_files_than_tracks_is_rejected() {
+        let mut s = settings();
+        s.minimum_files = 1;
+        let rs = [folder("u", "Art\\Alb", &["Alpha", "Beta"], "flac")];
+        assert!(candidates_for_tracks(&rs, "Art", "Alb", &titles(), &s).is_empty());
+        // Without a track list the same folder is fine.
+        assert_eq!(candidates_from_responses(&rs, "Art", "Alb", &s).len(), 1);
+    }
+
+    #[test]
+    fn six_files_for_a_three_track_album_rank_below_the_exact_folder() {
+        let mut s = settings();
+        s.minimum_files = 1;
+        let six = folder(
+            "big",
+            "Art\\Alb",
+            &["Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta"],
+            "flac",
+        );
+        let exact = folder("exact", "Art\\Alb", &["Alpha", "Beta", "Gamma"], "mp3");
+        let c = candidates_for_tracks(&[six, exact], "Art", "Alb", &titles(), &s);
+        let users: Vec<&str> = c.iter().map(|c| c.target.username.as_str()).collect();
+        // The exact-count MP3 folder beats the bigger FLAC one.
+        assert_eq!(users, ["exact", "big"]);
+        assert_eq!((c[0].fit, c[1].fit), (0, 1));
+    }
+
+    #[test]
+    fn extras_that_repeat_a_wanted_track_rank_last_and_foreign_folders_are_dropped() {
+        let mut s = settings();
+        s.minimum_files = 1;
+        let clean = folder(
+            "clean",
+            "Art\\Alb",
+            &["Alpha", "Beta", "Gamma", "Bonus"],
+            "flac",
+        );
+        let dupes = folder(
+            "dupes",
+            "Art\\Alb",
+            &["Alpha", "Beta", "Gamma", "Alpha (Live)"],
+            "flac",
+        );
+        // Six files, but not this album's tracks: no wanted title is present.
+        let foreign = folder(
+            "foreign",
+            "Art\\Alb",
+            &["One", "Two", "Three", "Four"],
+            "flac",
+        );
+        let c = candidates_for_tracks(&[dupes, foreign, clean], "Art", "Alb", &titles(), &s);
+        let users: Vec<&str> = c.iter().map(|c| c.target.username.as_str()).collect();
+        assert_eq!(users, ["clean", "dupes"]);
+        assert_eq!((c[0].fit, c[1].fit), (1, 2));
     }
 }

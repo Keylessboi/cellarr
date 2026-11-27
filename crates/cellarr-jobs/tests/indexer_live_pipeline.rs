@@ -528,6 +528,7 @@ async fn live_torznab_search_directly_returns_all_parsed_releases() {
         ids: vec![("tvdbid".into(), "121361".into())],
         numbering: vec![("season".into(), "2".into()), ("ep".into(), "5".into())],
         categories: vec![5000],
+        track_titles: Vec::new(),
     };
     use cellarr_core::traits::Indexer;
     let releases = indexer.search(&terms).await.unwrap();
@@ -599,6 +600,7 @@ async fn live_torznab_fail_fast_surfaces_the_401() {
         ids: vec![],
         numbering: vec![],
         categories: vec![],
+        track_titles: Vec::new(),
     };
     let err = indexer.search(&terms).await.unwrap_err();
     let msg = err.to_string();

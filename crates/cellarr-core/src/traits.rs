@@ -34,6 +34,11 @@ pub struct SearchTerms {
     /// category ids; native Torznab/Newznab adapters pass advertised ones through.
     /// Empty means "no category filter" (search everything).
     pub categories: Vec<u32>,
+    /// For an album search, the wanted album's track titles in order (empty when
+    /// unknown or not a music search). Their count is the expected track count;
+    /// an indexer that sees folders of files (Soulseek) uses them to tell the
+    /// right edition from a different one.
+    pub track_titles: Vec<String>,
 }
 
 /// Naming tokens a media module exposes for the rename engine.

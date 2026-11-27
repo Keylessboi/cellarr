@@ -27,13 +27,10 @@ impl DbMusicLookup {
         let Some(artist) = music.artist_by_content(album.artist_content_id).await? else {
             return Ok(None);
         };
-        let disc_count = music
-            .tracks_for_album(album.content_id)
-            .await?
-            .iter()
-            .map(|t| t.disc)
-            .max()
-            .unwrap_or(0);
+        let mut tracks = music.tracks_for_album(album.content_id).await?;
+        let disc_count = tracks.iter().map(|t| t.disc).max().unwrap_or(0);
+        tracks.sort_by_key(|t| (t.disc, t.position));
+        let track_titles = tracks.into_iter().map(|t| t.title).collect();
         Ok(Some(AlbumIdentity {
             artist_mbid: Some(artist.mbid.clone()),
             album_mbid: Some(album.mbid.clone()),
@@ -42,6 +39,7 @@ impl DbMusicLookup {
             album_title: album.title.clone(),
             year: album.year(),
             disc_count,
+            track_titles,
         }))
     }
 

@@ -82,6 +82,7 @@ async fn torznab_calls_caps_first_then_normalizes_search() {
             ("ep".to_string(), "5".to_string()),
         ],
         categories: vec![5000],
+        track_titles: Vec::new(),
     };
 
     let releases = indexer.search(&terms).await.expect("search");
@@ -158,6 +159,7 @@ async fn caps_is_cached_across_searches() {
         ids: vec![],
         numbering: vec![],
         categories: vec![],
+        track_titles: Vec::new(),
     };
     indexer.search(&terms).await.expect("search 1");
     indexer.search(&terms).await.expect("search 2");
@@ -190,6 +192,7 @@ async fn newznab_normalizes_usenet_results() {
         ids: vec![("imdbid".to_string(), "tt1234567".to_string())],
         numbering: vec![],
         categories: vec![2000],
+        track_titles: Vec::new(),
     };
     let releases = indexer.search(&terms).await.expect("search");
 

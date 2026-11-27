@@ -117,6 +117,7 @@ async fn search_builds_request_and_extracts() {
         ids: vec![],
         numbering: vec![],
         categories: vec![],
+        track_titles: Vec::new(),
     };
     let releases = engine.search(&terms).await.expect("search");
 
