@@ -6,7 +6,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use axum::extract::{Path, Request, State};
+use axum::extract::{Path, RawQuery, Request, State};
 use axum::http::StatusCode;
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -37,6 +37,12 @@ pub struct Fake {
     /// already on disk in the test).
     pub auto_complete: bool,
     pub auth_failures: u32,
+    /// The transfers listing answers 500 while set.
+    pub fail_listing: bool,
+    /// The transfers listing answers an empty array while set.
+    pub empty_listing: bool,
+    /// Every `DELETE` as `(username, id, raw query)`.
+    pub delete_calls: Vec<(String, String, String)>,
     next_id: u32,
 }
 
@@ -135,6 +141,12 @@ pub async fn start(responses: Vec<Value>) -> Server {
             "/api/v0/transfers/downloads",
             get(|State(s): State<Shared>| async move {
                 let mut f = s.lock().unwrap();
+                if f.fail_listing {
+                    return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!("boom")));
+                }
+                if f.empty_listing {
+                    return (StatusCode::OK, Json(json!([])));
+                }
                 if f.auto_complete {
                     for t in &mut f.transfers {
                         t.4 = "Completed, Succeeded".into();
@@ -158,14 +170,17 @@ pub async fn start(responses: Vec<Value>) -> Server {
                         json!({"username": u, "directories": [{"directory": "d", "fileCount": files.len(), "files": files}]})
                     })
                     .collect();
-                Json(Value::Array(out))
+                (StatusCode::OK, Json(Value::Array(out)))
             }),
         )
         .route(
             "/api/v0/transfers/downloads/{user}/{id}",
             delete(
-                |State(s): State<Shared>, Path((_u, id)): Path<(String, String)>| async move {
+                |State(s): State<Shared>,
+                 Path((u, id)): Path<(String, String)>,
+                 RawQuery(q): RawQuery| async move {
                     let mut f = s.lock().unwrap();
+                    f.delete_calls.push((u, id.clone(), q.unwrap_or_default()));
                     f.deleted.push(id.clone());
                     f.transfers.retain(|t| t.1 != id);
                     StatusCode::NO_CONTENT

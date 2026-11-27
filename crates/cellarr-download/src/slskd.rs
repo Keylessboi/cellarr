@@ -361,6 +361,56 @@ struct Transfer {
     exception: Option<String>,
 }
 
+/// How many polls in a row may find none of a grab's files before the grab is
+/// reported gone: slskd's listing can come back empty for a moment mid-grab.
+pub const EMPTY_LISTING_GRACE: u32 = 5;
+
+/// What was seen of one grab: files (bytes, succeeded), whether anything ever
+/// progressed, the last status given, and how many empty listings in a row.
+#[derive(Default)]
+struct Seen {
+    files: BTreeMap<String, (u64, bool)>,
+    progressed: bool,
+    last: Option<DownloadProgress>,
+    empties: u32,
+}
+
+fn memory() -> std::sync::MutexGuard<'static, std::collections::HashMap<String, Seen>> {
+    static MEMORY: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, Seen>>> =
+        std::sync::OnceLock::new();
+    MEMORY
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+fn seen_last(id: &str) -> Option<DownloadProgress> {
+    memory().get(id).and_then(|s| s.last.clone())
+}
+
+/// An empty listing: the last status while within the grace, else `None`.
+fn seen_empty(id: &str) -> Option<DownloadProgress> {
+    let mut m = memory();
+    let s = m.get_mut(id)?;
+    s.empties += 1;
+    if s.empties > EMPTY_LISTING_GRACE {
+        m.remove(id);
+        return None;
+    }
+    s.last.clone()
+}
+
+/// Forget a grab (it was removed).
+fn forget(id: &str) {
+    memory().remove(id);
+}
+
+/// Whether a download id is one this client issued (a Soulseek grab).
+#[must_use]
+pub fn is_download_id(id: &str) -> bool {
+    id.starts_with(ID_PREFIX)
+}
+
 /// slskd's HTTP API over the shared transport seam.
 pub struct SlskdApi {
     settings: SlskdSettings,
@@ -879,24 +929,75 @@ impl SlskdClient {
 
     /// The richer status the trait projects.
     ///
+    /// The status of a grab only moves forward. slskd's listing is large, polled
+    /// from several places (the run, the reconcile sweep, the queue view) and
+    /// sometimes unreadable, empty or missing files that were listed a moment
+    /// ago; each of those used to read as "queued" and made the queue item flap.
+    /// So what was seen is remembered per grab (process wide, since the queue
+    /// resolves a fresh client per call): once any file progressed or succeeded
+    /// the grab never reports `Queued` again, bytes and finished files never go
+    /// back, and a read that fails or comes back empty keeps the last status.
+    ///
     /// # Errors
-    /// [`DownloadError::NotFound`] when slskd has none of the files.
+    /// [`DownloadError::NotFound`] when slskd has none of the files (and, after
+    /// a grab was seen, has had none for [`EMPTY_LISTING_GRACE`] polls running);
+    /// a read error when nothing is known about the grab yet.
     pub async fn progress(&self, download_id: &str) -> Result<DownloadProgress, DownloadError> {
         let target = SlskdTarget::from_download_id(download_id)
             .ok_or_else(|| DownloadError::NotFound(download_id.to_string()))?;
-        let transfers = self.api.transfers_of(&target).await?;
+        let transfers = match self.api.transfers_of(&target).await {
+            Ok(t) => t,
+            // A failed or slow read is not news; auth errors are real.
+            Err(e @ DownloadError::Auth(_)) => return Err(e),
+            Err(e) => {
+                return match seen_last(download_id) {
+                    Some(last) => Ok(last),
+                    None => Err(e),
+                };
+            }
+        };
         if transfers.is_empty() {
-            return Err(DownloadError::NotFound(download_id.to_string()));
+            return match seen_empty(download_id) {
+                Some(last) => Ok(last),
+                None => Err(DownloadError::NotFound(download_id.to_string())),
+            };
         }
         let total = target.files.len();
         let done = |t: &Transfer| t.state.contains("Succeeded");
         let ended = |t: &Transfer| t.state.starts_with("Completed");
-        let succeeded = transfers.iter().filter(|t| done(t)).count();
         let failed: Vec<&Transfer> = transfers.iter().filter(|t| ended(t) && !done(t)).collect();
-        let wanted_bytes: u64 = target.files.iter().map(|f| f.size).sum();
-        let got: u64 = transfers
+        let active = transfers.iter().any(|t| {
+            t.bytes_transferred > 0
+                || done(t)
+                || t.state.contains("InProgress")
+                || t.state.contains("Initializing")
+        });
+
+        let mut memory = memory();
+        let seen = memory.entry(download_id.to_string()).or_default();
+        seen.empties = 0;
+        seen.progressed |= active;
+        for t in &transfers {
+            let entry = seen.files.entry(t.filename.clone()).or_default();
+            entry.0 = entry.0.max(t.bytes_transferred);
+            if done(t) {
+                entry.1 = true;
+            }
+        }
+        let succeeded = target
+            .files
             .iter()
-            .map(|t| if done(t) { t.size } else { t.bytes_transferred })
+            .filter(|f| seen.files.get(&f.filename).is_some_and(|e| e.1))
+            .count();
+        let wanted_bytes: u64 = target.files.iter().map(|f| f.size).sum();
+        let got: u64 = target
+            .files
+            .iter()
+            .map(|f| match seen.files.get(&f.filename) {
+                Some((_, true)) => f.size,
+                Some((bytes, false)) => (*bytes).min(f.size),
+                None => 0,
+            })
             .sum();
         let progress = if wanted_bytes == 0 {
             0.0
@@ -905,7 +1006,7 @@ impl SlskdClient {
         };
         let mut p = DownloadProgress {
             state: DownloadState::Queued,
-            progress,
+            progress: progress.max(seen.last.as_ref().map_or(0.0, |l| l.progress)),
             content_path: None,
             ratio: None,
             seeding_time_secs: None,
@@ -928,13 +1029,11 @@ impl SlskdClient {
             p.state = DownloadState::Completed;
             p.progress = 1.0;
             p.content_path = Some(self.content_dir(&target).to_string_lossy().into_owned());
-        } else if succeeded > 0
-            || transfers
-                .iter()
-                .any(|t| t.state.contains("InProgress") || t.state.contains("Initializing"))
-        {
+        } else if seen.progressed {
             p.state = DownloadState::Downloading;
         }
+        seen.last = Some(p.clone());
+        drop(memory);
         Ok(p)
     }
 
@@ -961,6 +1060,7 @@ impl SlskdClient {
                 Err(e) => return Err(e),
             }
         }
+        forget(download_id);
         if delete_data {
             self.delete_files(&target);
         }
@@ -1011,6 +1111,8 @@ impl DownloadClient for SlskdClient {
             return Err(DownloadError::Config("slskd release names no files".into()));
         }
         self.api.enqueue(&target).await?;
+        // A re-grab of the same files is a new grab: forget what the last one saw.
+        forget(&target.download_id());
         Ok(target.download_id())
     }
 

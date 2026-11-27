@@ -36,7 +36,13 @@ const DIR: &str = "@@u1\\Music\\Radiohead\\OK Computer (1997)";
 async fn a_search_polls_until_complete_and_returns_ranked_releases() {
     let srv = start(vec![
         peer("mp3guy", DIR, 12, "mp3", Some(320)),
-        peer("flacguy", DIR, 12, "flac", None),
+        peer(
+            "u_a_search_polls_until_complete_and_returns_ranked_releases",
+            DIR,
+            12,
+            "flac",
+            None,
+        ),
         peer("other", "x\\Coldplay\\Parachutes", 10, "flac", None),
     ])
     .await;
@@ -47,7 +53,10 @@ async fn a_search_polls_until_complete_and_returns_ranked_releases() {
     assert_eq!(found[0].title, "Radiohead - OK Computer [FLAC]");
     assert_eq!(found[1].title, "Radiohead - OK Computer [MP3 320]");
     let t = SlskdTarget::from_url(&found[0].download_url).unwrap();
-    assert_eq!(t.username, "flacguy");
+    assert_eq!(
+        t.username,
+        "u_a_search_polls_until_complete_and_returns_ranked_releases"
+    );
     assert_eq!(t.files.len(), 12);
     assert_eq!(found[0].size, Some(t.files.iter().map(|f| f.size).sum()));
     let f = srv.state.lock().unwrap();
@@ -99,7 +108,14 @@ fn grab(url: String) -> GrabRequest {
 #[tokio::test]
 async fn grab_status_lifecycle_and_removal() {
     let root = tempfile::tempdir().unwrap();
-    let srv = start(vec![peer("flacguy", DIR, 3, "flac", None)]).await;
+    let srv = start(vec![peer(
+        "u_grab_status_lifecycle_and_removal",
+        DIR,
+        3,
+        "flac",
+        None,
+    )])
+    .await;
     let s = settings(&srv.url, root.path().to_str().unwrap());
     let ix = SlskdIndexer::new(IndexerId::new(), "slsk", s.clone());
     let release = ix.search(&terms()).await.unwrap().remove(0);
@@ -112,7 +128,7 @@ async fn grab_status_lifecycle_and_removal() {
     {
         let f = srv.state.lock().unwrap();
         assert_eq!(f.enqueued.len(), 1);
-        assert_eq!(f.enqueued[0].0, "flacguy");
+        assert_eq!(f.enqueued[0].0, "u_grab_status_lifecycle_and_removal");
         assert_eq!(f.enqueued[0].1.as_array().unwrap().len(), 3);
     }
     let st = client.status(&id).await.unwrap();
@@ -129,7 +145,10 @@ async fn grab_status_lifecycle_and_removal() {
     let st = client.status(&id).await.unwrap();
     assert_eq!(st.state, DownloadState::Completed);
     // Derived from the transfer + root, never from slskd's /options.
-    let want = root.path().join("flacguy").join("OK Computer (1997)");
+    let want = root
+        .path()
+        .join("u_grab_status_lifecycle_and_removal")
+        .join("OK Computer (1997)");
     assert_eq!(st.content_path.as_deref(), Some(want.to_str().unwrap()));
 
     // Files on disk: delete_data removes exactly what was fetched.
@@ -156,7 +175,14 @@ async fn the_flat_layout_is_used_when_only_it_exists() {
     let root = tempfile::tempdir().unwrap();
     let flat = root.path().join("OK Computer (1997)");
     std::fs::create_dir_all(&flat).unwrap();
-    let srv = start(vec![peer("flacguy", DIR, 3, "flac", None)]).await;
+    let srv = start(vec![peer(
+        "u_the_flat_layout_is_used_when_only_it_exists",
+        DIR,
+        3,
+        "flac",
+        None,
+    )])
+    .await;
     let s = settings(&srv.url, root.path().to_str().unwrap());
     let release = SlskdIndexer::new(IndexerId::new(), "i", s.clone())
         .search(&terms())
@@ -172,7 +198,14 @@ async fn the_flat_layout_is_used_when_only_it_exists() {
 
 #[tokio::test]
 async fn a_failed_file_fails_the_download_with_a_reason_and_refusals_are_errors() {
-    let srv = start(vec![peer("flacguy", DIR, 3, "flac", None)]).await;
+    let srv = start(vec![peer(
+        "u_a_failed_file_fails_the_download_with_a_reason_and_refusals_are_errors",
+        DIR,
+        3,
+        "flac",
+        None,
+    )])
+    .await;
     let s = settings(&srv.url, "/dl");
     let release = SlskdIndexer::new(IndexerId::new(), "i", s.clone())
         .search(&terms())
@@ -193,4 +226,130 @@ async fn a_failed_file_fails_the_download_with_a_reason_and_refusals_are_errors(
     let err = client.add(&grab(release.download_url)).await.unwrap_err();
     assert!(err.to_string().contains("refused"), "{err}");
     assert!(client.add(&grab("magnet:?xt=x".into())).await.is_err());
+}
+
+/// Enqueue a 3-track grab and hand back the client, id and server.
+async fn grabbed(root: &str, user: &str) -> (SlskdClient, String, fake_slskd::Server) {
+    let srv = start(vec![peer(user, DIR, 3, "flac", None)]).await;
+    let s = settings(&srv.url, root);
+    let release = SlskdIndexer::new(IndexerId::new(), "i", s.clone())
+        .search(&terms())
+        .await
+        .unwrap()
+        .remove(0);
+    let client = SlskdClient::new("c", s);
+    let id = client.add(&grab(release.download_url)).await.unwrap();
+    (client, id, srv)
+}
+
+#[tokio::test]
+async fn status_never_goes_back_to_queued_once_a_file_progressed() {
+    let (client, id, srv) = grabbed(
+        "/dl",
+        "u_status_never_goes_back_to_queued_once_a_file_progressed",
+    )
+    .await;
+    assert_eq!(
+        client.status(&id).await.unwrap().state,
+        DownloadState::Queued
+    );
+
+    // One file finishes, one is mid-transfer, one waits remotely: Downloading.
+    {
+        let mut f = srv.state.lock().unwrap();
+        f.transfers[0].4 = "Completed, Succeeded".into();
+        f.transfers[0].5 = f.transfers[0].3;
+        f.transfers[1].4 = "InProgress".into();
+        f.transfers[1].5 = 500;
+    }
+    let st = client.status(&id).await.unwrap();
+    assert_eq!(st.state, DownloadState::Downloading);
+    let before = st.progress;
+    assert!(before > 0.0 && before < 1.0, "{before}");
+
+    // The in-flight file moves on to the next one: between files every
+    // remaining transfer is Requested / Queued, Remotely. Still Downloading.
+    {
+        let mut f = srv.state.lock().unwrap();
+        f.transfers[1].4 = "Requested".into();
+        f.transfers[1].5 = 0;
+        f.transfers[2].4 = "Queued, Remotely".into();
+    }
+    let st = client.status(&id).await.unwrap();
+    assert_eq!(st.state, DownloadState::Downloading);
+    assert!(st.progress >= before, "progress never goes back");
+
+    // A listing that fails, then one that is empty: the last status stays.
+    srv.state.lock().unwrap().fail_listing = true;
+    let st = client.status(&id).await.unwrap();
+    assert_eq!(st.state, DownloadState::Downloading);
+    assert!(st.progress >= before);
+    srv.state.lock().unwrap().fail_listing = false;
+    srv.state.lock().unwrap().empty_listing = true;
+    assert_eq!(
+        client.status(&id).await.unwrap().state,
+        DownloadState::Downloading
+    );
+
+    // Back to normal, finishing: Completed, with every file counted.
+    {
+        let mut f = srv.state.lock().unwrap();
+        f.empty_listing = false;
+    }
+    srv.set_state_all("Completed, Succeeded");
+    let st = client.status(&id).await.unwrap();
+    assert_eq!(st.state, DownloadState::Completed);
+    assert_eq!(st.progress, 1.0);
+}
+
+#[tokio::test]
+async fn a_read_error_before_anything_is_known_is_an_error_not_queued() {
+    let (client, id, srv) = grabbed(
+        "/dl",
+        "u_a_read_error_before_anything_is_known_is_an_error_not_queued",
+    )
+    .await;
+    srv.state.lock().unwrap().fail_listing = true;
+    // Nothing has been read successfully for this grab yet.
+    assert!(client.status(&id).await.is_err());
+}
+
+#[tokio::test]
+async fn an_empty_listing_is_forgiven_a_while_then_the_grab_is_gone() {
+    let (client, id, srv) = grabbed(
+        "/dl",
+        "u_an_empty_listing_is_forgiven_a_while_then_the_grab_is_gone",
+    )
+    .await;
+    srv.set_state_all("InProgress");
+    assert_eq!(
+        client.status(&id).await.unwrap().state,
+        DownloadState::Downloading
+    );
+    srv.state.lock().unwrap().empty_listing = true;
+    for _ in 0..cellarr_download::slskd::EMPTY_LISTING_GRACE {
+        assert_eq!(
+            client.status(&id).await.unwrap().state,
+            DownloadState::Downloading
+        );
+    }
+    assert!(matches!(
+        client.status(&id).await,
+        Err(cellarr_download::DownloadError::NotFound(_))
+    ));
+}
+
+#[tokio::test]
+async fn progress_counts_bytes_across_all_files() {
+    let (client, id, srv) = grabbed("/dl", "u_progress_counts_bytes_across_all_files").await;
+    {
+        let mut f = srv.state.lock().unwrap();
+        let sizes: Vec<u64> = f.transfers.iter().map(|t| t.3).collect();
+        for (t, half) in f.transfers.iter_mut().zip(sizes) {
+            t.4 = "InProgress".into();
+            t.5 = half / 2;
+        }
+    }
+    let st = client.status(&id).await.unwrap();
+    assert!((st.progress - 0.5).abs() < 0.01, "{}", st.progress);
 }
