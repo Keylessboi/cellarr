@@ -2183,6 +2183,7 @@ where
                 // matters solely to persistence.
                 let paths: Vec<String> = destinations.iter().map(|(p, _)| p.clone()).collect();
                 self.set_grab_status(grab_id, GrabStatus::Imported).await?;
+                self.release_imported_download(&download_id).await;
                 // Persist a media_file row for each imported destination, carrying
                 // the durable release type, and link it to the content node. This
                 // is what makes the import "stick" in the authoritative state: the
@@ -2891,6 +2892,9 @@ where
         self.set_grab_status(grab.id, GrabStatus::Imported)
             .await
             .map_err(|e| format!("set imported: {e}"))?;
+        if let Some(download_id) = grab.download_id.as_deref() {
+            self.release_imported_download(download_id).await;
+        }
         let imported_paths: Vec<String> = destinations.iter().map(|(p, _)| p.clone()).collect();
         self.music_history(
             matched_ref.id,
@@ -2923,6 +2927,21 @@ where
         self.fire_files_webhook(WebhookEventType::Download, matched_ref, &paths)
             .await;
         Ok(paths)
+    }
+
+    /// After a successful import, drop a Soulseek download's transfer records
+    /// from slskd (they stay listed forever otherwise). Soulseek has no seeding,
+    /// so nothing is owed to the network; the data is left alone (`delete_data`
+    /// false), since it is the import's source and the operator's to clean up.
+    /// Torrents are left to their client's own rules (ratio, minimum seed time)
+    /// and Usenet is handled by the reconcile sweep. Best-effort.
+    async fn release_imported_download(&self, download_id: &str) {
+        if !cellarr_download::slskd::is_download_id(download_id) {
+            return;
+        }
+        if let Err(e) = self.client.remove(download_id, false).await {
+            tracing::warn!(%download_id, error = %e, "removing the imported Soulseek transfers from slskd failed");
+        }
     }
 
     /// Import files mapped by hand onto an album's tracks when no grab owns them

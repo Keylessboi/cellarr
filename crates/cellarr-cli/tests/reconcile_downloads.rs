@@ -48,6 +48,9 @@ use cellarr_media::{
 /// - `gone-dl`      → `NotFound` error (gone → blocklist).
 /// - `healthy-dl`   → Downloading with peers (leave).
 /// - `peerless-dl`  → Downloading with zero peers (leave if young, blocklist if aged).
+/// Every `remove` the fake client received, as `(download id, delete_data)`.
+static REMOVED: std::sync::Mutex<Vec<(String, bool)>> = std::sync::Mutex::new(Vec::new());
+
 struct ReconcileClient {
     completed_path: String,
 }
@@ -74,7 +77,7 @@ impl cellarr_core::DownloadClient for ReconcileClient {
             error_string: None,
         };
         match id {
-            "completed-dl" => Ok(DownloadStatus {
+            "completed-dl" | "slskd-completed" => Ok(DownloadStatus {
                 content_path: Some(self.completed_path.clone()),
                 ..base(DownloadState::Completed, 1.0, Some(0))
             }),
@@ -91,7 +94,8 @@ impl cellarr_core::DownloadClient for ReconcileClient {
             _ => Ok(base(DownloadState::Downloading, 0.0, None)),
         }
     }
-    async fn remove(&self, _id: &str, _delete: bool) -> Result<(), Self::Error> {
+    async fn remove(&self, id: &str, delete: bool) -> Result<(), Self::Error> {
+        REMOVED.lock().unwrap().push((id.to_string(), delete));
         Ok(())
     }
 }
@@ -1001,4 +1005,40 @@ fn find_one_file(root: &std::path::Path) -> Option<PathBuf> {
         }
     }
     None
+}
+
+/// After a successful import, a Soulseek download's transfers are removed from
+/// slskd (data kept).
+#[tokio::test]
+async fn reconcile_removes_an_imported_soulseek_download_keeping_the_data() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = Database::open(tmp.path().join("cellarr.sqlite").to_str().unwrap())
+        .await
+        .unwrap();
+    let download_dir = tmp.path().join("downloads");
+    std::fs::create_dir_all(&download_dir).unwrap();
+    let downloaded = download_dir.join("The.Matrix.1999.1080p.BluRay.x264-GROUP.mkv");
+    std::fs::write(&downloaded, b"synthetic movie bytes").unwrap();
+    let library_root = tmp.path().join("library/movies");
+    std::fs::create_dir_all(&library_root).unwrap();
+
+    let node = seed_movie(&db).await;
+    // Fake client answers by exact id; the slskd prefix is what the pipeline keys on.
+    let grab = seed_grab(&db, &node, "slskd-completed").await;
+    let h = handler(
+        &db,
+        &node,
+        downloaded.to_string_lossy().into_owned(),
+        library_root,
+    );
+    assert!(matches!(
+        h.handle(&JobKind::ReconcileDownloads).await,
+        JobResult::Success
+    ));
+    assert_eq!(status_of(&db, grab).await, GrabStatus::Imported);
+    let removed = REMOVED.lock().unwrap().clone();
+    assert!(
+        removed.contains(&("slskd-completed".to_string(), false)),
+        "slskd transfers removed, data kept: {removed:?}"
+    );
 }

@@ -353,3 +353,37 @@ async fn progress_counts_bytes_across_all_files() {
     let st = client.status(&id).await.unwrap();
     assert!((st.progress - 0.5).abs() < 0.01, "{}", st.progress);
 }
+#[tokio::test]
+async fn removal_deletes_exactly_this_grabs_transfer_records_and_keeps_files() {
+    let root = tempfile::tempdir().unwrap();
+    let (client, id, srv) = grabbed(
+        root.path().to_str().unwrap(),
+        "u_removal_deletes_exactly_this_grabs_transfer_records_and_keeps_files",
+    )
+    .await;
+    // A foreign transfer from the same peer that is not part of this grab.
+    srv.state.lock().unwrap().transfers.push((
+        "u_removal_deletes_exactly_this_grabs_transfer_records_and_keeps_files".into(),
+        "foreign".into(),
+        "@@u1\\Music\\Other\\01.flac".into(),
+        10,
+        "Completed, Succeeded".into(),
+        10,
+    ));
+    srv.set_state_all("Completed, Succeeded");
+    let want = root
+        .path()
+        .join("u_removal_deletes_exactly_this_grabs_transfer_records_and_keeps_files")
+        .join("OK Computer (1997)");
+    std::fs::create_dir_all(&want).unwrap();
+    std::fs::write(want.join("01 - Track 1.flac"), b"x").unwrap();
+
+    client.remove(&id, false).await.unwrap();
+    let f = srv.state.lock().unwrap();
+    assert_eq!(f.delete_calls.len(), 3, "{:?}", f.delete_calls);
+    assert!(f.delete_calls.iter().all(|c| c.0
+        == "u_removal_deletes_exactly_this_grabs_transfer_records_and_keeps_files"
+        && c.1 != "foreign"));
+    assert!(f.transfers.iter().any(|t| t.1 == "foreign"));
+    assert!(want.join("01 - Track 1.flac").exists(), "files stay");
+}
